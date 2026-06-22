@@ -1,4 +1,12 @@
 # ========================== #
+#        Build System        #
+# ========================== #
+
+[build-system]
+requires = ["uv_build>=0.11.23,<0.12"]
+build-backend = "uv_build"
+
+# ========================== #
 #      Project Metadata      #
 # ========================== #
 
@@ -57,6 +65,12 @@ dev = [
     "ty>=0.0.51",
 ]
 
+[tool.uv.build-backend]
+module-name = "iivs_cardio"
+module-root = ""
+# See the following documentation for more information
+# https://docs.astral.sh/uv/concepts/build-backend/
+
 # PyTorch wheels come from a dedicated index for the chosen backend.
 # https://docs.astral.sh/uv/guides/integration/pytorch/
 [[tool.uv.index]]
@@ -92,9 +106,6 @@ addopts = [
     "--cov",
     "--cov-report=term-missing",
 ]
-# Application mode has no editable install — put the project root on
-# `sys.path` so tests can import the flat-layout package.
-pythonpath = ["."]
 # See the following documentation for more information
 # https://docs.pytest.org/en/stable/reference/customize.html
 # https://docs.pytest.org/en/stable/reference/reference.html#configuration-options
