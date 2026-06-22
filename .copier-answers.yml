@@ -1,6 +1,6 @@
 # Changes here will be overwritten by Copier; do not edit by hand.
 # Run `copier update --vcs-ref pytorch` to refresh from the template.
-_commit: pytorch-v1.7.1
+_commit: pytorch-v1.7.3
 _src_path: gh:kaparoo/python-project-template
 author_email: kaparoo2001@gmail.com
 author_name: Jaewoo Park
