@@ -14,16 +14,29 @@ authors = [
     { name = "Jaewoo Park", email = "kaparoo2001@gmail.com" },
 ]
 classifiers = [
-    "Development Status :: 4 - Beta",
-    "Intended Audience :: Developers",
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: Implementation :: CPython",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
     # See https://pypi.org/classifiers/ for more classifiers
 ]
-keywords = []
+keywords = [
+    "cardiomyocytes",
+    "deep-learning",
+    "pytorch",
+    "quantitative-phase-imaging",
+    "digital-holographic-microscopy",
+    "optical-flow",
+    "bio-imaging",
+    "cell-dynamics",
+    "dry-mass",
+]
 dependencies = [
     "torch>=2.12.1",
     "torchvision>=0.27.1",
