@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, type-check, test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    # CI runners have no GPU. Force the CPU PyTorch build for every `uv`
+    # command (sync + run) regardless of the project's compute_backend:
+    # CPU wheels are far smaller than CUDA wheels and — unlike CUDA wheels —
+    # are published for macOS too, so the cross-OS matrix resolves cleanly.
+    # `uv` re-resolves against this index and ignores the committed
+    # CUDA `uv.lock` for the CI run only.
+    env:
+      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies (CPU PyTorch)
+        run: uv sync --group dev
+
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Type check
+        run: uv run ty check
+
+      - name: Tests
+        run: uv run pytest
+
+  lock:
+    # Validate the committed (real-backend) `uv.lock`. The `check` job's
+    # CPU override re-resolves, so it never catches a stale CUDA lock;
+    # this job resolves metadata against the project's own index (no GPU,
+    # no wheel download) and fails if `uv.lock` is out of date.
+    name: Verify lockfile
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Check the committed lockfile is up to date
+        run: uv lock --check

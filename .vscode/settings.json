@@ -1,0 +1,40 @@
+{
+    // ==================== //
+    //      PYTHONPATH      //
+    // ==================== //
+
+    "terminal.integrated.env.windows": {
+        "PYTHONPATH": "${workspaceFolder}"
+    },
+    "terminal.integrated.env.linux": {
+        "PYTHONPATH": "${workspaceFolder}"
+    },
+    "terminal.integrated.env.osx": {
+        "PYTHONPATH": "${workspaceFolder}"
+    },
+
+    // ==================== //
+    //     Code Quality     //
+    // ==================== //
+
+    "[python]": {
+        "editor.rulers": [
+            72, // PEP 8 recommendation for docstrings or comments
+            88, // default max line-length in `black`
+        ],
+        "editor.codeActionsOnSave": {
+            "source.fixAll": "explicit",
+            "source.organizeImports": "explicit"
+        },
+        "editor.formatOnSave": true,
+        "editor.defaultFormatter": "charliermarsh.ruff"
+    },
+    "ruff.nativeServer": "on",
+
+    // ==================== //
+    //        Testing       //
+    // ==================== //
+
+    "python.testing.autoTestDiscoverOnSaveEnabled": true,
+    "python.testing.pytestEnabled": true,
+}

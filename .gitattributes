@@ -1,0 +1,10 @@
+# Normalize line endings: let Git decide for text, force LF where
+# tooling and CI expect it.
+* text=auto
+
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.lock text eol=lf
+*.py   text eol=lf
+*.md   text eol=lf

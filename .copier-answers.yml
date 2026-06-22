@@ -1,0 +1,21 @@
+# Changes here will be overwritten by Copier; do not edit by hand.
+# Run `copier update --vcs-ref pytorch` to refresh from the template.
+_commit: pytorch-v1.7.1
+_src_path: gh:kaparoo/python-project-template
+author_email: kaparoo2001@gmail.com
+author_name: Jaewoo Park
+compute_backend: cuda
+coverage_fail_under: 0
+cuda_version: '13.0'
+github_username: iivs-lab
+include_todo: true
+is_library: false
+license_year: 2026
+package_name: iivs_cardio
+project_description: A monorepo for deep-learning and bio-imaging research on cardiomyocytes
+project_name: iivs-cardio
+python_version: '3.14'
+repo_name: cardiomyocytes
+torch_version: 2.12.1
+torchvision_version: 0.27.1
+use_pytest: true

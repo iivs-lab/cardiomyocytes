@@ -1,0 +1,288 @@
+# ========================== #
+#      Project Metadata      #
+# ========================== #
+
+[project]
+name = "iivs-cardio"
+version = "0.1.0"
+description = "A monorepo for deep-learning and bio-imaging research on cardiomyocytes"
+readme = "README.md"
+requires-python = ">=3.14"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Jaewoo Park", email = "kaparoo2001@gmail.com" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    # See https://pypi.org/classifiers/ for more classifiers
+]
+keywords = []
+dependencies = [
+    "torch>=2.12.1",
+    "torchvision>=0.27.1",
+]
+
+[project.urls]
+GitHub = "https://www.github.com/iivs-lab/cardiomyocytes"
+
+# ========================== #
+#      [tool.*] Sections     #
+# ========================== #
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.18",
+    "ty>=0.0.51",
+]
+
+# PyTorch wheels come from a dedicated index for the chosen backend.
+# https://docs.astral.sh/uv/guides/integration/pytorch/
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+torchvision = { index = "pytorch" }
+
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.ty.src]
+exclude = ["tests/"]
+
+[tool.ty.terminal]
+error-on-warning = true
+# See the following documentation for more information
+# https://docs.astral.sh/ty/reference/configuration/
+# https://docs.astral.sh/ty/reference/rules/
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+cache_dir = "./.cache/pytest"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--strict-config",
+    "--import-mode=importlib",
+    "--cov",
+    "--cov-report=term-missing",
+]
+# Application mode has no editable install — put the project root on
+# `sys.path` so tests can import the flat-layout package.
+pythonpath = ["."]
+# See the following documentation for more information
+# https://docs.pytest.org/en/stable/reference/customize.html
+# https://docs.pytest.org/en/stable/reference/reference.html#configuration-options
+
+[tool.coverage.run]
+source = ["iivs_cardio"]
+branch = true
+data_file = ".cache/coverage/.coverage"
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+# 0 = measure only, no gate. Raise after establishing a baseline; keep
+# it a few points below the measured coverage to absorb variation.
+fail_under = 0
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "\\.\\.\\.",
+    "@overload",
+]
+# omit = ["iivs_cardio/types.py"]  # e.g. type-alias-only modules
+
+[tool.coverage.html]
+directory = ".cache/coverage/htmlcov"
+
+[tool.ruff]
+required-version = ">=0.15.18"
+cache-dir = "./.cache/ruff"
+extend-exclude = [
+    ".cache",
+    "__pycache__",
+    "*.pyc",
+    ".pytest_cache",
+    ".ipynb_checkpoints",
+    "*.egg-info",
+]
+line-length = 88
+indent-width = 4
+# preview = true  # Uncomment to enable unstable features
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+line-ending = "auto"
+# preview = true  # Uncomment to enable unstable formatter features
+
+[tool.ruff.lint]
+select = [
+    # Core linting
+    "E",     # pycodestyle (errors)
+    "F",     # pyflakes
+    "W",     # pycodestyle (warnings)
+    # Code quality
+    "B",     # flake8-bugbear
+    "SIM",   # flake8-simplify
+    "PERF",  # Perflint
+    "FURB",  # refurb
+    "RUF",   # Ruff-specific rules
+    # Security
+    "S",     # flake8-bandit (security)
+    # Type checking
+    "ANN",   # flake8-annotations
+    "TC",    # flake8-type-checking
+    # Import and organization
+    "I",     # isort
+    "TID",   # flake8-tidy-imports
+    "INP",   # flake8-no-pep420 (implicit namespace packages)
+    # Testing
+    "PT",    # flake8-pytest-style
+    # Debugging
+    "T10",   # flake8-debugger
+    # Error handling
+    "BLE",   # flake8-blind-except
+    "TRY",   # tryceratops
+    "EM",    # flake8-errmsg
+    # Async
+    "ASYNC", # flake8-async
+    # Logging
+    "G",     # flake8-logging-format
+    "LOG",   # flake8-logging
+    # Best practices
+    "A",     # flake8-builtins
+    "ARG",   # flake8-unused-arguments
+    "PTH",   # flake8-use-pathlib
+    "SLF",   # flake8-self
+    "RET",   # flake8-return
+    "RSE",   # flake8-raise
+    "SLOT",  # flake8-slots
+    "EXE",   # flake8-executable
+    # String handling
+    "Q",     # flake8-quotes
+    "ISC",   # flake8-implicit-str-concat
+    "FLY",   # flynt
+    # Modern Python
+    "UP",    # pyupgrade
+    "FA",    # flake8-future-annotations
+    # Date and time
+    "DTZ",   # flake8-datetimez
+    # Other quality checks
+    "FBT",   # flake8-boolean-trap
+    "COM",   # flake8-comma
+    "C4",    # flake8-comprehensions
+    "PIE",   # flake8-pie
+    "PGH",   # pygrep-hooks
+    "N",     # pep8-naming
+    "YTT",   # flake8-2020
+    "ERA",   # eradicate
+    "NPY",   # NumPy-specific rules
+]
+ignore = [
+    # Complexity rules (often too strict for practical code)
+    "PLR0904",  # too-many-public-methods
+    "PLR0911",  # too-many-return-statements
+    "PLR0912",  # too-many-branches
+    "PLR0913",  # too-many-arguments
+    "PLR0915",  # too-many-statements
+    "PLR0916",  # too-many-boolean-expressions
+    "PLR2004",  # magic-value-comparison
+    # Exception handling
+    "TRY003",   # raise-vanilla-args
+    # Formatter conflicts (handled by ruff format)
+    "E501",     # line-too-long
+    "W191",     # tab-indentation
+    "E111",     # indentation-not-multiple-of-four
+    "E114",     # indentation-not-multiple-of-four-comment
+    "E117",     # over-indented
+    "COM812",   # missing-trailing-comma
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Package markers may stay empty — exempt them from the required import.
+"__init__.py" = ["I002"]
+"tests/**" = [
+    "S101",   # `assert` is the primary verb in pytest
+    "ANN",    # test functions don't need full annotations
+    "FBT",    # `@pytest.mark.parametrize` uses bool positional args
+    "ARG",    # pytest fixtures look like unused arguments
+]
+
+[tool.ruff.lint.flake8-annotations]
+allow-star-arg-any = true
+ignore-fully-untyped = true
+mypy-init-return = true
+suppress-dummy-args = true
+suppress-none-returning = true
+
+[tool.ruff.lint.flake8-bandit]
+# check-typed-exception = true
+
+[tool.ruff.lint.flake8-pytest-style]
+fixture-parentheses = true
+mark-parentheses = true
+parametrize-names-type = "tuple"
+parametrize-values-type = "tuple"
+parametrize-values-row-type = "tuple"
+
+[tool.ruff.lint.flake8-quotes]
+inline-quotes = "double"
+multiline-quotes = "double"
+docstring-quotes = "double"
+avoid-escape = true
+
+[tool.ruff.lint.flake8-type-checking]
+exempt-modules = ["typing", "typing_extensions"]
+
+[tool.ruff.lint.flake8-unused-arguments]
+ignore-variadic-names = true
+
+[tool.ruff.lint.isort]
+known-first-party = ["iivs_cardio"]
+required-imports = ["from __future__ import annotations"]
+
+[tool.ruff.lint.pycodestyle]
+ignore-overlong-task-comments = true
+
+[tool.ruff.lint.pydoclint]
+ignore-one-line-docstrings = true
+
+# Following sections use default values and are omitted (ruff v0.15.18):
+# - tool.ruff.analyze
+# - tool.ruff.lint.flake8-boolean-trap
+# - tool.ruff.lint.flake8-bugbear
+# - tool.ruff.lint.flake8-builtins
+# - tool.ruff.lint.flake8-comprehensions
+# - tool.ruff.lint.flake8-copyright
+# - tool.ruff.lint.flake8-datetimez
+# - tool.ruff.lint.flake8-errmsg
+# - tool.ruff.lint.flake8-gettext
+# - tool.ruff.lint.flake8-implicit-str-concat
+# - tool.ruff.lint.flake8-import-conventions
+# - tool.ruff.lint.flake8-no-pep420
+# - tool.ruff.lint.flake8-self
+# - tool.ruff.lint.flake8-tidy-imports
+# - tool.ruff.lint.mccabe
+# - tool.ruff.lint.pep8-naming
+# - tool.ruff.lint.pyflakes
+# - tool.ruff.lint.pylint
+# - tool.ruff.lint.pydocstyle
+# - tool.ruff.lint.pyupgrade
+# - tool.ruff.lint.ruff
