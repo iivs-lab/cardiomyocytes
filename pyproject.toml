@@ -22,7 +22,7 @@ authors = [
     { name = "Jaewoo Park", email = "kaparoo2001@gmail.com" },
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
