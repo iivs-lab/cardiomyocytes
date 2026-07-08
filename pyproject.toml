@@ -15,7 +15,7 @@ name = "iivs-cardio"
 version = "0.1.0"
 description = "A monorepo for deep-learning and bio-imaging research on cardiomyocytes"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.13"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
@@ -26,6 +26,7 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Programming Language :: Python :: Implementation :: CPython",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
@@ -48,6 +49,8 @@ keywords = [
 dependencies = [
     "torch>=2.12.1",
     "torchvision>=0.27.1",
+    "opencv-contrib-python",
+    "numpy>=2",
 ]
 
 [project.urls]
@@ -81,9 +84,13 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "pytorch" }
 torchvision = { index = "pytorch" }
+opencv-contrib-python = [
+    { url = "https://github.com/cudawarped/opencv-python-cuda-wheels/releases/download/4.13.0.90/opencv_contrib_python-4.13.0.90-cp37-abi3-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
+    { url = "https://github.com/cudawarped/opencv-python-cuda-wheels/releases/download/4.13.0.90/opencv_contrib_python-4.13.0.90-cp37-abi3-win_amd64.whl", marker = "sys_platform == 'win32'" },
+]
 
 [tool.ty.environment]
-python-version = "3.14"
+python-version = "3.13"
 
 [tool.ty.src]
 exclude = ["tests/"]
