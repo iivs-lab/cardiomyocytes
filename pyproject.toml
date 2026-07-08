@@ -93,8 +93,8 @@ opencv-contrib-python = [
 python-version = "3.13"
 
 [tool.ty.src]
-# Standalone PEP 723 utilities (their own inline envs, untyped `cv2`) — not
-# part of the package graph, so keep them out of the project type-check.
+# Runnable utilities (untyped `cv2`, IO/device wiring) — not part of the
+# package graph, so keep them out of the project type-check.
 exclude = ["tests/", "scripts/"]
 
 [tool.ty.terminal]
@@ -256,6 +256,9 @@ ignore = [
     "ANN",    # test functions don't need full annotations
     "FBT",    # `@pytest.mark.parametrize` uses bool positional args
     "ARG",    # pytest fixtures look like unused arguments
+]
+"scripts/**" = [
+    "INP001",  # runnable entry points, not importable package modules
 ]
 
 [tool.ruff.lint.flake8-annotations]

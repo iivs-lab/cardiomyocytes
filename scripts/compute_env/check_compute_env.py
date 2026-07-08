@@ -1,29 +1,13 @@
-# /// script
-# requires-python = ">=3.9"
-# dependencies = [
-#     "numpy>=2",
-#     "opencv-contrib-python",
-#     "torch",
-#     "torchvision",
-# ]
-#
-# [tool.uv.sources]
-# torch = { index = "pytorch" }
-# torchvision = { index = "pytorch" }
-# # CUDA OpenCV wheels (cudawarped) exist only for Linux and Windows; on macOS
-# # uv falls back to the official CPU `opencv-contrib-python` from PyPI.
-# opencv-contrib-python = [
-#     { url = "https://github.com/cudawarped/opencv-python-cuda-wheels/releases/download/4.13.0.90/opencv_contrib_python-4.13.0.90-cp37-abi3-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
-#     { url = "https://github.com/cudawarped/opencv-python-cuda-wheels/releases/download/4.13.0.90/opencv_contrib_python-4.13.0.90-cp37-abi3-win_amd64.whl", marker = "sys_platform == 'win32'" },
-# ]
-#
-# [[tool.uv.index]]
-# name = "pytorch"
-# # Available options for the URL ending: cpu, cu118, cu121, cu124, cu126, cu130, etc.
-# url = "https://download.pytorch.org/whl/cu130"
-# explicit = true
-# ///
 """Check the CUDA compute environment and PyTorch / TorchVision / OpenCV.
+
+Run inside the project so it verifies the project's own environment:
+
+    uv run scripts/compute_env/check_compute_env.py
+
+It carries no PEP 723 inline metadata on purpose — `uv run` then resolves
+`torch` / `torchvision` / `opencv-contrib-python` / `numpy` from the project
+(`pyproject.toml` + `uv.lock`), so the check tests the exact pinned versions
+the project uses instead of drifting to the newest wheels in a throwaway env.
 
 CUDA is optional: each package must pass a CPU baseline (that is the exit-code
 contract), and GPU work is verified only where a CUDA device is present. A
