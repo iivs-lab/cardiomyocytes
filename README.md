@@ -1,7 +1,7 @@
 # iivs-cardio
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg?logo=opensourceinitiative&logoColor=white)](./LICENSE)
-[![Python](https://img.shields.io/badge/python-3.14+-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-3.13%20%7C%203.14-blue.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.12.1-EE4C2C.svg?logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![CUDA](https://img.shields.io/badge/CUDA-13.0-76B900.svg?logo=nvidia&logoColor=white)](https://developer.nvidia.com/cuda-toolkit)
 [![uv](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json)](https://github.com/astral-sh/uv)
@@ -11,9 +11,10 @@
 
 *A monorepo for deep-learning and bio-imaging research on cardiomyocytes*
 
-## 📦 Development setup
+## 🚀 Getting started
 
-Requires Python 3.14+.
+Requires **Python 3.13 or newer** and an **NVIDIA GPU** with a CUDA
+13.0-capable driver.
 
 ```bash
 git clone https://github.com/iivs-lab/cardiomyocytes.git
@@ -21,30 +22,39 @@ cd cardiomyocytes
 uv sync --group dev
 ```
 
-## 🖥️ Compute environment
+The first `uv sync` pulls the CUDA build of `torch` (~1.8 GB). On Windows,
+OpenCV additionally needs the one-time cuDNN step below.
 
-This project targets **PyTorch on NVIDIA GPUs**:
+### 🖥️ Compute environment
 
-- **Python** 3.14+
-- **PyTorch** `2.12.1` / **torchvision** `0.27.1`
-- **Compute backend**: CUDA **13.0** — wheels are pulled from the dedicated
-  PyTorch index (`https://download.pytorch.org/whl/cu130`) configured in
-  [`pyproject.toml`](./pyproject.toml); `uv sync` installs them automatically.
+The whole stack is pinned to **CUDA 13.0** on NVIDIA GPUs and installed by
+`uv sync`:
 
-> An NVIDIA GPU with a CUDA 13.0-capable driver is expected. The first
-> `uv sync` downloads the CUDA build of `torch` (~1.8 GB).
+- **Python** 3.13 or newer
+- **PyTorch** `2.12.1` / **torchvision** `0.27.1` — from the dedicated PyTorch
+  index (`.../whl/cu130`) set in [`pyproject.toml`](./pyproject.toml)
+- **OpenCV** `opencv-contrib-python 4.13.0.90` — a CUDA build
+  ([`cudawarped`](https://github.com/cudawarped/opencv-python-cuda-wheels)
+  wheels) linking the system CUDA 13.0 runtime and cuDNN
 
-### Switching the compute backend
+### 🪟 Windows: OpenCV CUDA setup
 
-The backend is selected by the `[[tool.uv.index]]` named `pytorch` in
-`pyproject.toml`:
+On Windows the OpenCV CUDA wheel can't find cuDNN (the cuDNN v9 installer keeps
+it in its own folder, and Python 3.8+ no longer searches `PATH`). Run once, in
+an **Administrator** PowerShell, to symlink cuDNN where the wheel looks:
 
-- **CUDA**: set the URL to `.../whl/cu126`, `.../whl/cu128`, or `.../whl/cu130`.
-- **CPU-only**: set the URL to `.../whl/cpu`.
+```powershell
+./scripts/setup-opencv-cuda.ps1
+```
 
-Then re-resolve with `uv lock && uv sync`. Alternatively re-run
-`copier update --UNSAFE --vcs-ref pytorch` and re-answer
-`compute_backend` / `cuda_version`.
+A bare `import cv2` then loads the CUDA build in any environment (venv, uv,
+conda, …). Notes:
+
+- **cuDNN from a zip** — unpacked into `bin\x64`: the script no-ops; unpacked
+  elsewhere: pass `-CUDNN_PATH <folder>`.
+- **After a cuDNN/CUDA upgrade** — re-run to repoint the links.
+- **Linux** — not needed; `ld.so` finds cuDNN via `RPATH` / `LD_LIBRARY_PATH` /
+  `ldconfig`.
 
 ## 📋 TODO
 
