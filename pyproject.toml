@@ -93,7 +93,9 @@ opencv-contrib-python = [
 python-version = "3.13"
 
 [tool.ty.src]
-exclude = ["tests/"]
+# Standalone PEP 723 utilities (their own inline envs, untyped `cv2`) — not
+# part of the package graph, so keep them out of the project type-check.
+exclude = ["tests/", "scripts/"]
 
 [tool.ty.terminal]
 error-on-warning = true

@@ -44,7 +44,7 @@ it in its own folder, and Python 3.8+ no longer searches `PATH`). Run once, in
 an **Administrator** PowerShell, to symlink cuDNN where the wheel looks:
 
 ```powershell
-./scripts/setup-opencv-cuda.ps1
+./scripts/compute_env/setup-opencv-cuda.ps1
 ```
 
 A bare `import cv2` then loads the CUDA build in any environment (venv, uv,
