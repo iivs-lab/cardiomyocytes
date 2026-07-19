@@ -5,6 +5,12 @@ item to a CHANGELOG entry once it lands.
 
 ## Open
 
+- **Extend `.gitignore` with ML runtime artifacts.** Add `data/`,
+  `outputs/` (or `runs/`/`results/`), `checkpoints/` (or `models/`),
+  `logs/`, `wandb/`, `*.ckpt` before these directories appear — the current
+  `.gitignore` only covers Python + `.venv`/`.cache`. See
+  [`docs/foundations.md`](docs/foundations.md) §8.
+
 - **Build the `optical_flow` module (compute + eval classes).** Design is
   frozen in [`docs/optical-flow-design.md`](docs/optical-flow-design.md):
   stateful `push(frame)` estimators (Farneback / DualTVL1 / DeepFlow) over a
