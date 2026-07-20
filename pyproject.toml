@@ -52,6 +52,10 @@ dependencies = [
     "opencv-contrib-python",
     "numpy>=2",
     "scikit-image>=0.24",
+    "kaparoo-python>=0.11.0",
+    "cupy-cuda13x>=14.1.1",
+    "jaxtyping>=0.3.11",
+    "beartype>=0.22.9",
 ]
 
 [project.urls]
@@ -247,6 +251,9 @@ ignore = [
     "E114",     # indentation-not-multiple-of-four-comment
     "E117",     # over-indented
     "COM812",   # missing-trailing-comma
+    # jaxtyping shape strings — `UInt8[Tensor, "H W"]` reads as a forward
+    # annotation to pyflakes, which then parses "H W" as Python and fails.
+    "F722",     # forward-annotation-syntax-error
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -287,6 +294,9 @@ avoid-escape = true
 
 [tool.ruff.lint.flake8-type-checking]
 exempt-modules = ["typing", "typing_extensions"]
+# jaxtyped/beartype resolve annotations at runtime, so their annotation imports
+# (torch.Tensor, jaxtyping.Float/UInt8) must stay out of `if TYPE_CHECKING`.
+runtime-evaluated-decorators = ["jaxtyping.jaxtyped", "beartype.beartype"]
 
 [tool.ruff.lint.flake8-unused-arguments]
 ignore-variadic-names = true
