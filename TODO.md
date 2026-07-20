@@ -5,18 +5,35 @@ item to a CHANGELOG entry once it lands.
 
 ## Open
 
+- **Decide the flow/vector tensor layout: HWC vs CHW.** Whether flow and the
+  kinematic vector fields put the 2-vector axis last (`(H,W,2)`, cv2-native) or
+  first (`(2,H,W)`/`(N,2,H,W)`, DL-native). Analysis + the (tentative CHW) lean
+  is in [`docs/tensor-layout-decision.md`](docs/tensor-layout-decision.md).
+  Blocks finalizing `evaluation.py`'s flow layout and the (unwritten) kinematic
+  kernels. Currently the estimators + evaluator are HWC.
+
+- **Fix the dev machine's torch cuDNN (GPU `conv2d` fails).** On this Windows
+  box every torch GPU convolution raises `CUDNN_STATUS_SUBLIBRARY_VERSION_MISMATCH`
+  (works with `torch.backends.cudnn.enabled = False`). Likely cause: the cuDNN
+  DLLs `scripts/compute_env/setup-opencv-cuda.ps1` symlinks into the CUDA `bin`
+  shadow torch's bundled cuDNN. It is an environment issue, not a code bug — but
+  it blocks GPU SSIM in the evaluator and any future GPU DL / learned flow, so
+  the setup needs reconciling (keep the OpenCV cuDNN links from overriding
+  torch's, or align versions).
+
 - **Extend `.gitignore` with ML runtime artifacts.** Add `data/`,
   `outputs/` (or `runs/`/`results/`), `checkpoints/` (or `models/`),
   `logs/`, `wandb/`, `*.ckpt` before these directories appear — the current
   `.gitignore` only covers Python + `.venv`/`.cache`. See
   [`docs/foundations.md`](docs/foundations.md) §8.
 
-- **Build the `optical_flow` evaluator (warp-consistency).** The compute
-  estimators (Farneback / DualTVL1 / DeepFlow over `torch.Tensor`, CPU + CUDA,
-  streaming `push`/`push_chunk` and stateless `calc`/`calc_batch`) are
-  implemented under `iivs_cardio/optical_flow/estimators/`. Remaining: the
-  warp-consistency `OpticalFlowEvaluator` (+ `FlowMetrics` /
-  `MetricsAccumulator`) and sequence IO via `iivs-lib>=0.2.0`. Design in
+- **Wire up the `optical_flow` pipeline (normalization + sequence IO + script).**
+  The estimators (`iivs_cardio/optical_flow/estimators/`) and the
+  warp-consistency evaluator (`iivs_cardio/optical_flow/evaluation.py` —
+  `OpticalFlowEvaluator` / `FlowMetrics` / `MetricsAccumulator`) are done.
+  Remaining: 4-mode normalization (per-frame / pairwise / sequence / dataset),
+  sequence read/iterate via `iivs-lib>=0.2.0`, and a thin assembly script under
+  `scripts/optical_flow/`. Design in
   [`docs/optical-flow-design.md`](docs/optical-flow-design.md).
 
 - **Build the `filter_3d` module (3D spatiotemporal filter).** Design is
@@ -34,4 +51,9 @@ item to a CHANGELOG entry once it lands.
   experiments. The current synthetic benchmark reports Dual TV-L1 quality
   *below* Farneback — the opposite of what is expected — so its numbers
   (TV-L1's especially) are provisional and should not be trusted until the
-  rework lands.
+  rework lands. **Likely cause:** building the evaluator surfaced that the
+  legacy warp direction is inverted — the backward warp that reconstructs
+  `curr` from `prev` is `grid - flow`, not `grid + flow` (empirically SSIM
+  ~0.98 vs ~-0.23 on a known shift). `evaluation.py` uses the correct sign;
+  the benchmark inherits the legacy bug, so switch it to the evaluator before
+  trusting any numbers.
