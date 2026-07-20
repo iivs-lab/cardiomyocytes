@@ -193,7 +193,9 @@ def test_push_chunk_continues_across_chunks():
     frames = _sequence(5)
     of = Farneback(device="cpu")
     first = of.push_chunk(frames[:3])  # first chunk: 3 frames -> 2 flows
-    rest = of.push_chunk(frames[3:])  # continues with retained prev: 2 frames -> 2 flows
+    rest = of.push_chunk(
+        frames[3:]
+    )  # continues with retained prev: 2 frames -> 2 flows
     assert first.shape == (2, 64, 64, 2)
     assert rest.shape == (2, 64, 64, 2)
 
