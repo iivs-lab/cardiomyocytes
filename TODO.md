@@ -11,13 +11,13 @@ item to a CHANGELOG entry once it lands.
   `.gitignore` only covers Python + `.venv`/`.cache`. See
   [`docs/foundations.md`](docs/foundations.md) §8.
 
-- **Build the `optical_flow` module (compute + eval classes).** Design is
-  frozen in [`docs/optical-flow-design.md`](docs/optical-flow-design.md):
-  stateful `push(frame)` estimators (Farneback / DualTVL1 / DeepFlow) over a
-  `Device` (`cpu` / `cuda:N`) matrix, `FarnebackParams` / `DualTVL1Params`,
-  and a warp-consistency `OpticalFlowEvaluator`. Open items there: placement
-  (`iivs_cardio/optical_flow/` vs `scripts/`) and CPU `prev` copy semantics.
-  Needs the `iivs-lib>=0.2.0` dependency for sequence IO.
+- **Build the `optical_flow` evaluator (warp-consistency).** The compute
+  estimators (Farneback / DualTVL1 / DeepFlow over `torch.Tensor`, CPU + CUDA,
+  streaming `push`/`push_chunk` and stateless `calc`/`calc_batch`) are
+  implemented under `iivs_cardio/optical_flow/estimators/`. Remaining: the
+  warp-consistency `OpticalFlowEvaluator` (+ `FlowMetrics` /
+  `MetricsAccumulator`) and sequence IO via `iivs-lib>=0.2.0`. Design in
+  [`docs/optical-flow-design.md`](docs/optical-flow-design.md).
 
 - **Build the `filter_3d` module (3D spatiotemporal filter).** Design is
   frozen in [`docs/filter-3d-design.md`](docs/filter-3d-design.md): a
