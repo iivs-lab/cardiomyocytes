@@ -53,18 +53,10 @@ dependencies = [
     "numpy>=2",
     "scikit-image>=0.24",
     "kaparoo-python>=0.11.0",
+    "cupy-cuda13x>=14.1.1",
     "jaxtyping>=0.3.11",
     "beartype>=0.22.9",
 ]
-
-[project.optional-dependencies]
-# CUDA-only GPU interop (cupy <-> cv2.cuda.GpuMat). cupy-cuda13x ships no
-# macOS wheel and its `cuda-pathfinder` pin is shadowed by the CPU PyTorch
-# index the cross-OS CI resolves against, so it stays optional: install with
-# `uv sync --extra cuda` on a CUDA machine. CPU-only installs and CI omit it;
-# `iivs_cardio.common.cuda_utils` imports cupy lazily so the module still
-# imports without it (the CUDA code paths raise a clear error if called).
-cuda = ["cupy-cuda13x>=14.1.1"]
 
 [project.urls]
 GitHub = "https://www.github.com/iivs-lab/cardiomyocytes"

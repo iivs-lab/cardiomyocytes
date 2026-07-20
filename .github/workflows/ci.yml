@@ -10,33 +10,19 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# This project is CUDA-core: its runtime stack (cupy-cuda13x and the cudawarped
+# CUDA OpenCV build) has no CPU/macOS wheels and cannot even `import` without an
+# NVIDIA driver, so a GPU-less runner cannot install the project. CI therefore
+# does NOT install it, type-check, or run tests — those run locally on a CUDA
+# machine (`uv run ty check`, `uv run pytest`). CI keeps only the checks that
+# are cheap, deterministic, and need no GPU: ruff (static, isolated) and
+# lockfile freshness.
+
 jobs:
-  check:
-    name: Lint, type-check, test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
-    # CI runners have no GPU. Force the CPU PyTorch build for every `uv`
-    # command (sync + run) regardless of the project's compute_backend:
-    # CPU wheels are far smaller than CUDA wheels and — unlike CUDA wheels —
-    # are published for macOS too, so the cross-OS matrix resolves cleanly.
-    # `uv` re-resolves against this index and ignores the committed
-    # CUDA `uv.lock` for the CI run only.
-    #
-    # `UV_INDEX_STRATEGY: unsafe-best-match` is required because that re-resolve
-    # is universal — it covers every extra, including `cuda` (cupy-cuda13x),
-    # even though the CPU sync installs none of it. The CPU PyTorch index
-    # shadows `cuda-pathfinder` at an old version, so the default first-index
-    # strategy fails to resolve cupy's pin; best-match lets uv find the correct
-    # version on PyPI. Both indexes here (pytorch, PyPI) are trusted.
-    env:
-      UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
-      UV_INDEX_STRATEGY: unsafe-best-match
-
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-
+  lint:
+    name: Ruff (format + lint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
@@ -45,26 +31,16 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Sync dependencies (CPU PyTorch)
-        run: uv sync --group dev
-
+      # Run ruff in isolation (uvx): it reads [tool.ruff] from pyproject but
+      # needs none of the project's GPU-only dependencies installed. Pinned to
+      # the dev group's ruff so CI and local agree on formatting/lint rules.
       - name: Ruff format check
-        run: uv run ruff format --check .
+        run: uvx ruff@0.15.18 format --check .
 
       - name: Ruff lint
-        run: uv run ruff check .
-
-      - name: Type check
-        run: uv run ty check
-
-      - name: Tests
-        run: uv run pytest
+        run: uvx ruff@0.15.18 check .
 
   lock:
-    # Validate the committed (real-backend) `uv.lock`. The `check` job's
-    # CPU override re-resolves, so it never catches a stale CUDA lock;
-    # this job resolves metadata against the project's own index (no GPU,
-    # no wheel download) and fails if `uv.lock` is out of date.
     name: Verify lockfile
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -76,5 +52,7 @@ jobs:
         with:
           enable-cache: true
 
+      # Metadata-only resolve against the project's real (CUDA) index — no GPU
+      # and no wheel downloads — so it flags a stale lock without installing.
       - name: Check the committed lockfile is up to date
         run: uv lock --check
