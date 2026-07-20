@@ -21,8 +21,16 @@ jobs:
     # are published for macOS too, so the cross-OS matrix resolves cleanly.
     # `uv` re-resolves against this index and ignores the committed
     # CUDA `uv.lock` for the CI run only.
+    #
+    # `UV_INDEX_STRATEGY: unsafe-best-match` is required because that re-resolve
+    # is universal — it covers every extra, including `cuda` (cupy-cuda13x),
+    # even though the CPU sync installs none of it. The CPU PyTorch index
+    # shadows `cuda-pathfinder` at an old version, so the default first-index
+    # strategy fails to resolve cupy's pin; best-match lets uv find the correct
+    # version on PyPI. Both indexes here (pytorch, PyPI) are trusted.
     env:
       UV_INDEX: pytorch=https://download.pytorch.org/whl/cpu
+      UV_INDEX_STRATEGY: unsafe-best-match
 
     strategy:
       fail-fast: false
