@@ -2,6 +2,7 @@ from __future__ import annotations
 
 __all__ = ("cupy_to_gpumat", "gpumat_to_cupy", "gpumat_to_tensor", "tensor_to_gpumat")
 
+import importlib
 from typing import TYPE_CHECKING, Any
 
 import cv2
@@ -30,15 +31,16 @@ _DTYPE_CH_TO_CVTYPE = {
 
 
 def _require_cupy() -> ModuleType:
+    # Imported via importlib (not a static `import cupy`) so type-checking never
+    # tries to resolve the optional package on a CPU-only install / CI.
     try:
-        import cupy as cp
+        return importlib.import_module("cupy")
     except ImportError as exc:
         msg = (
             "cupy is required for CUDA GpuMat interop but is not installed; "
             "install the 'cuda' extra on a CUDA machine (uv sync --extra cuda)"
         )
         raise ImportError(msg) from exc
-    return cp
 
 
 def gpumat_to_cupy(gm: cv2.cuda.GpuMat) -> CupyArray:
