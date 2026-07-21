@@ -29,10 +29,10 @@ item to a CHANGELOG entry once it lands.
   [`docs/foundations.md`](docs/foundations.md) §8.
 
 - **Wire up the `optical_flow` pipeline (normalization + sequence IO + script).**
-  The estimators (`iivs_cardio/optical_flow/estimators/`) and the backward-warp
-  utility (`iivs_cardio/common/warp.py` — `backward_warp` / `BackwardWarp`) are
-  done; warp-consistency scoring is composed from `backward_warp` + metrics at
-  the call site rather than a dedicated evaluator class. Remaining: 4-mode
+  The estimators (`iivs_cardio/optical_flow/estimators/`), the backward-warp
+  utility (`iivs_cardio/common/warp.py` — `backward_warp` / `BackwardWarp`) and
+  warp-consistency scoring (`iivs_cardio/optical_flow/evaluation.py` —
+  `warp_consistency` / `WarpConsistency`) are done. Remaining: 4-mode
   normalization (per-frame / pairwise / sequence / dataset), sequence
   read/iterate via `iivs-lib>=0.2.0`, and a thin assembly script under
   `scripts/optical_flow/`. Design in

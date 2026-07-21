@@ -10,9 +10,11 @@
 >   stateless `calc`/`calc_batch`, jaxtyping+beartype 경계 검증. 파라미터 기본값은
 >   `cardio-force-legacy`와 일치. device는 `common.resolve_device`(`torch.device`).
 > - **백워드 워프** — `iivs_cardio/common/warp.py`가 정본이다:
->   `backward_warp` 함수 + `BackwardWarp`(nn.Module, grid 캐시). warp-consistency
->   점수는 전용 evaluator 클래스 없이 `backward_warp` + 지표(torchmetrics 등)를
->   **호출부에서 조합**한다 (아래 참조).
+>   `backward_warp` 함수 + `BackwardWarp`(nn.Module, grid 캐시). optical_flow 전용이
+>   아니라 kinematic 등도 공유한다.
+> - **평가** — `iivs_cardio/optical_flow/evaluation.py`가 정본이다:
+>   `warp_consistency` 함수 + `WarpConsistency`(nn.Module, grid 캐시). 상태를 갖는
+>   evaluator·accumulator 없이 쌍마다 `dict[str, Tensor]`를 반환한다 (아래 참조).
 >
 > 남은 부분은 **통합**: 4-mode 정규화 · iivs-lib 시퀀스 IO · 조립 스크립트.
 >
@@ -40,10 +42,23 @@ kinematic 등도 공유하는 `common` 유틸이다.
 - `BackwardWarp(nn.Module)` — 동일 연산의 캐시 버전. `(H, W)` 좌표 grid는
   transform과 무관하므로 크기·device당 1회 생성·재사용(hot-path·`torch.compile`/
   `jit` 친화를 위해 런타임 타입검사는 함수 쪽에만 둔다).
-- **warp-consistency 지표**: 전용 evaluator·`FlowMetrics`·`MetricsAccumulator`는
-  두지 않는다. `backward_warp`로 `prev`를 warp한 뒤 PSNR/SSIM/MSE/MAE(및 opt-in
-  LPIPS)를 **호출부가 직접** 계산·집계한다 — DL 학습 metric과 동일하게 필요한
-  것만 골라 쓰기 위함.
+## 평가 — warp-consistency (구현 완료)
+
+`iivs_cardio/optical_flow/evaluation.py`. `frame1`을 `flow`로 backward-warp한 뒤
+`frame2`와 비교해 **SSIM/PSNR/MSE/MAE를 `dict[str, Tensor]`** 로 반환한다.
+
+- `warp_consistency(frame1, frame2, flow, *, data_range, padding_mode, reduce)` —
+  함수판. `WarpConsistency(nn.Module)`는 `BackwardWarp`를 보유해 grid를 재사용한다.
+- **상태 없음**: `FlowMetrics`·`MetricsAccumulator` 같은 번들·누산기를 두지 않는다.
+  반환이 `MetricCollection`과 같은 `dict[str, Tensor]`(0-d)라 Lightning의
+  `log_dict(..., on_epoch=True)`가 에폭 집계를 맡는다. 지표를 골라 쓰기도 쉽다.
+- `reduce=True`(기본)는 `()`, `reduce=False`는 쌍별 `(*dim)`. 항상 쌍별로 계산한 뒤
+  평균하므로 **`reduce=True`는 정확히 `reduce=False`의 평균**이다(PSNR 포함 — batch를
+  한 장으로 본 pooled PSNR과는 다른 값).
+- `data_range`는 정수 dtype에서 유추(uint8→255)하고 **float 프레임은 명시 필수**다
+  (`[0,1]` 프레임에 255를 쓰면 PSNR이 ~48 dB 부풀고 SSIM이 1.0으로 포화).
+- **float 프레임에서는 미분 가능** — photometric loss로 쓸 수 있다. 정수 프레임은
+  warp의 round/clamp에서 그래프가 끊긴다. LPIPS는 제외했다.
 
 > **⚠️ warp 방향(중요)**: estimator는 forward flow(`prev→curr`)를 내므로 curr
 > 재구성은 **`grid − flow`**(= `grid − transform`) 샘플이다. 조상 문서/레거시의
