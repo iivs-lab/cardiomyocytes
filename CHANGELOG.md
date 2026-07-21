@@ -16,6 +16,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `backward_warp` / `BackwardWarp` sample at `grid + offset` instead of
+  `grid - transform`, and the second parameter is renamed accordingly. A forward
+  optical flow is now passed unchanged rather than negated at every call site,
+  which removes the bare sign flip that this project has already been bitten by;
+  `offset` rather than `flow` keeps `common/` free of optical-flow vocabulary
+  while stating the sign in the name. To displace an image *by* a field, negate
+  it.
 - `warp_consistency` / `WarpConsistency` now reconstruct `frame1` by sampling
   `frame2` at `grid + flow`, instead of reconstructing `frame2` from `frame1` at
   `grid - flow`. The forward flow is defined on `frame1`'s grid, so this

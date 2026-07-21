@@ -98,11 +98,11 @@ def test_warp_consistency_samples_frame2_along_the_flow():
 
     mse = warp_consistency(frame1, frame2, flow)["mse"].item()
 
-    along = backward_warp(frame2, -flow).float() - frame1.float()
+    along = backward_warp(frame2, flow).float() - frame1.float()
     assert mse == pytest.approx(float((along * along).mean()))
 
     # The reverse direction scores differently here -- that is the whole point.
-    reversed_ = backward_warp(frame1, flow).float() - frame2.float()
+    reversed_ = backward_warp(frame1, -flow).float() - frame2.float()
     assert float((reversed_ * reversed_).mean()) != pytest.approx(mse)
 
 

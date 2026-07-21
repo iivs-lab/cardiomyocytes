@@ -258,12 +258,12 @@ def normalize_pairs(
 def forward_backward_error(forward: torch.Tensor, backward: torch.Tensor) -> float:
     """Mean `|f_fwd(x) + f_bwd(x + f_fwd(x))|` in px; 0 for a consistent flow.
 
-    `backward_warp` samples at `grid - transform`, so passing `-forward` samples
-    the backward flow where the forward flow claims the pixel went. The transform
-    is broadcast over the flow's own two channels.
+    `backward_warp` samples at `grid + flow`, so warping the backward flow by the
+    forward one evaluates it exactly where the forward flow claims the pixel went.
+    The flow is broadcast over the backward field's own two channels.
     """
-    transform = (-forward).unsqueeze(0).expand(2, -1, -1, -1)
-    residual = forward + backward_warp(backward, transform)
+    sampled = backward_warp(backward, forward.unsqueeze(0).expand(2, -1, -1, -1))
+    residual = forward + sampled
     return float(torch.sqrt(residual[0] ** 2 + residual[1] ** 2).mean())
 
 

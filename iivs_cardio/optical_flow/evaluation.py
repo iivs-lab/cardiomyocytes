@@ -119,9 +119,7 @@ def warp_consistency(
         reduce: average over the batch to a 0-d scalar per metric. `False` keeps
             one score per pair, shaped `(*dim)`.
     """
-    # `backward_warp` samples at `grid - transform`, so the transform that samples
-    # *along* the flow -- at `grid + flow` -- is its negation.
-    warped = backward_warp(frame2, -flow, padding_mode=padding_mode)
+    warped = backward_warp(frame2, flow, padding_mode=padding_mode)
     return _metrics(warped, frame1, data_range, reduce=reduce)
 
 
@@ -160,5 +158,5 @@ class WarpConsistency(nn.Module):
         self, frame1: Tensor, frame2: Tensor, flow: Tensor
     ) -> dict[str, Tensor]:
         """Return the warp-consistency metrics of `flow`, reusing the cached grid."""
-        warped = self._warp(frame2, -flow)  # sample along the flow: `grid + flow`
+        warped = self._warp(frame2, flow)
         return _metrics(warped, frame1, self.data_range, reduce=self.reduce)
