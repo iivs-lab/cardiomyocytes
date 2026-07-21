@@ -5,19 +5,20 @@ item to a CHANGELOG entry once it lands.
 
 ## Open
 
-- **Decide the flow/vector tensor layout: HWC vs CHW.** Whether flow and the
-  kinematic vector fields put the 2-vector axis last (`(H,W,2)`, cv2-native) or
-  first (`(2,H,W)`/`(N,2,H,W)`, DL-native). Analysis + the (tentative CHW) lean
-  is in [`docs/tensor-layout-decision.md`](docs/tensor-layout-decision.md).
-  Blocks finalizing `evaluation.py`'s flow layout and the (unwritten) kinematic
-  kernels. Currently the estimators + evaluator are HWC.
+- **Propagate the CHW tensor layout to the kinematic kernels.** The layout is
+  settled — CHW (`(2,H,W)`/`(N,2,H,W)`), rationale in
+  [`docs/tensor-layout-decision.md`](docs/tensor-layout-decision.md). The
+  estimators (`(2,H,W)` flow) and `iivs_cardio/common/warp.py` already follow it;
+  the (unwritten) kinematic kernels must too, and the channel-last kernel
+  sketches in [`docs/foundations.md`](docs/foundations.md) §2 and
+  `new-project-DESIGN.md` §4.1 need updating to channel-first.
 
 - **Fix the dev machine's torch cuDNN (GPU `conv2d` fails).** On this Windows
   box every torch GPU convolution raises `CUDNN_STATUS_SUBLIBRARY_VERSION_MISMATCH`
   (works with `torch.backends.cudnn.enabled = False`). Likely cause: the cuDNN
   DLLs `scripts/compute_env/setup-opencv-cuda.ps1` symlinks into the CUDA `bin`
   shadow torch's bundled cuDNN. It is an environment issue, not a code bug — but
-  it blocks GPU SSIM in the evaluator and any future GPU DL / learned flow, so
+  it blocks any torch GPU convolution and any future GPU DL / learned flow, so
   the setup needs reconciling (keep the OpenCV cuDNN links from overriding
   torch's, or align versions).
 
@@ -28,11 +29,12 @@ item to a CHANGELOG entry once it lands.
   [`docs/foundations.md`](docs/foundations.md) §8.
 
 - **Wire up the `optical_flow` pipeline (normalization + sequence IO + script).**
-  The estimators (`iivs_cardio/optical_flow/estimators/`) and the
-  warp-consistency evaluator (`iivs_cardio/optical_flow/evaluation.py` —
-  `OpticalFlowEvaluator` / `FlowMetrics` / `MetricsAccumulator`) are done.
-  Remaining: 4-mode normalization (per-frame / pairwise / sequence / dataset),
-  sequence read/iterate via `iivs-lib>=0.2.0`, and a thin assembly script under
+  The estimators (`iivs_cardio/optical_flow/estimators/`) and the backward-warp
+  utility (`iivs_cardio/common/warp.py` — `backward_warp` / `BackwardWarp`) are
+  done; warp-consistency scoring is composed from `backward_warp` + metrics at
+  the call site rather than a dedicated evaluator class. Remaining: 4-mode
+  normalization (per-frame / pairwise / sequence / dataset), sequence
+  read/iterate via `iivs-lib>=0.2.0`, and a thin assembly script under
   `scripts/optical_flow/`. Design in
   [`docs/optical-flow-design.md`](docs/optical-flow-design.md).
 

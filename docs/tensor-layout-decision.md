@@ -1,16 +1,16 @@
-# 텐서 레이아웃 결정 — HWC vs CHW (미결정)
+# 텐서 레이아웃 결정 — HWC vs CHW (결정: CHW)
 
-> **상태: OPEN — 확정 전.** flow/벡터장 텐서의 2-벡터축을 **마지막(HWC,
-> `(H,W,2)`)** 에 둘지 **앞(CHW, `(2,H,W)` / `(N,2,H,W)`)** 에 둘지의 프로젝트
-> 전역 규약. 이 문서는 판단 근거를 보존한다(맑은 머리로 결정할 것).
+> **상태: DECIDED — CHW (`(2,H,W)` / `(N,2,H,W)`).** flow/벡터장 텐서의 2-벡터축을
+> **앞(채널-첫)** 에 둔다. 이 문서는 판단 근거를 보존한다(§핵심 값 판단). 적용
+> 현황은 §결정 참조.
 
 ## 문제
 
 - **프레임은 grayscale `(H,W)`** 라 무관. 판단 대상은 **flow·속도장 등 2-벡터
   텐서의 축 위치**뿐.
-- **현재 상태(암묵적 HWC)**: estimators가 `(H,W,2)`(cv2 네이티브), evaluation.py도
-  `(H,W,2)`로 작성됨. DL nn.Module(RAFT 등)은 `(N,2,H,W)` = CHW.
-- 목표: evaluator를 **DL Metric + estimator 평가 양쪽**에 쓰려면 한 규약이 필요.
+- **현재 상태(CHW 확정)**: estimators가 `(2,H,W)`, `common/warp.py`가
+  `(*dim,2,H,W)` transform. DL nn.Module(RAFT 등)도 `(N,2,H,W)` = CHW.
+- 목표: estimator 출력·warp·DL을 **한 규약(CHW)** 으로 통일.
 
 ## 분석 (연산별로 누가 permute를 무는가)
 
@@ -43,17 +43,17 @@
 - **범위가 estimator + evaluator뿐**(프레임만 워핑, 벡터장 워핑 없음)이라면 5행이
   사라져 **거의 무승부**, 그땐 cv2 native를 살려 **HWC가 미세 우위**.
 
-## CHW로 통일 시 작업 (결정되면)
+## CHW 적용 작업
 
-1. **estimators**: `_calc_*`/`gpumat_to_tensor` 출력을 `(2,H,W)`로 permute(한 곳에서).
-   estimator 테스트의 shape 단언도 `(2,H,W)`로.
-2. **evaluation.py**: `(2,H,W)` 입력으로(warp는 `flow[0]`/`flow[1]`로 grid 생성 —
-   동일), frames는 `(H,W)` 유지, 배치 `(N,2,H,W)` 자연 지원.
-3. **커널(미구현)**: `(...,2,H,W)` 채널-첫으로 스케치. `foundations.md §2`,
+1. ✅ **estimators**: `_calc_*` 출력이 `(2,H,W)`, 테스트 shape 단언도 `(2,H,W)`.
+2. ✅ **warp**(`common/warp.py`, evaluation.py 대체): `(*dim,2,H,W)` transform
+   입력, image는 `(H,W)`/`(*dim,H,W)` 유지, 배치 `(N,2,H,W)` 자연 지원.
+3. ⬜ **커널(미구현)**: `(...,2,H,W)` 채널-첫으로 스케치. `foundations.md §2`,
    `new-project-DESIGN.md §4.1`의 채널-마지막 커널 규약 갱신 필요.
-4. **DL**: 변환 0.
+4. ✅ **DL**: 변환 0(이미 CHW).
 
 ## 결정
 
-**PENDING** — 위 값 판단을 근거로 CHW 통일(전체 파이프라인 기준)이 유력하나,
-확정은 보류. 확정 후 이 문서를 "DECIDED: …"로 갱신하고 위 작업을 진행한다.
+**DECIDED: CHW** — 위 §핵심 값 판단(특히 `grid_sample`이 벡터장을 `(N,C,H,W)`로
+받으므로 벡터장 워핑이 CHW native)을 근거로 채널-첫으로 확정. estimator·warp·DL은
+적용 완료, 남은 것은 미구현 kinematic 커널을 CHW로 작성하는 것뿐(작업 3).
