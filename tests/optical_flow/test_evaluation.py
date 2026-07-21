@@ -84,9 +84,10 @@ def test_warp_consistency_rewards_the_matching_flow():
 def test_warp_consistency_samples_frame2_along_the_flow():
     """Pin the warp direction: sample `frame2` at `grid + flow`, score on `frame1`.
 
-    The flow is non-uniform on purpose. Under a uniform translation the two
-    directions agree exactly, so every other test in this file would still pass
-    with the warp reversed -- which is how such a bug survives review.
+    The flow is non-uniform on purpose: under a uniform translation the two
+    directions coincide, so every other test in this file passes either way. A
+    flipped *sign* is a different error, and those tests do catch it -- this one
+    covers the direction they cannot see.
     """
     frame1 = _textured()
     frame2 = _shifted(frame1)

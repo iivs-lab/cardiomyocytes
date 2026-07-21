@@ -97,9 +97,10 @@ def warp_consistency(
     `frame1`, requires inverting the map, and `x - flow(x)` only approximates it,
     with an error growing as `|flow| * |grad flow|`.
 
-    The two agree exactly under a uniform translation, which makes that case
-    useless for telling them apart -- and is how a warp of the wrong *sign*
-    survives review. Test the direction with a non-uniform flow.
+    Under a *uniform* flow the two coincide -- `x - flow(x)` inverts a constant
+    map exactly -- so no amount of testing on a rigid translation can tell them
+    apart. Pin this choice with a non-uniform flow instead. (A flipped *sign* is
+    a different error, and a uniform translation does catch that one.)
 
     Gradients reach `flow` for float frames, so this doubles as a photometric
     training loss -- also the form the unsupervised-flow literature uses. Integer
