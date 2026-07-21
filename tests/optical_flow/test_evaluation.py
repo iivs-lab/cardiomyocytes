@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 import torch
 
+from iivs_cardio.common.warp import backward_warp
 from iivs_cardio.optical_flow.evaluation import WarpConsistency, warp_consistency
 
 METRICS = {"ssim", "psnr", "mse", "mae"}
@@ -45,8 +46,8 @@ def test_warp_consistency_returns_metric_tensors():
     assert all(v.ndim == 0 for v in out.values())  # 0-d scalars, not floats
 
 
-def test_warp_consistency_is_perfect_when_the_warp_reconstructs_frame2():
-    # frame1 == frame2 with zero flow -> the warp reproduces frame2 exactly.
+def test_warp_consistency_is_perfect_when_the_warp_reconstructs_the_frame():
+    # frame1 == frame2 with zero flow -> the warp reproduces the frame exactly.
     frame = _textured()
     out = warp_consistency(frame, frame, _zero_flow())
     assert out["mse"].item() == 0.0
@@ -56,8 +57,8 @@ def test_warp_consistency_is_perfect_when_the_warp_reconstructs_frame2():
 
 
 def test_warp_consistency_mse_mae_match_independent_torch():
-    # Zero flow -> warped == frame1, so the residual is frame1 - frame2; check
-    # MSE/MAE against a torch computation independent of the metric functions.
+    # Zero flow -> the warp is the identity, so the residual is frame2 - frame1;
+    # check MSE/MAE against a torch computation independent of the metric functions.
     frame1 = _textured()
     frame2 = _shifted(frame1)
     out = warp_consistency(frame1, frame2, _zero_flow())
@@ -78,6 +79,30 @@ def test_warp_consistency_rewards_the_matching_flow():
     assert matching["mse"].item() < identity["mse"].item()
     assert matching["ssim"].item() > identity["ssim"].item()
     assert matching["psnr"].item() > identity["psnr"].item()
+
+
+def test_warp_consistency_samples_frame2_along_the_flow():
+    """Pin the warp direction: sample `frame2` at `grid + flow`, score on `frame1`.
+
+    The flow is non-uniform on purpose. Under a uniform translation the two
+    directions agree exactly, so every other test in this file would still pass
+    with the warp reversed -- which is how such a bug survives review.
+    """
+    frame1 = _textured()
+    frame2 = _shifted(frame1)
+
+    flow = torch.zeros((2, 64, 64), dtype=torch.float32)
+    flow[0] = torch.linspace(0.0, 4.0, 64)  # varies along x
+    flow[1] = torch.linspace(0.0, 2.0, 64)[:, None]  # varies along y
+
+    mse = warp_consistency(frame1, frame2, flow)["mse"].item()
+
+    along = backward_warp(frame2, -flow).float() - frame1.float()
+    assert mse == pytest.approx(float((along * along).mean()))
+
+    # The reverse direction scores differently here -- that is the whole point.
+    reversed_ = backward_warp(frame1, flow).float() - frame2.float()
+    assert float((reversed_ * reversed_).mean()) != pytest.approx(mse)
 
 
 def test_warp_consistency_respects_padding_mode():

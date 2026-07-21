@@ -16,7 +16,7 @@ Reading the quality columns -- this is the part that is easy to get wrong:
   frames are already nearly identical and a flow of exactly zero scores SSIM
   ~0.95. Raw SSIM therefore says almost nothing. Every row is reported as a
   **gain over the identity baseline**, which is the row for a zero flow.
-- SSIM alone is gameable: a flow with more freedom matches frame2 better by
+- SSIM alone is gameable: a flow with more freedom reconstructs the frame better by
   fitting *noise*. Measured on this data, parameters that double the SSIM gain
   degrade forward-backward consistency 8-20x. So each row also carries **FB-err**
   -- `|f_fwd(x) + f_bwd(x + f_fwd(x))|`, which a noise-fitted flow fails because

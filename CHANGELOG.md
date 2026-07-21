@@ -13,3 +13,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `iivs-lib[torch]>=0.2.0` as a dependency, for phase sequence IO. The `torch`
   extra additionally enables `iivs.dhm.analysis.pytorch` and
   `iivs.common.data.pytorch`.
+
+### Changed
+
+- `warp_consistency` / `WarpConsistency` now reconstruct `frame1` by sampling
+  `frame2` at `grid + flow`, instead of reconstructing `frame2` from `frame1` at
+  `grid - flow`. The forward flow is defined on `frame1`'s grid, so this
+  direction needs no inverse and is exact; the previous one approximated the
+  inverse with an error growing as `|flow| * |grad flow|`. Scores shift only in
+  the 5th decimal at sub-pixel motion, and estimator rankings are unchanged.
