@@ -5,6 +5,80 @@ item to a CHANGELOG entry once it lands.
 
 ## Open
 
+- **Find the configuration that best explains the data.** The project's current
+  priority: sweep filtering (on/off, kernel shape, per-axis radius) against every
+  estimator and parameter set over the full dataset, then cache the winning phase
+  and flow.
+
+  **Score on three axes, not one.** Warp consistency measures only how well a
+  flow reconstructs a frame, and a search will happily game that proxy:
+
+  - *bias* — endpoint error against the ground-truth benchmark below, or failing
+    that the fidelity of mean `|flow|`;
+  - *consistency* — forward-backward error, which catches a flow that earns its
+    photometric score by fitting noise;
+  - *beating-profile amplitude* — std/mean of per-pair mean `|flow|`, which is
+    what caught the legacy temporal radius compressing the signal by ~30%.
+
+  One photometric number is a mismatched objective: the deliverable is the
+  beating profile and force, not a reconstructed frame.
+
+  **Do not assume Dual TV-L1 wins.** Both it and Farneback are coarse-to-fine, so
+  that is not the difference; the estimator *inside* each level is. TV-L1's L1
+  data term buys robustness to occlusion and illumination change — neither occurs
+  in transparent phase imaging — at the cost of efficiency under the roughly
+  Gaussian phase noise, and its TV regularizer prefers piecewise-constant fields
+  where the tissue deforms as a smooth continuum. At sub-pixel motion the pyramid
+  is inert for both (Farneback's `num_levels` 1/3/5 measure bit-identical).
+  Whether the resulting shrinkage is a defect or a useful variance reduction is
+  what the three axes are there to decide. Judge speed by the cost of generating
+  a cache once, not per epoch — that makes DeepFlow's CPU-only path far less
+  disqualifying than it first appears.
+
+  **Do not select per frame pair; validate per-sequence selection before trusting
+  it.** Deriving a parameter from a measured covariate (temporal radius from the
+  frame interval) is principled and extrapolates; picking whichever configuration
+  scores highest is selection bias. Per-pair selection is the worst case — it
+  maximizes exactly the noise-fitting these metrics are vulnerable to, and since
+  estimators differ in bias by ~2.2x, switching mid-sequence injects a step into
+  the beating profile larger than the drug-induced changes the analysis exists to
+  detect.
+
+  Test the per-sequence hypothesis with a **split-half check**: does the
+  configuration that wins on half a sequence's pairs also win on the other half?
+  If not, the variation is noise. If it replicates, regress the per-sequence
+  winner on covariates (frame rate, mean `|flow|`, SNR, beat period) — an
+  explained difference becomes a rule, an unexplained one stays a single global
+  setting. Prefer parameterizing by covariate over switching estimators: one or
+  two degrees of freedom instead of one per sequence, and no discontinuity.
+
+- **Cache the least-biased flow; smooth at the consumer.** Bias and variance are
+  not symmetric. A noisy flow can be smoothed afterwards; motion that
+  regularization shrank away is unrecoverable, because every sample is displaced
+  identically. Measured, Dual TV-L1 returns ~0.46x Farneback's mean `|flow|` —
+  over half the motion gone.
+
+  The planned consumers disagree, which is why this matters. Kinematics and force
+  want low variance: acceleration is a second difference, multiplying independent
+  noise by `sqrt(6)` while shrinking a smooth 1 Hz signal sampled at 10 Hz by
+  ~0.40, so each double-differencing costs roughly 6x in SNR. Frame interpolation
+  and supervised flow training want low bias: a half-magnitude flow places
+  interpolated content half-way short, and a network trained on it inherits the
+  shrinkage permanently. Caching the sharper flow serves both, since the force
+  path can regularize at consumption.
+
+  Use a **single** configuration for the cache. A uniform bias is
+  characterizable and correctable — a constant scale factor leaves relative
+  comparisons intact — while a bias that varies by frame pair is neither.
+
+  Storage: flow is `(2, H, W)` float32 at 6.48 MB/frame, *twice* the phase,
+  against ~4 s per 1000 frames to regenerate on CUDA. Same conditional rule as
+  the filter cache: regenerate while exploring, cache for training loops.
+
+  For learned flow, prefer an unsupervised photometric objective (`warp_consistency`
+  is differentiable on float frames) or the ground-truth generator below over
+  classical pseudo-labels, which cap the model at its teacher.
+
 - **Propagate the CHW tensor layout to the kinematic kernels.** The layout is
   settled — CHW (`(2,H,W)`/`(N,2,H,W)`), rationale and channel-first kernel
   sketches in [`docs/foundations.md`](docs/foundations.md) §2. The estimators and
@@ -155,6 +229,10 @@ item to a CHANGELOG entry once it lands.
   brightness constancy holds exactly and the task is unrealistically easy. Add an
   independent noise realization to the warped frame, or treat the numbers as
   ranking estimators rather than as achievable accuracy.
+
+  The same construction doubles as a **supervised training-data generator** for a
+  learned flow model — real image statistics with exact labels — which is the
+  alternative to training on classical pseudo-labels.
 
 - **Add opt-in real-data tests over the fixtures.** The Koala time-lapses live in
   the private `iivs-lab/iivs-lib-fixtures` release (`gh release download v1 -R
