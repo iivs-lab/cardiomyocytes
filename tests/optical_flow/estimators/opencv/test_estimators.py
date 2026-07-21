@@ -43,10 +43,10 @@ def _assert_recovers_shift(flow: torch.Tensor) -> None:
     # `_frames` shifts by np.roll(base, (2, 3), (0, 1)), so the flow away from the
     # wrap-around borders should recover (dx, dy) = (3, 2) — an independent ground
     # truth that also proves the I/O path returns real values, not garbage.
-    # flow is (H, W, 2): channel 0 = dx, channel 1 = dy.
-    interior = flow[16:48, 16:48].cpu()
-    assert interior[..., 0].median().item() == pytest.approx(3.0, abs=0.5)
-    assert interior[..., 1].median().item() == pytest.approx(2.0, abs=0.5)
+    # flow is (2, H, W): channel 0 = dx, channel 1 = dy.
+    interior = flow[:, 16:48, 16:48].cpu()
+    assert interior[0].median().item() == pytest.approx(3.0, abs=0.5)
+    assert interior[1].median().item() == pytest.approx(2.0, abs=0.5)
 
 
 def _sequence(n: int, device: str = "cpu") -> torch.Tensor:
@@ -54,6 +54,17 @@ def _sequence(n: int, device: str = "cpu") -> torch.Tensor:
     base = _textured_base()
     seq = np.stack([np.roll(base, shift=(2 * k, 3 * k), axis=(0, 1)) for k in range(n)])
     return torch.as_tensor(seq, device=device)
+
+
+class _CountingAlgorithm:
+    """A stand-in cv2 flow algorithm that counts `.calc` calls (returns zeros)."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def calc(self, i0, i1, flow=None):  # cv2 DenseOpticalFlow.calc(prev, curr, flow)
+        self.calls += 1
+        return np.zeros((*i0.shape, 2), np.float32)
 
 
 @pytest.mark.parametrize("flow_cls", CPU_METHODS)
@@ -65,7 +76,7 @@ def test_push_streams_pairwise_flow(flow_cls):
 
     flow = of.push(curr)
     assert flow is not None
-    assert flow.shape == (*prev.shape, 2)
+    assert flow.shape == (2, *prev.shape)
     assert flow.dtype == torch.float32
     assert flow.device.type == "cpu"
 
@@ -87,7 +98,7 @@ def test_calc_is_a_stateless_one_shot(flow_cls):
     prev, curr = _frames()
 
     flow = of.calc(prev, curr)
-    assert flow.shape == (*prev.shape, 2)
+    assert flow.shape == (2, *prev.shape)
     assert flow.dtype == torch.float32
     # One-shot leaves no retained state, so a following push is still "first".
     assert of.push(prev) is None
@@ -109,11 +120,21 @@ def test_push_result_survives_the_next_push(flow_cls):
 
 @pytest.mark.parametrize("flow_cls", (Farneback, DualTVL1))
 def test_recovers_known_shift(flow_cls):
-    # Farneback and DualTVL1 recover a small translation precisely; DeepFlow is a
-    # coarser matcher, so it is only validated structurally above.
+    # Farneback and DualTVL1 recover a small translation precisely; DeepFlow is
+    # checked separately below.
     of = flow_cls(device="cpu")
     prev, curr = _frames()
     _assert_recovers_shift(of.calc(prev, curr))
+
+
+def test_deepflow_recovers_shift():
+    # DeepFlow's output values (elsewhere only its shape/dtype are asserted): zero
+    # for identical frames and the known (dx, dy) = (3, 2) shift recovered — a
+    # real, motion-dependent result that a garbage/no-op calc would fail.
+    of = DeepFlow(device="cpu")
+    base, shifted = _frames()
+    assert of.calc(base, base).abs().max().item() < 1e-3  # no motion -> zero flow
+    _assert_recovers_shift(of.calc(base, shifted))
 
 
 def test_push_rejects_wrong_dtype():
@@ -154,16 +175,36 @@ def test_calc_batch_matches_per_pair(flow_cls):
     currs = torch.as_tensor(rng.integers(0, 256, size=(3, 64, 64), dtype=np.uint8))
 
     batch = of.calc_batch(prevs, currs)
-    assert batch.shape == (3, 64, 64, 2)
+    assert batch.shape == (3, 2, 64, 64)
     assert batch.dtype == torch.float32
     for i in range(3):
         assert torch.equal(batch[i], of.calc(prevs[i], currs[i]))
 
 
+def test_calc_batch_calls_algorithm_once_per_pair(monkeypatch):
+    # Contract: exactly one core `algorithm.calc` per source pair. Verified with a
+    # spy, not just by values — a redundant re-compute would still match results.
+    of = Farneback(device="cpu")
+    spy = _CountingAlgorithm()
+    monkeypatch.setattr(of, "_algorithm", spy)
+    prevs = torch.zeros((3, 64, 64), dtype=torch.uint8)
+    of.calc_batch(prevs, prevs)
+    assert spy.calls == 3
+
+
+def test_push_chunk_calls_algorithm_once_per_consecutive_pair(monkeypatch):
+    # 5 frames -> 4 flows -> exactly 4 core calls (the first frame is only retained).
+    of = Farneback(device="cpu")
+    spy = _CountingAlgorithm()
+    monkeypatch.setattr(of, "_algorithm", spy)
+    of.push_chunk(_sequence(5))
+    assert spy.calls == 4
+
+
 def test_calc_batch_empty_returns_empty():
     empty = torch.zeros((0, 64, 64), dtype=torch.uint8)
     out = Farneback(device="cpu").calc_batch(empty, empty)
-    assert out.shape == (0, 64, 64, 2)
+    assert out.shape == (0, 2, 64, 64)
     assert out.dtype == torch.float32
 
 
@@ -185,7 +226,7 @@ def test_push_chunk_matches_individual_pushes():
             individual.append(flow)
 
     chunk = Farneback(device="cpu").push_chunk(frames)
-    assert chunk.shape == (4, 64, 64, 2)  # first chunk: 5 frames -> 4 flows
+    assert chunk.shape == (4, 2, 64, 64)  # first chunk: 5 frames -> 4 flows
     assert torch.equal(chunk, torch.stack(individual))
 
 
@@ -196,8 +237,8 @@ def test_push_chunk_continues_across_chunks():
     rest = of.push_chunk(
         frames[3:]
     )  # continues with retained prev: 2 frames -> 2 flows
-    assert first.shape == (2, 64, 64, 2)
-    assert rest.shape == (2, 64, 64, 2)
+    assert first.shape == (2, 2, 64, 64)
+    assert rest.shape == (2, 2, 64, 64)
 
     of2 = Farneback(device="cpu")
     individual = []
@@ -212,14 +253,14 @@ def test_push_chunk_first_single_frame_retains_without_flow():
     of = Farneback(device="cpu")
     frames = _sequence(2)
     out = of.push_chunk(frames[:1])  # first chunk of 1 -> 0 flows, retains the frame
-    assert out.shape == (0, 64, 64, 2)
+    assert out.shape == (0, 2, 64, 64)
     assert of.push(frames[1]) is not None  # a previous frame is now retained
 
 
 def test_push_chunk_empty_returns_empty():
     empty = torch.zeros((0, 64, 64), dtype=torch.uint8)
     out = Farneback(device="cpu").push_chunk(empty)
-    assert out.shape == (0, 64, 64, 2)
+    assert out.shape == (0, 2, 64, 64)
 
 
 @requires_cuda
@@ -231,7 +272,7 @@ def test_cuda_push_stays_on_device(flow_cls):
     assert of.push(prev) is None
     flow = of.push(curr)
     assert flow is not None
-    assert flow.shape == (*prev.shape, 2)
+    assert flow.shape == (2, *prev.shape)
     assert flow.dtype == torch.float32
     assert flow.device.type == "cuda"  # device-resident, no host round trip
 
@@ -284,7 +325,7 @@ def test_cuda_push_streams_without_corrupting_retained_flows():
 def test_cuda_push_chunk_streams():
     of = Farneback(device="cuda")
     chunk = of.push_chunk(_sequence(5, device="cuda"))
-    assert chunk.shape == (4, 64, 64, 2)  # 5 frames -> 4 flows
+    assert chunk.shape == (4, 2, 64, 64)  # 5 frames -> 4 flows
     assert chunk.device.type == "cuda"
     _assert_recovers_shift(chunk[0])  # each pair shifts by (3, 2)
 

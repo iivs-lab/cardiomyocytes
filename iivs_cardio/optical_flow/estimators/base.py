@@ -30,7 +30,7 @@ class OpticalFlowEstimator(ABC):
     stateless one-shot for a single pair.
 
     Subclasses pin the concrete dtype/shape of frames and flow (e.g. the OpenCV
-    backend takes `(H, W)` uint8 frames and returns `(H, W, 2)` float32 flow).
+    backend takes `(H, W)` uint8 frames and returns `(2, H, W)` float32 flow).
     """
 
     SUPPORTED_DEVICES: ClassVar[frozenset[DeviceKind]] = DEVICE_KINDS

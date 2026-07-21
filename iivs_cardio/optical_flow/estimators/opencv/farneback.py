@@ -13,7 +13,7 @@ from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVEstimator
 if TYPE_CHECKING:
     import torch
 
-    from iivs_cardio.optical_flow.estimators.opencv.base import DenseOpticalFlow
+    from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVAlgorithm
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +39,7 @@ class Farneback(OpenCVEstimator):
         super().__init__(device)
 
     @override
-    def _create_algorithm(self) -> DenseOpticalFlow:
+    def _create_algorithm(self) -> OpenCVAlgorithm:
         params = self.params
 
         if self.is_cuda:
