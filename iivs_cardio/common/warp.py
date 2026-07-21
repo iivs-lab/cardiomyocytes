@@ -102,12 +102,12 @@ def backward_warp(
 class BackwardWarp(nn.Module):
     """Backward-warp images by a transform, caching the coordinate grid.
 
-    `forward(image, transform)` samples `image` at ``grid - transform`` (per-pixel
-    displacement, channel 0 = dx, 1 = dy) bilinearly in float32, cast back to
-    `image`'s dtype (integers rounded and clamped, floats kept fractional); shared
-    leading dims are warped together. The `(H, W)` grid depends only on image size
-    and device, so it is built once and reused across same-size calls, rebuilt
-    lazily on a size/device change.
+    `forward(image, transform)` takes a `(*dim, H, W)` image of any real dtype and
+    a `(*dim, 2, H, W)` float32 displacement (channel 0 = dx, 1 = dy), sampling
+    `image` at ``grid - transform`` in float32 and casting back to `image`'s dtype
+    (integers rounded and clamped, floats kept fractional). The `(H, W)` grid
+    depends only on image size and device, so it is built once and reused across
+    same-size calls, rebuilt lazily on a size/device change.
 
     Args:
         padding_mode: out-of-bounds policy (`border`, `zeros`, or `reflection`).
@@ -119,7 +119,7 @@ class BackwardWarp(nn.Module):
         self._grid: Tensor | None = None  # cached (H, W, 2) identity grid
 
     def _base_grid(self, image: Tensor) -> Tensor:
-        """The cached `(H, W, 2)` grid for `image`, (re)built on a size/device change."""
+        """The cached `(H, W, 2)` grid for `image`, rebuilt on a size/device change."""
         shape = image.shape[-2:]
         grid = self._grid
         if grid is None or grid.shape[:2] != shape or grid.device != image.device:
@@ -127,7 +127,7 @@ class BackwardWarp(nn.Module):
             self._grid = grid
         return grid
 
-    def forward(self, image: ImageType, transform: TransformType) -> ImageType:
+    def forward(self, image: Tensor, transform: Tensor) -> Tensor:
         """Return `image` backward-warped by `transform`, reusing the cached grid."""
         base = self._base_grid(image)
         return _warp_with_grid(image, transform, base, self.padding_mode)
