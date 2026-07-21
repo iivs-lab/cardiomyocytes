@@ -10,13 +10,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- `iivs-lib[torch]>=0.2.0` as a dependency. Beyond phase sequence IO, the
-  `torch` extra enables `iivs.dhm.analysis.pytorch` (`phase_to_opd`,
-  `calc_drymass`) and `iivs.common.data.pytorch` (masked `Mean` / `Variance` /
-  `Norm` reductions) — tensor-in/tensor-out twins that preserve device and
-  autograd.
-
-### Changed
-
-- Design docs folded into `docs/foundations.md` and `TODO.md`; the kinematic
-  kernel sketches are channel-first, matching the settled CHW layout.
+- `iivs-lib[torch]>=0.2.0` as a dependency, for phase sequence IO. The `torch`
+  extra additionally enables `iivs.dhm.analysis.pytorch` and
+  `iivs.common.data.pytorch`.
