@@ -108,3 +108,32 @@ def test_tensor_gpumat_tensor_roundtrips_flow():
     out = gpumat_to_tensor(tensor_to_gpumat(flow))
     assert out.shape == (16, 16, 2)
     assert torch.allclose(out.cpu(), flow.cpu())
+
+
+@requires_cuda
+def test_cupy_dtype_rejects_unsupported_depth():
+    from iivs_cardio.common.cuda_utils import _cupy_dtype
+
+    with pytest.raises(ValueError, match="unsupported GpuMat depth"):
+        _cupy_dtype(cv2.CV_16U)  # only CV_8U / CV_32F are supported
+
+
+@requires_cuda
+def test_cv_type_rejects_unsupported_combo():
+    import cupy as cp
+
+    from iivs_cardio.common.cuda_utils import _cv_type
+
+    with pytest.raises(ValueError, match="unsupported"):
+        _cv_type(cp.float64, 3)  # unsupported (dtype, channels) combo
+
+
+@requires_cuda
+def test_tensor_to_gpumat_rejects_cpu_tensor():
+    import torch
+
+    from iivs_cardio.common.cuda_utils import tensor_to_gpumat
+
+    # A CPU tensor would silently host->device copy via cp.asarray; reject it.
+    with pytest.raises(ValueError, match="CUDA tensor"):
+        tensor_to_gpumat(torch.zeros((4, 4), dtype=torch.uint8))
