@@ -54,10 +54,16 @@ item to a CHANGELOG entry once it lands.
   cannot be used directly. Allow a zero radius to disable an axis; the legacy
   could not express that.
 
-  **Factor it as a stateless window core (`window -> centre frame`) with the
-  streaming delay-line (`push` / `flush`) as a wrapper**, so the sequential
-  pipeline and a chunked `Dataset` share one implementation. Decided: torch only
-  on CPU and CUDA (no numba / scipy), gaussian by per-axis `sigma` + `truncate`.
+  **Streaming only** — a `push` / `flush` delay line, with no random-access entry
+  point. The reason is correctness rather than I/O: a filtered frame depends on
+  its neighbours, so under random access "frame i" would silently depend on which
+  window asked for it, while a `Dataset` advertises independent samples. Keep the
+  window core a pure function of its window for testability, but do not ship a
+  random-access path. The delay line also bounds memory — the prototype holds the
+  whole padded volume at a measured 9.5 MB/frame, so ~1200 frames exhaust a 12 GB
+  GPU, where a delay line needs `2rz+1` frames whatever the length. Cost is linear
+  and flat at **3.01 ms/frame** on CUDA, 20x that on CPU. Decided: torch only on
+  both (no numba / scipy), gaussian by per-axis `sigma` + `truncate`.
 
   **The temporal radius must scale with the frame rate.** Damage tracks the time
   the window spans, not its frame count, so the legacy's fixed `(2,2,2)` is a
@@ -73,17 +79,54 @@ item to a CHANGELOG entry once it lands.
   scaled by the joint range of whichever pair it is in, so it appears twice with
   two encodings — the API must be built around pairs (or windows) for the mode to
   exist at all. `per_frame` is the unsafe mode: rescaling each frame by its own
-  extremes breaks the brightness constancy every estimator assumes. `sequence`
-  (the legacy's `sample`) and `per_frame` statistics can be delegated to
-  iivs-lib's `value_range(index=None)`; `dataset` merges those per sequence.
+  extremes breaks the brightness constancy every estimator assumes (`sequence` is
+  the legacy's `sample`). Applying stats is elementwise and local, so once they
+  exist every mode is safe under random access; only computing them needs a pass.
 
-  Dataset consumption, settled by discussion: a ring buffer needs sequential
-  access, so per-frame `RandomSampler` would amplify I/O by the window size.
-  **Sample chunks, not frames** — which this domain requires anyway (flow needs 2
-  consecutive frames, accel 3; cf. `foundations.md` §5). A chunk of K with a
-  `2*rz` halo costs `(K+2rz)/K` and restores the buffer within the chunk. Check
-  first whether a sequence simply fits in RAM (~1 GB per 300 frames), which makes
-  the question moot.
+  **Store per-frame `(min, max)`; all four modes derive from it exactly** —
+  pairwise is the elementwise min/max of two neighbours, which is literally what
+  the legacy computes; sequence reduces over frames, dataset over sequences.
+  ~16 KB per 1000 frames, nothing redundant to disagree, and dataset composition
+  stays a *view*: changing a split needs no recomputation, and training-split-only
+  stats become the natural default rather than an extra mechanism (computing them
+  across all splits leaks val/test into training). Storing the sequence-level pair
+  as well is fine for readability and as corruption detection, but only as a
+  *derived* field verified against the per-frame array on load — left
+  authoritative it is a second source of truth that can silently disagree.
+
+  This does lock in min/max semantics: sequence percentiles are **not** derivable
+  from per-frame percentiles. If outlier fragility bites — one hot pixel sets the
+  max and compresses everything else into part of the 256 uint8 levels — per-frame
+  *histograms* compose additively and give exact percentiles at any level, at
+  ~16 MB per 1000 frames. Version the sidecar so that switch stays open.
+
+  **Do not use `phbounds.txt`.** It is Koala's uint8 *preview* range, and
+  `PhaseBounds`' own docstring says the previews are never authoritative; it also
+  describes raw phase, while a median can only shrink the range, so it would waste
+  uint8 levels. Do not write our values into that filename either — the same name
+  with different semantics is the silent-mismatch failure this project keeps
+  hitting.
+
+  **Cache format**: filtered frames as Koala `.bin` through iivs-lib's
+  `save_phase_bin` / `save_phase_folder`, so `PhaseBinFolder` reads them back and
+  the `pixel_size` / `height_scale` calibration travels *inside* the file instead
+  of in a sidecar that can desync. Both `.bin` and iivs-lib's `.npy` are float32,
+  so float16 means leaving the ecosystem entirely — revisit only if disk actually
+  binds, and measure the precision loss on the physical quantities first. Our own
+  sidecar carries what the ecosystem does not: the per-frame statistics and their
+  unit, the filter parameters, a source hash (without which a changed radius
+  silently reuses a stale cache), and a format version.
+
+  **Whether to keep the cache is conditional**, not automatic. Regenerating costs
+  ~3 s per 1000 frames on CUDA, so caching wins where the GPU is scarce or absent
+  — CPU-only machines, and training loops where re-filtering every epoch competes
+  with the model for the device. Regenerating wins while preprocessing parameters
+  are still being explored, since every change invalidates the cache. Deleting raw
+  phase to keep only filtered frames is a separate decision that should wait until
+  the parameters are settled.
+
+  A training `Dataset` therefore reads the *cache*, never raw sequences, and its
+  random access is then unrestricted.
 
 - **Promote the identity baseline and forward-backward error into
   `evaluation.py`.** Both are prototyped in
