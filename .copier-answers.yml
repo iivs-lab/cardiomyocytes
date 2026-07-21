@@ -14,7 +14,7 @@ license_year: 2026
 package_name: iivs_cardio
 project_description: A monorepo for deep-learning and bio-imaging research on cardiomyocytes
 project_name: iivs-cardio
-python_version: '3.14'
+python_version: '3.13'
 repo_name: cardiomyocytes
 torch_version: 2.12.1
 torchvision_version: 0.27.1

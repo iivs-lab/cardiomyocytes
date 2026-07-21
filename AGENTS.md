@@ -6,7 +6,7 @@ Guidance for AI coding assistants working on this project.
 ## Project
 
 - Package: `iivs_cardio/`
-- Python:  3.14+
+- Python:  3.13+
 - Kind:    application — not packaged for distribution
 
 ## Toolchain
