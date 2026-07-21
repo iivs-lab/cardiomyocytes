@@ -95,6 +95,24 @@ item to a CHANGELOG entry once it lands.
   so it cannot reuse `warp_consistency`'s single-flow signature. Open: whether
   the baseline is an extra returned key or a separate function.
 
+- **Build a ground-truth flow benchmark from real frames.** Warp a real DHM frame
+  by a known, smooth, sub-pixel displacement field (~0.3 px, the measured scale)
+  and score estimators by endpoint error against it. This keeps real image
+  statistics while restoring ground truth — the old synthetic scene had ground
+  truth but the wrong motion regime, at 8-14 px.
+
+  The point is to settle which proxy to trust. SSIM gain and forward-backward
+  error routinely disagree (raising TV-L1's `lambda_` doubles the gain while
+  degrading FB error 14x), and with no ground truth there is no way to say which
+  is right. EPE decides it directly, and shows which proxy actually correlates
+  with accuracy — after which the proxies can be used on real pairs with
+  justified confidence.
+
+  Caveat to design around: warping one frame transports its noise intact, so
+  brightness constancy holds exactly and the task is unrealistically easy. Add an
+  independent noise realization to the warped frame, or treat the numbers as
+  ranking estimators rather than as achievable accuracy.
+
 - **Add opt-in real-data tests over the fixtures.** The Koala time-lapses live in
   the private `iivs-lab/iivs-lib-fixtures` release (`gh release download v1 -R
   iivs-lab/iivs-lib-fixtures -D fixtures`); nothing fetches them automatically —
