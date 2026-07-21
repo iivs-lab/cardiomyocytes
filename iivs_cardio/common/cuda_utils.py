@@ -31,7 +31,7 @@ def _cupy_dtype(depth: int) -> type:
 
 
 def _cv_type(dtype: type, channels: int) -> int:
-    """The cv2 type code for a `(dtype, channels)` pair, or raise on an unsupported one."""
+    """The cv2 type code for a `(dtype, channels)` pair; raises if unsupported."""
     try:
         return _DTYPE_CH_TO_CVTYPE[dtype, channels]
     except KeyError:

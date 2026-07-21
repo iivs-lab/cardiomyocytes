@@ -34,11 +34,10 @@ class OpenCVEstimator(OpticalFlowEstimator):
 
     Takes `(H, W)` uint8 frames and returns `(2, H, W)` float32 flow (channel 0 =
     dx, channel 1 = dy) as `torch.Tensor`s on `self.device`. cv2 computes flow in
-    `(H, W, 2)`; the output is transposed once to the channel-first (`2 H W`)
-    layout that torch spatial ops (`grid_sample`, `conv2d`) consume natively. A
-    CUDA estimator keeps the whole
-    computation on the device, so its output chains into the next GPU stage
-    without a host transfer. Subclasses supply only `_create_algorithm`,
+    `(H, W, 2)`; the output is transposed once to the channel-first layout that
+    torch spatial ops (`grid_sample`, `conv2d`) consume natively. A CUDA estimator
+    keeps the whole computation on the device, so its output chains into the next
+    GPU stage without a host transfer. Subclasses supply only `_create_algorithm`,
     choosing the concrete cv2 algorithm for the device.
 
     Separate from `OpticalFlowEstimator` so a future PyTorch (`nn.Module`)
@@ -75,7 +74,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
 
     @override
     def reset(self) -> None:
-        """Forget the retained previous frame (and reset CUDA buffers) for a new sequence."""
+        """Forget the retained frame and CUDA buffers, restarting the sequence."""
         if self.is_cuda:
             self._frame_buffers = (GpuMat(), GpuMat())
             self._prev_slot = 0
@@ -85,7 +84,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
     @jaxtyped(typechecker=beartype)
     @override
     def push(self, frame: FrameType) -> FlowType | None:
-        """Return the flow from the retained frame to `frame` (`(H,W)` u8 -> `(2,H,W)` f32), `None` if first."""
+        """Return the flow from the retained frame, or `None` on the first frame."""
         self.validate_device(frame)
         push = self._push_cuda if self.is_cuda else self._push_cpu
         return push(frame)
@@ -93,7 +92,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
     @jaxtyped(typechecker=beartype)
     @override
     def push_chunk(self, frames: BatchFrameType) -> ChunkFlowType:
-        """Stream `(H,W)` uint8 frames, returning stacked `(M,2,H,W)` flows that continue the sequence."""
+        """Stream a chunk of frames, returning stacked flows continuing the sequence."""
         self.validate_device(frames)
         push = self._push_cuda if self.is_cuda else self._push_cpu
         flows: list[Tensor] = []
@@ -106,7 +105,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
     @jaxtyped(typechecker=beartype)
     @override
     def calc(self, prev: FrameType, curr: FrameType) -> FlowType:
-        """Compute the one-shot flow `prev -> curr` (`(H,W)` u8 -> `(2,H,W)` f32), stateless."""
+        """Compute the flow `prev -> curr` in one shot, leaving no retained state."""
         self.validate_device(prev)
         self.validate_device(curr)
         calc = self._calc_cuda if self.is_cuda else self._calc_cpu
@@ -115,7 +114,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
     @jaxtyped(typechecker=beartype)
     @override
     def calc_batch(self, prev: BatchFrameType, curr: BatchFrameType) -> BatchFlowType:
-        """Compute per-pair flows for a batch (`(N,H,W)` u8 -> stacked `(N,2,H,W)` f32)."""
+        """Compute the flow for each independent pair `prev[i] -> curr[i]`, stacked."""
         self.validate_device(prev)
         self.validate_device(curr)
         calc = self._calc_cuda if self.is_cuda else self._calc_cpu
@@ -124,7 +123,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
 
     @staticmethod
     def _stack_flows(flows: list[Tensor], frames: Tensor) -> Tensor:
-        """Stack per-pair flows, or a `(0, 2, H, W)` empty float32 when there are none."""
+        """Stack the flows, or an empty `(0, 2, H, W)` float32 when there are none."""
         if not flows:
             return frames.new_empty((0, 2, *frames.shape[1:]), dtype=torch.float32)
         return torch.stack(flows)
