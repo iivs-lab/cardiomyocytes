@@ -3,14 +3,17 @@
 > **⚠️ 이 문서는 "의도/결정"의 스냅샷이지 "현재 코드의 사실"이 아니다.**
 > 외부 컴퓨터를 포함한 **이후 작업이 이 문서를 100% 반영하지 않을 수 있다** —
 > 결정은 뒤집힐 수 있고 구현은 앞서갈 수 있다. **불일치 시 우선순위:**
-> 실제 코드 > `pyproject.toml`/`uv.lock`/git 이력 > 모듈별 `docs/*-design.md` >
+> 실제 코드 > `pyproject.toml`/`uv.lock`/git 이력 > [`TODO.md`](../TODO.md) >
 > **이 문서**. 이 문서에 적힌 심볼·수치·경계는 **채택 전 코드로 재검증**할 것.
 >
 > 출처: 조상 문서 `new-project-DESIGN.md`(cell-dynamics 설계) + `PROJECT_CONTEXT.md`
 > (부트스트랩 핸드오프) 중 **여전히 유효한 부분만 선별**. 낡은 사실(옛 copier ref,
 > Python 버전, "bare project" 상태, `opencv-python`, `cardio_dynamics` 명명 등)은
-> 의도적으로 제외했다. 모듈별 상세는 [`optical-flow-design.md`](optical-flow-design.md),
-> [`filter-3d-design.md`](filter-3d-design.md).
+> 의도적으로 제외했다.
+>
+> 모듈별 `*-design.md`는 **모두 제거**했다 — 구현된 부분은 코드·docstring이,
+> 미구현 부분은 [`TODO.md`](../TODO.md)가 정본이다. 원문이 필요하면 git 이력에서
+> 꺼낼 수 있다(`git log --diff-filter=D -- docs/`).
 
 ## 1. 아키텍처 결정 (가급적 재론 금지 — 단, §상단 disclaimer 적용)
 
@@ -26,7 +29,17 @@
 ## 2. compute 커널 — 단일 수학 출처
 
 DL·파이프라인·2D/3D·numpy/torch가 **모두 같은 수학 함수**를 호출한다(중복 금지).
-입력은 `(T, H, W[, C])` 시간축-우선 청크 가정.
+입력은 시간축-우선 청크: 스칼라장 `(T, H, W)`, 벡터장 `(T, 2, H, W)` — **채널-첫(CHW)**.
+
+> **CHW인 이유 (HWC 대비, 결정 완료).** 결정적 근거는 **하나**다: Lagrangian 체인이
+> 속도장·벡터장을 `grid_sample`로 반복 워핑하는데 그 **이미지 입력이 `(N, C, H, W)`**
+> 라 2-벡터장은 `(N, 2, H, W)`가 native다. HWC면 **매 warp마다 permute in/out(+복사)**
+> 이 hot-path에서 반복된다. 나머지는 상쇄된다 — cv2(HWC 출력) ↔ DL(CHW 출력) 경계는
+> 어느 규약이든 반대편에서 permute-view 1회로 **대칭**이고, HWC의 유일한 이점인 커널
+> 인덱싱 가독성(`[..., 0]` vs `[..., 0, :, :]`)은 **코스메틱**(성능·기능 차 0)이며,
+> 지표(PSNR/SSIM/MSE/MAE)는 프레임만 보므로 레이아웃과 **무관**하다.
+> 적용: estimators `(2,H,W)` ✅ / `common/warp.py` `(*dim,2,H,W)` ✅ / DL ✅(원래 CHW)
+> / kinematic 커널 ⬜(미구현 — 아래 스케치가 채널-첫 규약이다).
 
 ```python
 def opd_from_phase(phase, opd_scale):        # phase(rad) → OPD(nm)
@@ -38,7 +51,7 @@ def height_from_phase(phase, height_scale):  # phase(rad) → height(m)
 def warp(field_next, flow):                  # field_next[t]를 flow(t→t+1)로 t좌표계 정렬
     ...                                      # grid_sample / remap
 
-def displacement_xy(flow, pixel_size):       # flow(px) → 횡변위(m). (T-1, H, W, 2)
+def displacement_xy(flow, pixel_size):       # flow(px) → 횡변위(m). (T-1, 2, H, W)
     return flow * pixel_size
 
 def z_displacement(height, flow, *, lagrangian=True):  # 물질 점 높이 변화. (T-1, H, W)
@@ -54,15 +67,15 @@ def acceleration(v, flow, dt, *, lagrangian=True):     # 물질미분
         return (warp(v[1:], flow) - v[:-1]) / dt
     return (v[1:] - v[:-1]) / dt
 
-def force(accel, mass):
-    return mass[..., None] * accel           # 벡터 차원 D=2 or 3 무관
+def force(accel, mass):                      # mass (T-1, H, W) → 채널축 삽입
+    return mass[..., None, :, :] * accel     # 벡터 차원 D=2 or 3 무관
 ```
 
 - **quantity 계열**: 분석(`OPD`, `dry mass`) / kinematic(`displacement → speed →
   acceleration`) / kinetic(`force = mass × accel`) / 통계(`OPD variance` = OPD의
   시간 reduction).
 - **다중 엔드포인트**: `phase → OPD`에서 `… → force` 가지와 `OPD variance` 가지가 갈림.
-- `speed`/`acceleration`/`force`는 마지막 벡터축 `D`(2 또는 3)에 **무관**.
+- `speed`/`acceleration`/`force`는 채널축 `D`(2 또는 3)의 크기에 **무관**.
 
 ## 3. 정확성 3규약 + Lagrangian/Eulerian (non-obvious, 필수 지식)
 
@@ -95,7 +108,8 @@ def force(accel, mass):
 - **OPD variance 전역값**: 청크에 걸쳐 **Welford/Chan 스트리밍 누적**(청크별
   `(n, mean, M2)` 병합 → finalize). **float64 누적.** (윈도우 단위 분산이면 청크 독립.)
 - variance/dry mass 합산은 **float64**, 그 외 기본 float32(필요 시 AMP).
-- cf. `filter_3d`의 delay-line도 시간 윈도우·overlap 개념을 공유.
+- cf. `data/preprocessing/filtering`의 delay-line도 시간 윈도우·overlap 개념을
+  공유한다(청크 소비 시 halo = 2·rz).
 
 ## 6. 멀티 GPU
 
@@ -111,13 +125,16 @@ def force(accel, mass):
 이 프로젝트는 iivs-lib를 **소비만** 한다(코드 침투 없음). flow·warping·kinematic·
 kinetic·OPD variance·필터는 전부 이 프로젝트 소유.
 
-- **스케일·헤더 (유효 추정)**: `pixel_size`(헤더), `height_scale`(phase→height),
-  `OPDConverter.opd_scale`(phase→OPD), `DryMassCalculator.drymass_scale`.
-- **데이터 시퀀스·타임스탬프 로딩**: **iivs-lib 0.2.0** 에서 온다.
-  > ⚠️ **갱신 지점**: 조상 문서는 이 부분을 **kaparoo**(`WindowedSequence`/
-  > `FileFolderSequence`)로 적었으나, 최근 결정은 **iivs-lib 0.2.0**. 원본에 나온
-  > 구체 클래스명(`PhaseBinFolder`/`PhaseBinList`, `TimestampsTxtFile`/
-  > `TimestampsFixedFPS` 등)은 **iivs-lib 0.2.0 API로 반드시 재확인**할 것.
+- **스케일·헤더**: `PhaseBinHeader`가 `pixel_size`(m)와 `height_scale`(m/rad)를
+  들고 있음 — **설치본에서 확인 완료**. `OPDConverter.opd_scale`(phase→OPD),
+  `DryMassCalculator.drymass_scale`은 아직 **미확인 추정**.
+- **데이터 시퀀스·타임스탬프 로딩**: **iivs-lib 0.2.0**(의존성 등록 완료).
+  조상 문서가 적은 kaparoo `WindowedSequence`/`FileFolderSequence`는 **폐기된 경로**.
+  > ⚠️ **타입 함정**: `PhaseFloatSequence`는 **본문 없는 마커**라 `DataSequence`
+  > 표면(`len`/`seq[i]`/순회/`get_item`/`get_meta`/`get_pair`)만 준다.
+  > `frame_shape`·`value_range()`·`header`/`get_header()`는 **구체 클래스**
+  > (`PhaseFileList`/`PhaseBinFolder`)에만 있다 — 파라미터를 마커로 넓게 받으면
+  > 스케일·통계·shape를 포기하게 된다. 상세는 [`TODO.md`](../TODO.md).
 
 ## 8. 액션 아이템 — `.gitignore` (미완)
 
@@ -128,8 +145,8 @@ ML 런타임/대용량 산출물을 **구조로 커밋하지 말고 gitignore**:
 
 ## 참고
 
-- 모듈별 상세 설계: [`optical-flow-design.md`](optical-flow-design.md),
-  [`filter-3d-design.md`](filter-3d-design.md).
+- 모듈별 상세 설계 문서는 제거됨(상단 disclaimer 참조) — 구현분은 코드·docstring,
+  미구현분은 [`TODO.md`](../TODO.md)가 정본.
 - 조상 문서(일부 낡음, repo 밖): `new-project-DESIGN.md`(cell-dynamics 전체 설계 —
   두 모드(DL nn.Module / lazy 노드 DAG), flow 처리 등 더 상세하나 일부 분기),
   `PROJECT_CONTEXT.md`(부트스트랩 핸드오프 — 사실관계 상당히 낡음).
