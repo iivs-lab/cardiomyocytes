@@ -57,6 +57,41 @@ def print_gpu_hardware() -> None:
     print("   No CUDA GPU detected (CPU mode)")
 
 
+def _conv_works_without_cudnn() -> bool:
+    """Whether a CUDA convolution succeeds once cuDNN is switched off.
+
+    Called only after a CUDA convolution has already failed: it separates "cuDNN
+    is the problem" from "CUDA itself is the problem", which need different fixes.
+    """
+    import torch
+
+    image = torch.zeros(1, 1, 3, 3, device="cuda")
+    box = torch.ones(1, 1, 2, 2, device="cuda")
+    torch.backends.cudnn.enabled = False
+    try:
+        torch.nn.functional.conv2d(image, box)
+        torch.cuda.synchronize()
+    except RuntimeError:
+        return False
+    finally:
+        torch.backends.cudnn.enabled = True
+    return True
+
+
+def _report_conv_fault() -> None:
+    """Explain a failed CUDA convolution and point at the matching fix."""
+    if not _conv_works_without_cudnn():
+        print("      Fails with cuDNN disabled too, so cuDNN is not the cause --")
+        print("      check the NVIDIA driver, the CUDA runtime, or the torch build.")
+        return
+
+    print("      Works with cuDNN disabled, so cuDNN itself is the cause. Usually a")
+    print("      foreign cuDNN shadowing the one torch bundles in torch/lib. On")
+    print("      Windows the OpenCV setup is the usual source -- preview and repair:")
+    print("        scripts/compute_env/setup-opencv-cuda.ps1 -DryRun")
+    print("        scripts/compute_env/setup-opencv-cuda.ps1     (as Administrator)")
+
+
 def check_pytorch() -> bool:
     try:
         import torch
@@ -84,6 +119,31 @@ def check_pytorch() -> bool:
         gpu_ok = bool(torch.allclose(gpu_out, cpu_out))
         print(f"   CUDA matmul matches CPU ... {'PASS' if gpu_ok else 'FAIL'}")
         ok = ok and gpu_ok
+
+    # CPU baseline: a 3x3 ramp convolved with a 2x2 box sums each 2x2 window --
+    # [[0,1,2],[3,4,5],[6,7,8]] -> [[0+1+3+4, 1+2+4+5], [3+4+6+7, 4+5+7+8]].
+    image = torch.arange(9, dtype=torch.float32).reshape(1, 1, 3, 3)
+    box = torch.ones(1, 1, 2, 2)
+    cpu_conv = torch.nn.functional.conv2d(image, box)[0, 0]
+    conv_ok = bool(torch.allclose(cpu_conv, torch.tensor([[8.0, 12.0], [20.0, 24.0]])))
+    print(f"   CPU conv2d matches expected ... {'PASS' if conv_ok else 'FAIL'}")
+    ok = ok and conv_ok
+
+    if cuda:
+        # Convolution is the only op checked here that goes through cuDNN --
+        # matmul and TorchVision's NMS do not -- so it is what catches a cuDNN
+        # that is broken or shadowed by a foreign build.
+        try:
+            gpu_conv = torch.nn.functional.conv2d(image.cuda(), box.cuda()).cpu()[0, 0]
+            conv_gpu_ok = bool(torch.allclose(gpu_conv, cpu_conv))
+            state = "PASS" if conv_gpu_ok else "FAIL"
+            print(f"   CUDA conv2d (cuDNN) matches CPU ... {state}")
+        except RuntimeError as exc:
+            conv_gpu_ok = False
+            print("   CUDA conv2d (cuDNN) matches CPU ... FAIL")
+            print(f"      {str(exc).splitlines()[0][:88]}")
+            _report_conv_fault()
+        ok = ok and conv_gpu_ok
 
     return ok
 
