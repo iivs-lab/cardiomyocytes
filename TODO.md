@@ -13,14 +13,18 @@ item to a CHANGELOG entry once it lands.
   sketches in [`docs/foundations.md`](docs/foundations.md) §2 and
   `new-project-DESIGN.md` §4.1 need updating to channel-first.
 
-- **Fix the dev machine's torch cuDNN (GPU `conv2d` fails).** On this Windows
-  box every torch GPU convolution raises `CUDNN_STATUS_SUBLIBRARY_VERSION_MISMATCH`
-  (works with `torch.backends.cudnn.enabled = False`). Likely cause: the cuDNN
-  DLLs `scripts/compute_env/setup-opencv-cuda.ps1` symlinks into the CUDA `bin`
-  shadow torch's bundled cuDNN. It is an environment issue, not a code bug — but
-  it blocks any torch GPU convolution and any future GPU DL / learned flow, so
-  the setup needs reconciling (keep the OpenCV cuDNN links from overriding
-  torch's, or align versions).
+- **Re-run `setup-opencv-cuda.ps1` once (elevated) on every dev machine.** The
+  torch-vs-OpenCV cuDNN clash is fixed at its source. The script used to symlink
+  *every* `cudnn*.dll` into the CUDA `bin` — a directory on `PATH` that torch
+  also searches — so torch (which bundles its own cuDNN 9.20 in `torch/lib`)
+  loaded a foreign 9.23 sub-library (`cudnn_engines_tensor_ir`) and every GPU
+  `conv2d` failed with `CUDNN_STATUS_SUBLIBRARY_VERSION_MISMATCH`. It now links
+  only the core cuDNN set and *removes* stale non-core links, so one elevated
+  re-run both repairs and future-proofs a machine (`-DryRun` previews it without
+  elevation). Verified on the `C:\Users\kaparoo` box — GPU `conv2d` OK, full
+  suite 94 passed (the CUDA SSIM test no longer skips). **The other dev machine
+  still needs the re-run** (or, minimally, deleting the
+  `cudnn_engines_tensor_ir64_9.dll` link).
 
 - **Extend `.gitignore` with ML runtime artifacts.** Add `data/`,
   `outputs/` (or `runs/`/`results/`), `checkpoints/` (or `models/`),
