@@ -3,7 +3,10 @@
 Tracked items that are not yet captured in code or tests. Promote an
 item to a CHANGELOG entry once it lands.
 
-## Open
+## Analysis — what to settle on the full dataset
+
+Experiments and policy rather than modules. These decide what the caches will
+hold, so they gate most of the implementation below.
 
 - **Find the configuration that best explains the data.** The project's current
   priority: sweep filtering (on/off, kernel shape, per-axis radius) against every
@@ -79,20 +82,9 @@ item to a CHANGELOG entry once it lands.
   is differentiable on float frames) or the ground-truth generator below over
   classical pseudo-labels, which cap the model at its teacher.
 
-- **Propagate the CHW tensor layout to the kinematic kernels.** The layout is
-  settled — CHW (`(2,H,W)`/`(N,2,H,W)`), rationale and channel-first kernel
-  sketches in [`docs/foundations.md`](docs/foundations.md) §2. The estimators and
-  `iivs_cardio/common/warp.py` already follow it; the unwritten kinematic kernels
-  must too. The ancestor `new-project-DESIGN.md` §4.1 is still channel-last —
-  read it with that correction in mind.
+## Implementation — modules to write
 
-- **Wire up the `optical_flow` pipeline.** Estimators, `common/warp.py` and
-  `optical_flow/evaluation.py` are done. Remaining: `data/` sequence IO,
-  `data/preprocessing/`, and a thin assembly script under `scripts/optical_flow/`.
-
-  Optimization left on the table: pipeline an estimator's input conversion,
-  `calc` and output over a `cv2.cuda.Stream` (today everything runs on the single
-  default stream).
+Roughly in dependency order: each one is easier once the previous has landed.
 
 - **Decide how much of `iivs-lib[torch]` to consume.** The extra enables
   `iivs.dhm.analysis.pytorch` (`phase_to_opd`, `calc_drymass`) and
@@ -201,6 +193,26 @@ item to a CHANGELOG entry once it lands.
 
   A training `Dataset` therefore reads the *cache*, never raw sequences, and its
   random access is then unrestricted.
+
+- **Wire up the `optical_flow` pipeline.** Estimators, `common/warp.py` and
+  `optical_flow/evaluation.py` are done. Remaining: `data/` sequence IO,
+  `data/preprocessing/`, and a thin assembly script under `scripts/optical_flow/`.
+
+  Optimization left on the table: pipeline an estimator's input conversion,
+  `calc` and output over a `cv2.cuda.Stream` (today everything runs on the single
+  default stream).
+
+- **Propagate the CHW tensor layout to the kinematic kernels.** The layout is
+  settled — CHW (`(2,H,W)`/`(N,2,H,W)`), rationale and channel-first kernel
+  sketches in [`docs/foundations.md`](docs/foundations.md) §2. The estimators and
+  `iivs_cardio/common/warp.py` already follow it; the unwritten kinematic kernels
+  must too. The ancestor `new-project-DESIGN.md` §4.1 is still channel-last —
+  read it with that correction in mind.
+
+## Evaluation — how a result earns trust
+
+Measurement the analysis above leans on. Each entry exists because a proxy metric
+has already misled this project at least once.
 
 - **Promote the identity baseline and forward-backward error into
   `evaluation.py`.** Both are prototyped in
