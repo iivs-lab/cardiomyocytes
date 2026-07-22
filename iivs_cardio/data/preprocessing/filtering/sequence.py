@@ -94,7 +94,7 @@ class FilteredSequence[M](DataSequence["Tensor", M]):
     @override
     def get_item(self, index: int) -> Tensor:
         """Return source frame `index` filtered against its neighbours."""
-        index = self._resolve(index)
+        index = self._normalize_index(index)
         radius = self.kernel.temporal_radius
 
         start = max(0, index - radius)
@@ -105,15 +105,7 @@ class FilteredSequence[M](DataSequence["Tensor", M]):
     @override
     def get_meta(self, index: int) -> M:
         """Return the source's metadata for `index`, which filtering leaves alone."""
-        return self._source.get_meta(self._resolve(index))
-
-    def _resolve(self, index: int) -> int:
-        """Normalize a possibly-negative index and bounds-check it."""
-        length = len(self)
-        if not -length <= index < length:
-            msg = f"index {index} out of range for {length} frames"
-            raise IndexError(msg)
-        return index % length
+        return self._source.get_meta(self._normalize_index(index))
 
     def _window(self, indices: range) -> Tensor:
         """Stack the source frames at `indices`, reading only what is not buffered."""

@@ -16,6 +16,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- `kaparoo-python` minimum raised to `0.11.1`, which adds
+  `DataSequence._normalize_index`. `FilteredSequence` calls it instead of
+  carrying its own copy, so a negative index now reports
+  `index -7 out of range for length 6` rather than `... for 6 frames`.
 - `backward_warp` / `BackwardWarp` sample at `grid + offset` instead of
   `grid - transform`, and the second parameter is renamed accordingly. A forward
   optical flow is now passed unchanged rather than negated at every call site,

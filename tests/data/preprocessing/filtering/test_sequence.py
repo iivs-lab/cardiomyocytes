@@ -87,11 +87,18 @@ def test_a_forward_pass_reads_each_source_frame_once():
 
 
 def test_negative_indices_count_from_the_end():
+    # Wrapping and bounds come from `DataSequence._normalize_index`; what this
+    # pins is that `get_item` and `get_meta` go through it. Skip the call and a
+    # negative index reaches the window arithmetic, where it silently yields an
+    # empty range rather than the frame counted from the end.
     filtered = FilteredSequence(_Frames(_frames(6)), MedianKernel((1, 1, 1)))
 
     assert torch.equal(filtered[-1], filtered[5])
-    with pytest.raises(IndexError, match="out of range"):
-        filtered[6]
+    assert filtered.get_meta(-1) == filtered.get_meta(5)
+
+    for outside in (6, -7):
+        with pytest.raises(IndexError, match="out of range"):
+            filtered[outside]
 
 
 def test_metadata_passes_through_untouched():

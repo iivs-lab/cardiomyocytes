@@ -214,7 +214,7 @@ requires-dist = [
     { name = "cupy-cuda13x", specifier = ">=14.1.1" },
     { name = "iivs-lib", extras = ["torch"], specifier = ">=0.2.0" },
     { name = "jaxtyping", specifier = ">=0.3.11" },
-    { name = "kaparoo-python", specifier = ">=0.11.0" },
+    { name = "kaparoo-python", specifier = ">=0.11.1" },
     { name = "numpy", specifier = ">=2" },
     { name = "opencv-contrib-python", marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
     { name = "opencv-contrib-python", marker = "sys_platform == 'linux'", url = "https://github.com/cudawarped/opencv-python-cuda-wheels/releases/download/4.13.0.90/opencv_contrib_python-4.13.0.90-cp37-abi3-linux_x86_64.whl" },
@@ -329,11 +329,11 @@ wheels = [
 
 [[package]]
 name = "kaparoo-python"
-version = "0.11.0"
+version = "0.11.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/6a/ba/0536428f330a33592d83755f586fc43feaa3c4cc58adaec09ecaccf95e27/kaparoo_python-0.11.0.tar.gz", hash = "sha256:0a33ff88f56e3c8311d5d6b8a52a7c0b79baeffbd0a036ac1a9a422d88136058", size = 104350, upload-time = "2026-07-15T15:42:55.623Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/08/8f/ec69d360401713329ec58451ff20f83a4cb7ddfd289b1fa6852e56824e2c/kaparoo_python-0.11.1.tar.gz", hash = "sha256:7a4afd0ecdaecbb63dde6b5864e50ce45b3b91d7d0258dc528fa992c60d2e43f", size = 104305, upload-time = "2026-07-22T17:36:26.273Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2c/ac/bda5eff019cc975aaa25404615cc40d47494e0c0a13ea65a64fe6fa4378e/kaparoo_python-0.11.0-py3-none-any.whl", hash = "sha256:942f71b6e6e53161f3937fccef744816226dba72df177510d3d8abbd840bf624", size = 99910, upload-time = "2026-07-15T15:42:54.282Z" },
+    { url = "https://files.pythonhosted.org/packages/02/3e/f41ade4a492fe3be0903d2ac5f1a4c43c5c1079426c494167a44b1ac79b8/kaparoo_python-0.11.1-py3-none-any.whl", hash = "sha256:8826aeb42d558f662af2f349de7a098dd7f4643dbe9376a456f736f8fb510636", size = 99810, upload-time = "2026-07-22T17:36:24.831Z" },
 ]
 
 [[package]]
