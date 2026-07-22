@@ -1,39 +1,20 @@
 from __future__ import annotations
 
-__all__ = ("FilteredSequence", "MedianParams")
+__all__ = ("FilteredSequence",)
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, override
 
 import torch
 from kaparoo.data.sequences import DataSequence
 
 from iivs_cardio.common.device import resolve_device
-from iivs_cardio.data.preprocessing.kernels import Kernel, MedianKernel
 
 if TYPE_CHECKING:
     import numpy as np
     from numpy.typing import NDArray
     from torch import Tensor
 
-    from iivs_cardio.data.preprocessing.kernels import KernelShape, Radius
-
-
-@dataclass(frozen=True, slots=True)
-class MedianParams:
-    """The arguments a `MedianKernel` is built from, as one value.
-
-    Separate from the kernel so a config file, a CLI, or the cache sidecar can
-    carry the settings without holding a live object -- and so what a later run
-    reconstructs is exactly what was recorded.
-    """
-
-    radius: Radius
-    shape: KernelShape = "ellipsoid"
-
-    def build(self) -> MedianKernel:
-        """Construct the kernel these describe."""
-        return MedianKernel(self.radius, shape=self.shape)
+    from iivs_cardio.data.preprocessing.filtering.kernel import Kernel, MedianParams
 
 
 class FilteredSequence[M](DataSequence["Tensor", M]):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
 from statistics import median
 from typing import TYPE_CHECKING
 
@@ -7,7 +8,7 @@ import numpy as np
 import pytest
 import torch
 
-from iivs_cardio.data.preprocessing.kernels import MedianKernel
+from iivs_cardio.data.preprocessing.filtering import MedianKernel, MedianParams
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -125,3 +126,24 @@ def test_median_matches_a_brute_force_pass_over_explicit_neighbours():
         assert torch.allclose(
             kernel.apply(window, index), _brute_median(frames, kernel, index)
         )
+
+
+# --------------------------------- params --------------------------------- #
+
+
+def test_params_build_the_kernel_they_describe():
+    kernel = MedianParams((2, 1, 0), shape="cuboid").build()
+
+    assert isinstance(kernel, MedianKernel)
+    assert kernel.radius == (2, 1, 0)
+    assert kernel.shape == "cuboid"  # not the default, so it came from the params
+
+
+def test_params_are_frozen_records():
+    # They are what the cache sidecar records; a mutated one would describe a
+    # cache that had been built with something else.
+    params = MedianParams((1, 1, 1))
+
+    assert params.shape == "ellipsoid"
+    with pytest.raises(FrozenInstanceError):
+        params.radius = (2, 2, 2)  # ty: ignore[invalid-assignment]

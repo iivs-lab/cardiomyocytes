@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
 from typing import override
 
 import numpy as np
@@ -9,8 +8,11 @@ import torch
 from kaparoo.data.sequences import DataSequence
 from numpy.typing import NDArray
 
-from iivs_cardio.data.preprocessing.filtering import FilteredSequence, MedianParams
-from iivs_cardio.data.preprocessing.kernels import MedianKernel
+from iivs_cardio.data.preprocessing.filtering import (
+    FilteredSequence,
+    MedianKernel,
+    MedianParams,
+)
 
 
 class _Frames(DataSequence[NDArray[np.float32], int]):
@@ -123,13 +125,3 @@ def test_from_params_builds_the_kernel_it_describes():
     assert built.kernel.shape == "cuboid"  # not the default, so it came from params
     for index in range(len(frames)):
         assert torch.equal(built[index], direct[index])
-
-
-def test_params_are_frozen_records():
-    # They are what the cache sidecar records; a mutated one would describe a
-    # cache that had been built with something else.
-    params = MedianParams((1, 1, 1))
-
-    assert params.shape == "ellipsoid"
-    with pytest.raises(FrozenInstanceError):
-        params.radius = (2, 2, 2)  # ty: ignore[invalid-assignment]

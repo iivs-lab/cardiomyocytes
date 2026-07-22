@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-__all__ = ("Kernel", "KernelShape", "MedianKernel", "Radius")
+__all__ = ("Kernel", "KernelShape", "MedianKernel", "MedianParams", "Radius")
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Literal, override
 
 import torch
@@ -79,6 +80,23 @@ class Kernel(ABC):
         if not 0 <= center < frames:
             msg = f"center {center} is not an index into a {frames}-frame window"
             raise ValueError(msg)
+
+
+@dataclass(frozen=True, slots=True)
+class MedianParams:
+    """The arguments a `MedianKernel` is built from, as one value.
+
+    Separate from the kernel so a config file, a CLI, or the cache sidecar can
+    carry the settings without holding a live object -- and so what a later run
+    reconstructs is exactly what was recorded.
+    """
+
+    radius: Radius
+    shape: KernelShape = "ellipsoid"
+
+    def build(self) -> MedianKernel:
+        """Construct the kernel these describe."""
+        return MedianKernel(self.radius, shape=self.shape)
 
 
 class MedianKernel(Kernel):
