@@ -101,35 +101,45 @@ Roughly in dependency order: each one is easier once the previous has landed.
   `NDArray[np.float32]`, so this layer owns the numpy → torch (+ device)
   boundary. Mind the marker-vs-concrete trap documented in `foundations.md` §7.
 
-- **Build `iivs_cardio/data/preprocessing/`.** A faithful prototype of both files
-  runs inside `scripts/optical_flow/benchmark_opencv.py`, ported from the legacy
-  `Python/calc_optflows.py` — harvest from there.
+- **`data/preprocessing/` has landed; a gaussian kernel has not.**
+  `filtering/` (`kernel.py` + `sequence.py`) and `normalization.py` are written,
+  tested, and driven from `scripts/optical_flow/`. What follows records what was
+  settled, so the reasons outlive the code that now encodes them.
 
-  > Quantitative claims from that script are **provisional**: they come from
+  > Quantitative claims from the benchmark are **provisional**: they come from
   > 20-frame excerpts, about one beat. Ranking flipped between raw and filtered
   > frames, so settle radii and parameters on a full dataset. The mechanical
   > facts below are exact.
 
-  `filtering.py` — 3D spatiotemporal filter (median / gaussian),
-  ellipsoid/cuboid footprint, per-axis radius, device via
-  `iivs_cardio/common/device.py`. Legacy semantics, verified against `scipy`:
-  ellipsoid = offsets with `(dx/rx)^2 + (dy/ry)^2 + (dz/rz)^2 <= 1` (33 taps at
-  radius 2 against a cuboid's 125); border **truncate** (out-of-range neighbours
-  dropped, not padded); and with an even number of valid samples the median
-  **averages the middle two**, so `torch.median` — which returns the lower —
-  cannot be used directly. Allow a zero radius to disable an axis; the legacy
-  could not express that.
+  `filtering/kernel.py` — 3D spatiotemporal median, ellipsoid/cuboid footprint,
+  per-axis radius. Legacy semantics, verified against `scipy`: ellipsoid = offsets
+  with `(dx/rx)^2 + (dy/ry)^2 + (dz/rz)^2 <= 1` (33 samples at radius 2 against a
+  cuboid's 125); border **truncate** (out-of-range neighbours dropped, not
+  padded); and with an even number of valid samples the median **averages the
+  middle two**, so `torch.median` — which returns the lower — cannot be used
+  directly. A zero radius disables an axis, which the legacy could not express.
+  Decided: torch only (no numba / scipy). **Still to write**: the gaussian
+  kernel, by per-axis `sigma` + `truncate`. It was drafted and withdrawn, so
+  `Kernel` currently has one subclass.
 
-  **Streaming only** — a `push` / `flush` delay line, with no random-access entry
-  point. The reason is correctness rather than I/O: a filtered frame depends on
-  its neighbours, so under random access "frame i" would silently depend on which
-  window asked for it, while a `Dataset` advertises independent samples. Keep the
-  window core a pure function of its window for testability, but do not ship a
-  random-access path. The delay line also bounds memory — the prototype holds the
-  whole padded volume at a measured 9.5 MB/frame, so ~1200 frames exhaust a 12 GB
-  GPU, where a delay line needs `2rz+1` frames whatever the length. Cost is linear
-  and flat at **3.01 ms/frame** on CUDA, 20x that on CPU. Decided: torch only on
-  both (no numba / scipy), gaussian by per-axis `sigma` + `truncate`.
+  **Reversed: `FilteredSequence` owns its source and is randomly accessible.**
+  The earlier note here banned random access, on the grounds that "frame i" would
+  depend on which window asked for it. That is a property of a delay line, which
+  cannot look back. Owning the source removes it — the window is always
+  re-readable, so `filtered[i]` is the reduction over `source[i-rz .. i+rz]` and
+  nothing else. Verified: a shuffled pass with repeats returns exactly what a
+  forward pass returned. Memory is bounded the same way a delay line would bound
+  it, at `2rz+1` frames, and measured flat from 100 to 2400 frames — the length
+  of a sequence does not enter.
+
+  Two costs come with it, both measured. A forward pass reads each source frame
+  **once**; random access misses the buffer and reads about `2rz+1` times as much
+  (5.7x at `rz=2`). And **one instance is not safe across threads** — concurrent
+  `get_item` calls evict each other's buffered frames and raise `KeyError`,
+  though never a wrong value. Worker *processes* each hold their own instance, so
+  a `DataLoader` is unaffected; a thread pool is not. Neither is a defect to fix
+  until something needs it: the contract is a sequential pass that builds a
+  cache, and a shuffled consumer should read the finished cache.
 
   **The temporal radius must scale with the frame rate.** Damage tracks the time
   the window spans, not its frame count, so the legacy's fixed `(2,2,2)` is a
@@ -140,14 +150,29 @@ Roughly in dependency order: each one is easier once the previous has landed.
   read the real interval from each sample's `timestamps.txt` — the fixture names
   only claim "~10 Hz" and "~20 Hz".
 
-  `normalization.py` — 4 modes, splitting "compute stats" from "apply", emitting
-  uint8. **`pairwise` cannot produce a single normalized frame list**: a frame is
-  scaled by the joint range of whichever pair it is in, so it appears twice with
-  two encodings — the API must be built around pairs (or windows) for the mode to
+  `normalization.py` — three modes on a pair-shaped API, emitting uint8.
+  **`pairwise` cannot produce a single normalized frame list**: a frame is scaled
+  by the joint range of whichever pair it is in, so it appears twice with two
+  encodings — the API must be built around pairs (or windows) for the mode to
   exist at all. `perframe` is the unsafe mode: rescaling each frame by its own
-  extremes breaks the brightness constancy every estimator assumes (`sequence` is
-  the legacy's `sample`). Applying stats is elementwise and local, so once they
-  exist every mode is safe under random access; only computing them needs a pass.
+  extremes breaks the brightness constancy every estimator assumes. The four
+  scopes collapsed to three modes: `injected` takes a range measured outside the
+  call, so sequence and dataset scope are the same code and the caller's choice.
+  Applying stats is elementwise and local, so once they exist every mode is safe
+  under random access; only computing them needs a pass.
+
+  It **rounds where the legacy truncated**, moving half the pixels by one level
+  of 256. That removes a systematic downward bias rather than adding noise, but
+  quality columns from before the switch are not comparable at the fifth decimal.
+
+  **`pairwise` forecloses the estimator's streaming path.** `push` retains the
+  *normalized* previous frame, and under `pairwise` that encoding is stale by the
+  time the next frame arrives — the two frames being compared end up on different
+  scales, which is the brightness-constancy break `perframe` is rejected for.
+  Measured: a frame's two encodings differ. So `pairwise` implies `calc`, and
+  only `injected` is both safe and compatible with `push`. That trade is worth
+  little at present — `push` measured 1.05x over `calc` on CUDA, because the
+  host-device conversion it saves is small next to the flow itself.
 
   **Store per-frame `(min, max)`; all four modes derive from it exactly** —
   pairwise is the elementwise min/max of two neighbours, which is literally what
@@ -194,13 +219,76 @@ Roughly in dependency order: each one is easier once the previous has landed.
   A training `Dataset` therefore reads the *cache*, never raw sequences, and its
   random access is then unrestricted.
 
-- **Wire up the `optical_flow` pipeline.** Estimators, `common/warp.py` and
-  `optical_flow/evaluation.py` are done. Remaining: `data/` sequence IO,
-  `data/preprocessing/`, and a thin assembly script under `scripts/optical_flow/`.
+  **The cache boundary is after filtering and before normalization**, in float32.
+  This is forced, not chosen: `pairwise` gives a frame two uint8 encodings, so
+  normalized frames cannot be stored at all without giving that mode up
+  permanently. Storing float32 filtered frames also makes the cached form and the
+  live `FilteredSequence` bit-identical, which is what lets them substitute for
+  each other.
+
+  That leaves three shapes a consumer may be handed — a raw bin folder, a
+  `FilteredSequence` over one, or a bin folder of cached filtered frames — and
+  they **do not share a type**. The bin folders yield `NDArray[float32]`;
+  `FilteredSequence` yields `Tensor`, because it is also where the numpy → torch
+  boundary happens to sit. `FrameNormalizer` takes tensors, so the two folder
+  shapes need that conversion made explicit rather than inherited by accident.
+
+- **Rewrite the benchmark as `scripts/optical_flow/benchmark_estimator.py`.**
+  Estimators, `common/warp.py`, `optical_flow/evaluation.py` and
+  `data/preprocessing/` are done; `benchmark_opencv.py` runs on them but scores a
+  single sample against a CPU-vs-CUDA verdict. The replacement sweeps every
+  sequence under a root, aggregating per sequence, which is the shape the
+  parameter search needs.
+
+  **Parallelise over sequences, not over frames.** Measured, batching buys
+  nothing anywhere in this pipeline: filtering a batch of frames instead of one
+  runs at 0.97-1.08x, because a single frame already saturates the device and
+  there is no per-call overhead to amortise; `calc_batch` is a Python loop
+  because OpenCV exposes no batched optical flow; and a `DataLoader`'s
+  `batch_size` would only loop `__getitem__` anyway, since neither
+  `FilteredSequence` nor `DataSequence` defines `__getitems__`. Sequences are
+  independent, of uneven length, and there are dozens — that is where the
+  parallelism is.
+
+  Constraints that shape the worker API, all verified:
+
+  - **No estimator survives a process boundary.** Every one fails to pickle on
+    its `cv2` object. Workers must be handed a recipe — params, device, paths —
+    and build their own. `FarnebackParams`, `MedianKernel` and `FrameNormalizer`
+    all pickle, but a normalizer holds mutable state and a `FilteredSequence`
+    carries both a warm buffer and a baked-in device, so neither should be sent
+    either.
+  - **A pool `initializer` is what makes a worker cheap**, building one estimator
+    per worker rather than per sequence, and giving each worker its own device.
+  - **Sort longest-first and dispatch dynamically.** Static length-balanced
+    subsets and `imap_unordered` over a longest-first order measured identically
+    (both 1.07x of a perfect split); the sort is one line where the split is a
+    bin-packing function, and dynamic dispatch also absorbs estimate error.
+    Unsorted costs 1.10x, longest-last 1.15x — so the sort earns its place, and
+    the partitioning does not.
+  - **Worker count follows the estimator's device**: cores for a CPU estimator,
+    where the gain is near-linear, but only as many as there are GPUs for a CUDA
+    one, which serialises on the device no matter how many processes queue on it.
+
+  Where the time actually goes, per frame pair: the flow dominates everything.
+  CPU Dual TV-L1 is ~150x the median filter and ~15x CPU Farneback; on CUDA the
+  ordering inverts against intuition, with `warp_consistency` costing ~10x a
+  Farneback `calc`. Optimising preprocessing is not where throughput is.
 
   Optimization left on the table: pipeline an estimator's input conversion,
   `calc` and output over a `cv2.cuda.Stream` (today everything runs on the single
-  default stream).
+  default stream). And evaluation, now that it outweighs the flow it scores.
+
+- **Decide whether `hydra` is worth its blocker.** A config-driven driver was
+  written (`conf/` plus a `hydra.main` entry point) and is committed unrunnable:
+  `hydra.main` builds an `argparse` parser with a non-string `help`, which
+  **Python 3.14 rejects outright**, so `hydra-core` 1.3.4 cannot start a job on
+  this interpreter. 1.4.0.dev6 fixes it, and under that version the config
+  composes, config groups select, and `_target_` with `_partial_` builds each
+  estimator with the script supplying `device` — which is also exactly the recipe
+  shape the workers above need. The choice is between pinning a dev release,
+  dropping to 3.13, and giving up `--multirun`; none of them is about this
+  script, which is why it is parked rather than decided.
 
 - **Propagate the CHW tensor layout to the kinematic kernels.** The layout is
   settled — CHW (`(2,H,W)`/`(N,2,H,W)`), rationale and channel-first kernel
@@ -215,10 +303,10 @@ Measurement the analysis above leans on. Each entry exists because a proxy metri
 has already misled this project at least once.
 
 - **Promote the identity baseline and forward-backward error into
-  `evaluation.py`.** Both are prototyped in
-  `scripts/optical_flow/benchmark_opencv.py`, whose docstring explains why they
-  are needed: with sub-pixel motion a zero flow already scores SSIM ~0.94, and
-  SSIM gain alone rewards a flow that fits noise. Neither metric is safe alone —
+  `evaluation.py`.** Both are prototyped in `benchmark_opencv.py`, which the
+  rewrite above will retire — move them before it goes. Its docstring explains
+  why they are needed: with sub-pixel motion a zero flow already scores SSIM
+  ~0.94, and SSIM gain alone rewards a flow that fits noise. Neither is safe —
   a zero flow earns no gain but is perfectly self-consistent — so the API should
   make reporting them together the easy path. FB error needs the backward flow,
   so it cannot reuse `warp_consistency`'s single-flow signature. Open: whether
