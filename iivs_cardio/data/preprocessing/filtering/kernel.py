@@ -144,8 +144,9 @@ class MedianKernel(Kernel):
         radius: half-extent per axis; `0` disables that axis. Left required
             because there is no safe default: `rz` counts frames but damage
             tracks the time a window spans, so it has to follow the frame rate
-            rather than a constant -- which is also why `(r_spatial,
-            r_temporal)` is usually the form to reach for over a bare `r`.
+            rather than a constant -- which is also why
+            `(r_spatial, r_temporal)` is usually the form to reach for over a
+            bare `r`.
         shape: `ellipsoid` weighs the axes against their radii together, taking
             33 offsets at radius `(2, 2, 2)`; `cuboid` takes the whole box, 125.
 

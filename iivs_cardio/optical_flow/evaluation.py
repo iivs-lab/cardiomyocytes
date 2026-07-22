@@ -85,13 +85,13 @@ def warp_consistency(
 ) -> dict[str, Tensor]:
     """Warp-consistency metrics of `flow`: warp `frame2` back, score it on `frame1`.
 
-    The standard proxy when there is no ground-truth flow. Returns `{"ssim",
-    "psnr", "mse", "mae"}` on the frames' device; a perfect match gives mse/mae 0,
-    ssim 1, psnr inf.
+    The standard proxy when there is no ground-truth flow. Returns
+    `{"ssim", "psnr", "mse", "mae"}` on the frames' device; a perfect match
+    gives mse/mae 0, ssim 1, psnr inf.
 
-    **Direction.** `flow` is the forward flow `frame1 -> frame2`, so it is defined
-    on `frame1`'s grid: the material point at `x` in `frame1` sits at `x +
-    flow(x)` in `frame2`. Sampling `frame2` there reconstructs `frame1`
+    **Direction.** `flow` is the forward flow `frame1 -> frame2`, so it is
+    defined on `frame1`'s grid: the material point at `x` in `frame1` sits at
+    `x + flow(x)` in `frame2`. Sampling `frame2` there reconstructs `frame1`
     **exactly** -- the output grid *is* the grid the flow is defined on, so no
     inverse is needed. Going the other way, reconstructing `frame2` from
     `frame1`, requires inverting the map, and `x - flow(x)` only approximates it,
