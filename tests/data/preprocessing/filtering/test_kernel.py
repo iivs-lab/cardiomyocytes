@@ -85,10 +85,33 @@ def test_the_three_forms_agree_where_they_describe_one_kernel():
 
 
 def test_a_radius_of_no_recognised_form_is_rejected():
-    with pytest.raises(
-        ValueError, match=r"expected r, \(r_xy, r_z\), or \(rx, ry, rz\)"
-    ):
+    with pytest.raises(ValueError, match=r"expected int r"):
         MedianKernel((1, 1, 1, 1))  # ty: ignore[invalid-argument-type]
+
+
+@pytest.mark.parametrize(
+    "radius",
+    (
+        pytest.param(2.0, id="scalar-float"),
+        pytest.param((2.0, 5), id="float-in-a-pair"),
+        pytest.param((2, 2, 5.0), id="float-in-a-triple"),
+        pytest.param(("2", "5"), id="digits-as-strings"),
+        pytest.param((None, 1), id="none"),
+    ),
+)
+def test_a_radius_holding_a_non_int_is_rejected(radius):
+    # A config file reaches here having been through YAML or JSON, where `2.0`
+    # and a quoted `"2"` are easy to write. Unchecked, a float gets as far as
+    # `range()` in `_build_offsets` and raises there, naming neither the radius
+    # nor the caller's mistake.
+    with pytest.raises(ValueError, match="invalid radius"):
+        MedianKernel(radius)  # ty: ignore[invalid-argument-type]
+
+
+def test_a_sequence_is_accepted_however_a_config_parser_spelled_it():
+    # YAML and JSON have no tuple, so a radius arrives as a list.
+    assert MedianKernel([2, 5]).radius == (2, 2, 5)
+    assert MedianKernel([3, 2, 1]).radius == (3, 2, 1)
 
 
 def test_a_negative_scalar_is_caught_after_expansion():

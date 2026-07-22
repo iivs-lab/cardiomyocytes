@@ -38,26 +38,34 @@ def _normalize_radius(radius: RadiusLike) -> RadiusType:
     directly, where `(2, 2, 5)` leaves a reader checking whether the repetition
     was meant.
 
+    Each element is matched as an `int`, not merely counted. A radius that
+    reaches here from a config file has been through YAML or JSON, where `2` and
+    `2.0` look alike and a quoted `"2"` is easy to write; unchecked, those get
+    as far as `range()` inside a kernel and fail on something that never names
+    the radius.
+
     Args:
         radius: `r` for every axis, `(r_spatial, r_temporal)` to set the two
-            in-plane axes together, or an explicit `(rx, ry, rz)`.
+            in-plane axes together, or an explicit `(rx, ry, rz)`. Any sequence
+            will do, so the lists a config parser produces are accepted.
 
     Returns:
         The half-extent per axis, in `(rx, ry, rz)` order.
 
     Raises:
-        ValueError: If `radius` is none of those three forms.
+        ValueError: If `radius` is none of those three forms, or holds anything
+            that is not an `int`.
     """
     match radius:
         case int():
             return radius, radius, radius
-        case (spatial, temporal):
+        case (int() as spatial, int() as temporal):
             return spatial, spatial, temporal
-        case (rx, ry, rz):
+        case (int() as rx, int() as ry, int() as rz):
             return rx, ry, rz
-        case _:
-            msg = f"invalid radius {radius!r}: expected r, (r_xy, r_z), or (rx, ry, rz)"
-            raise ValueError(msg)
+
+    msg = f"invalid radius {radius!r}: expected int r, (r_xy, r_z), or (rx, ry, rz)"
+    raise ValueError(msg)
 
 
 class Kernel(ABC):
