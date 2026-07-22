@@ -141,55 +141,6 @@ class MedianParams:
 _CUDA_TOPK_TAPS = range(33, 65)
 
 
-def _lower_half(gathered: Tensor) -> Tensor:
-    """The smallest `K // 2 + 1` samples per pixel, ascending, NaNs sorting last.
-
-    As much of the order as a median can reach: at most `K` samples are valid,
-    so neither central rank lies past `K // 2`.
-    """
-    k = gathered.shape[0] // 2 + 1
-
-    return gathered.topk(k, dim=0, largest=False, sorted=True).values
-
-
-def _middle_two(ordered: Tensor, gathered: Tensor) -> Tensor:
-    """Average each pixel's two central valid samples.
-
-    One element for an odd count and the middle two for an even one -- the
-    latter being what `torch.median`, returning the lower, cannot give.
-
-    Args:
-        ordered: `gathered` sorted ascending along axis 0, or any prefix of that
-            order reaching rank `K // 2`.
-        gathered: the same samples unsorted, read only for how many are valid.
-    """
-    valid = (~gathered.isnan()).sum(dim=0)  # >= 1: the centre offset never drops
-    pair = ordered.gather(0, torch.stack(((valid - 1) // 2, valid // 2)))
-
-    return (pair[0] + pair[1]) / 2
-
-
-def _median_cpu(gathered: Tensor) -> Tensor:
-    """Reduce `gathered` by sorting only as far as the median can reach.
-
-    `topk` beat a full sort at every tap count measured here, so this route
-    takes no decision.
-    """
-    return _middle_two(_lower_half(gathered), gathered)
-
-
-def _median_cuda(gathered: Tensor) -> Tensor:
-    """Reduce `gathered` by whichever of `topk` and `sort` the tap count favours.
-
-    Unlike the CPU route this one has to choose, and `_CUDA_TOPK_TAPS` is the
-    range where the choice goes the other way.
-    """
-    if gathered.shape[0] in _CUDA_TOPK_TAPS:
-        return _middle_two(_lower_half(gathered), gathered)
-
-    return _middle_two(gathered.sort(dim=0).values, gathered)
-
-
 class MedianKernel(Kernel):
     """A 3D median over a discrete neighbourhood, robust to isolated spikes.
 
@@ -256,14 +207,6 @@ class MedianKernel(Kernel):
             ValueError: If `target` is not an index into `window`.
         """
         self._validate_target(window, target)
-        gathered = self._gather(window, target)
-
-        median = _median_cuda if gathered.is_cuda else _median_cpu
-
-        return median(gathered)
-
-    def _gather(self, window: Tensor, target: int) -> Tensor:
-        """Stack every in-range neighbour of frame `target` along a new axis 0."""
         frames, height, width = window.shape
         rx, ry = self.spatial_radius
 
@@ -271,7 +214,7 @@ class MedianKernel(Kernel):
         # instead of contributing a padded value.
         padded = pad(window, (rx, rx, ry, ry), value=float("nan"))
 
-        return torch.stack(
+        gathered = torch.stack(
             [
                 padded[
                     target + dz, ry + dy : ry + dy + height, rx + dx : rx + dx + width
@@ -280,3 +223,23 @@ class MedianKernel(Kernel):
                 if 0 <= target + dz < frames
             ]
         )
+
+        # Only the two central order statistics are read, so the lower half is
+        # enough: at most `taps` samples are valid, and neither rank reaches
+        # past `taps // 2`. `topk` supplies it more cheaply than a full sort
+        # except on CUDA outside `_CUDA_TOPK_TAPS`.
+        taps = gathered.shape[0]
+        if gathered.is_cuda and taps not in _CUDA_TOPK_TAPS:
+            ordered = gathered.sort(dim=0).values
+        else:
+            ordered = gathered.topk(
+                taps // 2 + 1, dim=0, largest=False, sorted=True
+            ).values
+
+        # NaNs order last either way, so the valid samples occupy `[0, valid)`
+        # and the median is one element for an odd count, the middle two to
+        # average for an even one -- which is why `torch.median` cannot serve.
+        valid = (~gathered.isnan()).sum(dim=0)  # >= 1: the centre never drops
+        pair = ordered.gather(0, torch.stack(((valid - 1) // 2, valid // 2)))
+
+        return (pair[0] + pair[1]) / 2
