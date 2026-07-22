@@ -134,11 +134,11 @@ class MedianParams:
     shape: KernelShape = "ellipsoid"
 
 
-# Tap counts at which CUDA's `topk` beats its `sort`. Below the window `sort`
+# Sample counts at which CUDA's `topk` beats its `sort`. Below the range `sort`
 # still has its shared-memory fast path, which it leaves above 32 elements at a
-# 3x step; above the window `topk`'s own `k` has grown too large to pay off.
+# 3x step; above the range `topk`'s own `k` has grown too large to pay off.
 # Measured on one GPU -- re-measure before trusting the bounds on another.
-_CUDA_TOPK_TAPS = range(33, 65)
+_CUDA_TOPK_SAMPLES = range(33, 65)
 
 
 class MedianKernel(Kernel):
@@ -225,15 +225,15 @@ class MedianKernel(Kernel):
         )
 
         # Only the two central order statistics are read, so the lower half is
-        # enough: at most `taps` samples are valid, and neither rank reaches
-        # past `taps // 2`. `topk` supplies it more cheaply than a full sort
-        # except on CUDA outside `_CUDA_TOPK_TAPS`.
-        taps = gathered.shape[0]
-        if gathered.is_cuda and taps not in _CUDA_TOPK_TAPS:
+        # enough: however many samples are valid, neither rank reaches past
+        # `samples // 2`. `topk` supplies it more cheaply than a full sort
+        # except on CUDA outside `_CUDA_TOPK_SAMPLES`.
+        samples = gathered.shape[0]
+        if gathered.is_cuda and samples not in _CUDA_TOPK_SAMPLES:
             ordered = gathered.sort(dim=0).values
         else:
             ordered = gathered.topk(
-                taps // 2 + 1, dim=0, largest=False, sorted=True
+                samples // 2 + 1, dim=0, largest=False, sorted=True
             ).values
 
         # NaNs order last either way, so the valid samples occupy `[0, valid)`

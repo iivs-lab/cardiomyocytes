@@ -236,14 +236,14 @@ def test_a_spike_is_replaced_by_its_neighbourhood():
 @pytest.mark.parametrize(
     ("radius", "shape"),
     (
-        pytest.param((1, 1, 1), "ellipsoid", id="7-taps-below-the-window"),
-        pytest.param((2, 2, 2), "ellipsoid", id="33-taps-inside-the-window"),
-        pytest.param((2, 2, 2), "cuboid", id="125-taps-above-the-window"),
+        pytest.param((1, 1, 1), "ellipsoid", id="7-samples-below-the-range"),
+        pytest.param((2, 2, 2), "ellipsoid", id="33-samples-inside-the-range"),
+        pytest.param((2, 2, 2), "cuboid", id="125-samples-above-the-range"),
     ),
 )
 def test_cuda_returns_what_the_cpu_returns(radius, shape):
     # The device picks how much of the order to materialize, purely for speed,
-    # so the answer must not move with it. The radii straddle the tap window
+    # so the answer must not move with it. The radii straddle the sample count
     # where that choice flips.
     window = torch.rand(5, 32, 32, generator=torch.Generator().manual_seed(0))
     kernel = MedianKernel(radius, shape=shape)
