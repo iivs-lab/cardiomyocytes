@@ -144,7 +144,7 @@ Roughly in dependency order: each one is easier once the previous has landed.
   uint8. **`pairwise` cannot produce a single normalized frame list**: a frame is
   scaled by the joint range of whichever pair it is in, so it appears twice with
   two encodings — the API must be built around pairs (or windows) for the mode to
-  exist at all. `per_frame` is the unsafe mode: rescaling each frame by its own
+  exist at all. `perframe` is the unsafe mode: rescaling each frame by its own
   extremes breaks the brightness constancy every estimator assumes (`sequence` is
   the legacy's `sample`). Applying stats is elementwise and local, so once they
   exist every mode is safe under random access; only computing them needs a pass.
