@@ -254,6 +254,24 @@ def test_cuda_returns_what_the_cpu_returns(radius, shape):
     assert torch.equal(on_cpu, on_cuda.cpu())
 
 
+def test_an_odd_count_returns_the_sample_itself_bit_for_bit():
+    # An odd count averages each sample with itself, so this pins that the
+    # averaging is exact and not merely close -- `torch.equal`, not `allclose`,
+    # over values that have no exact halves.
+    awkward = torch.rand(1, 64, 64, generator=torch.Generator().manual_seed(0))
+
+    # One sample per pixel: the centre, alone.
+    assert torch.equal(MedianKernel(0).apply(awkward, 0), awkward[0])
+
+    # Three per pixel, spanning eight orders of magnitude so a lost bit shows.
+    # The centre row sees all three, and their median by value is the first
+    # row's `0.1` -- sorted they run 1e-8, 0.1, 12345.679.
+    column = torch.tensor([[[0.1], [12345.679], [1e-8]]])  # (T=1, H=3, W=1)
+    filtered = MedianKernel((0, 1, 0)).apply(column, 0)
+
+    assert torch.equal(filtered[1], column[0, 0])
+
+
 def test_median_matches_a_brute_force_pass_over_explicit_neighbours():
     # Everything at once -- offset selection, truncation at all six borders, and
     # even-count averaging -- against a computation sharing no code with it.

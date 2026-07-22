@@ -212,8 +212,6 @@ class MedianKernel(Kernel):
         frames, height, width = window.shape
         rx, ry = self.spatial_radius
 
-        # NaN marks "no sample here", so an edge offset drops out of the median
-        # instead of contributing a padded value.
         padded = pad(window, (rx, rx, ry, ry), value=float("nan"))
 
         gathered = torch.stack(
@@ -241,6 +239,9 @@ class MedianKernel(Kernel):
         # NaNs order last either way, so the valid samples occupy `[0, valid)`
         # and the median is one element for an odd count, the middle two to
         # average for an even one -- which is why `torch.median` cannot serve.
+        # An odd count needs no case of its own: the two ranks coincide, and
+        # halving the sample added to itself only moves the exponent, so it
+        # comes back bit-for-bit.
         valid = (~gathered.isnan()).sum(dim=0)  # >= 1: the centre never drops
         pair = ordered.gather(0, torch.stack(((valid - 1) // 2, valid // 2)))
 
