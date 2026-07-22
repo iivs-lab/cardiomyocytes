@@ -5,8 +5,8 @@ __all__ = (
     "KernelShape",
     "MedianKernel",
     "MedianParams",
-    "Radius",
     "RadiusLike",
+    "RadiusType",
 )
 
 from abc import ABC, abstractmethod
@@ -22,14 +22,14 @@ from torch.nn.functional import pad
 KernelShape = Literal["ellipsoid", "cuboid"]
 
 # The stored form is always the triple; `RadiusLike` is what a caller may write.
-Radius = tuple[int, int, int]
-RadiusLike = int | tuple[int, int] | Radius
+RadiusType = tuple[int, int, int]
+RadiusLike = int | tuple[int, int] | RadiusType
 
 FrameType = Float32[Tensor, "H W"]
 WindowType = Float32[Tensor, "T H W"]
 
 
-def _normalize_radius(radius: RadiusLike) -> Radius:
+def _normalize_radius(radius: RadiusLike) -> RadiusType:
     """Expand `radius` to the `(rx, ry, rz)` every kernel stores.
 
     The two-value form exists because the in-plane axes are almost always equal
@@ -87,32 +87,18 @@ class Kernel(ABC):
     """
 
     def __init__(self, radius: RadiusLike) -> None:
-        radii = _normalize_radius(radius)
-        if min(radii) < 0:
-            msg = f"negative radius {radii}: each axis needs 0 or more (0 disables it)"
+        radius = _normalize_radius(radius)
+        if any(r < 0 for r in radius):
+            msg = f"negative radius {radius}: each axis needs 0 or more (0 disables it)"
             raise ValueError(msg)
-
-        self.radius = radii
+        self.radius = radius
 
     @property
     def spatial_radius(self) -> tuple[int, int]:
-        """The in-plane half-extent, `(rx, ry)`.
-
-        A kernel pads for these itself, so they never reach `FilteredSequence`
-        -- which is the asymmetry with `temporal_radius`, not an oversight.
-        """
-        rx, ry, _ = self.radius
-        return rx, ry
+        return self.radius[:2]
 
     @property
     def temporal_radius(self) -> int:
-        """How many frames either side of the centre a window must carry.
-
-        The time-axis half-extent, in frames -- `rz` here, but a subclass
-        deriving its footprint reports whatever its own reduction needs.
-        `FilteredSequence` reads this alone to size a window, which is why it
-        is the one axis the base class promises.
-        """
         return self.radius[2]
 
     @abstractmethod
@@ -143,37 +129,8 @@ class Kernel(ABC):
 
 @dataclass(frozen=True, slots=True)
 class MedianParams:
-    """The arguments a `MedianKernel` is built from, as one value.
-
-    Separate from the kernel so a config file, a CLI, or the cache sidecar can
-    carry the settings without holding a live object -- and so what a later run
-    reconstructs is exactly what was recorded.
-
-    `radius` is normalized to the `(rx, ry, rz)` triple on construction, so two
-    records describing one kernel compare equal however each was written. That
-    matters here and not on the kernel: this is the value a cache is looked up
-    by, and `MedianParams(2) != MedianParams((2, 2, 2))` would miss a cache the
-    same settings had already built. Whether the axes make a usable kernel is
-    still the kernel's to say, and is raised by `build`.
-
-    Attributes:
-        radius: the normalized `(rx, ry, rz)`, whichever form was passed.
-        shape: the footprint the offsets are drawn from.
-    """
-
     radius: RadiusLike
     shape: KernelShape = "ellipsoid"
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "radius", _normalize_radius(self.radius))
-
-    def build(self) -> MedianKernel:
-        """Construct the kernel these describe.
-
-        Raises:
-            ValueError: If any axis of `radius` is negative.
-        """
-        return MedianKernel(self.radius, shape=self.shape)
 
 
 class MedianKernel(Kernel):
@@ -202,11 +159,11 @@ class MedianKernel(Kernel):
         self._offsets = self._build_offsets()
 
     @property
-    def offsets(self) -> tuple[Radius, ...]:
+    def offsets(self) -> tuple[RadiusType, ...]:
         """The `(dx, dy, dz)` offsets sampled at each pixel, the centre included."""
         return self._offsets
 
-    def _build_offsets(self) -> tuple[Radius, ...]:
+    def _build_offsets(self) -> tuple[RadiusType, ...]:
         """Enumerate the offsets `shape` admits, in scan order.
 
         An axis with radius `0` contributes only `0`, disabling it. `ellipsoid`

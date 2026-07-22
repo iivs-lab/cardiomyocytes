@@ -4,8 +4,8 @@ __all__ = (
     "KernelShape",
     "MedianKernel",
     "MedianParams",
-    "Radius",
     "RadiusLike",
+    "RadiusType",
 )
 
 from iivs_cardio.data.preprocessing.filtering.kernel import (
@@ -13,7 +13,7 @@ from iivs_cardio.data.preprocessing.filtering.kernel import (
     KernelShape,
     MedianKernel,
     MedianParams,
-    Radius,
     RadiusLike,
+    RadiusType,
 )
 from iivs_cardio.data.preprocessing.filtering.sequence import FilteredSequence

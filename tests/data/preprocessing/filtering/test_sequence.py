@@ -125,3 +125,12 @@ def test_from_params_builds_the_kernel_it_describes():
     assert built.kernel.shape == "cuboid"  # not the default, so it came from params
     for index in range(len(frames)):
         assert torch.equal(built[index], direct[index])
+
+
+def test_from_params_passes_a_short_radius_through_to_the_kernel():
+    # The record holds the radius verbatim, so this is the only step that
+    # expands it -- and the one a config-driven caller depends on.
+    built = FilteredSequence.from_params(_Frames(_frames(4)), MedianParams((1, 0)))
+
+    assert built.kernel.radius == (1, 1, 0)
+    assert built.kernel.temporal_radius == 0

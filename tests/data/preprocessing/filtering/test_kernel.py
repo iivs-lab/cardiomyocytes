@@ -185,33 +185,15 @@ def test_median_matches_a_brute_force_pass_over_explicit_neighbours():
 # --------------------------------- params --------------------------------- #
 
 
-def test_params_build_the_kernel_they_describe():
-    kernel = MedianParams((2, 1, 0), shape="cuboid").build()
+def test_params_hold_what_they_were_given():
+    # A plain record: it neither expands the radius nor checks it, so a config
+    # round-trips through it unchanged and the kernel stays the one place that
+    # interprets a radius. Whatever builds a kernel from these does the rest.
+    assert MedianParams(2).radius == 2
+    assert MedianParams((2, 5)).radius == (2, 5)
+    assert MedianParams((1, -1, 1)).radius == (1, -1, 1)  # invalid, and still held
 
-    assert isinstance(kernel, MedianKernel)
-    assert kernel.radius == (2, 1, 0)
-    assert kernel.shape == "cuboid"  # not the default, so it came from the params
-
-
-def test_params_normalize_the_radius_they_were_given():
-    # A cache is looked up by this value, so the same settings written three
-    # ways must be one record -- otherwise a hit is missed and the filtered
-    # sequence is rebuilt from scratch.
-    assert MedianParams(2).radius == (2, 2, 2)
-    assert MedianParams((2, 5)).radius == (2, 2, 5)
-
-    assert MedianParams(2) == MedianParams((2, 2)) == MedianParams((2, 2, 2))
-    assert len({MedianParams(2), MedianParams((2, 2, 2))}) == 1
-
-
-def test_params_leave_a_negative_radius_for_the_kernel_to_reject():
-    # Normalizing is not validating: the record still round-trips, and the
-    # complaint arrives from the one place that owns the rule.
-    params = MedianParams((1, -1))
-
-    assert params.radius == (1, 1, -1)
-    with pytest.raises(ValueError, match="negative radius"):
-        params.build()
+    assert MedianParams((1, 1, 1)).shape == "ellipsoid"  # the only default
 
 
 def test_params_are_frozen_records():

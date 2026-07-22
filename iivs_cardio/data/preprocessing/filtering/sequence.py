@@ -8,6 +8,7 @@ import torch
 from kaparoo.data.sequences import DataSequence
 
 from iivs_cardio.common.device import resolve_device
+from iivs_cardio.data.preprocessing.filtering.kernel import MedianKernel
 
 if TYPE_CHECKING:
     import numpy as np
@@ -75,7 +76,13 @@ class FilteredSequence[M](DataSequence["Tensor", M]):
             params: which kernel to build, and with what.
             device: where filtering runs and the returned tensors live.
         """
-        return cls(source, params.build(), device=device)
+        # Temporary: constructing the kernel here hard-codes the one params
+        # type there is. `hydra` is the intended owner of this step, and takes
+        # it over via `_target_`, which is why nothing more general is built
+        # in the meantime.
+        kernel = MedianKernel(params.radius, shape=params.shape)
+
+        return cls(source, kernel, device=device)
 
     @property
     def source(self) -> DataSequence[NDArray[np.float32], M]:
