@@ -164,6 +164,31 @@ def test_ellipsoid_samples_fewer_offsets_than_the_cuboid_box():
     assert len(MedianKernel((2, 2, 2), shape="cuboid").offsets) == 125
 
 
+def test_cuboid_takes_the_whole_box_in_scan_order():
+    # `cuboid` applies no predicate at all. Spelled out with explicit loops
+    # rather than the tool the source uses, so the two cannot agree by sharing
+    # a mistake.
+    expected = [
+        (dx, dy, dz)
+        for dx in range(-2, 3)
+        for dy in range(-1, 2)
+        for dz in range(-3, 4)
+    ]
+
+    assert len(expected) == 5 * 3 * 7
+    assert MedianKernel((2, 1, 3), shape="cuboid").offsets == tuple(expected)
+
+
+def test_the_ellipsoid_is_a_strict_subset_of_its_box_in_the_same_order():
+    # Selecting offsets must not reorder them: `offsets` documents scan order.
+    box = MedianKernel((3, 2, 4), shape="cuboid").offsets
+    ellipsoid = MedianKernel((3, 2, 4)).offsets
+    kept = set(ellipsoid)
+
+    assert kept < set(box)
+    assert list(ellipsoid) == [offset for offset in box if offset in kept]
+
+
 def test_a_zero_radius_disables_that_axis():
     # Legacy could not express this -- it divides by each radius unguarded.
     spatial = MedianKernel((1, 1, 0))

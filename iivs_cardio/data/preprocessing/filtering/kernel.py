@@ -11,6 +11,7 @@ __all__ = (
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from itertools import product
 from typing import Literal, override
 
 import torch
@@ -171,17 +172,16 @@ class MedianKernel(Kernel):
         keeps those satisfying `(dx/rx)^2 + (dy/ry)^2 + (dz/rz)^2 <= 1`.
         """
         rx, ry, rz = self.radius
+        box = product(range(-rx, rx + 1), range(-ry, ry + 1), range(-rz, rz + 1))
 
-        offsets = []
-        for dx in range(-rx, rx + 1):
-            for dy in range(-ry, ry + 1):
-                for dz in range(-rz, rz + 1):
-                    axes = zip((dx, dy, dz), self.radius, strict=True)
-                    inside = sum((d / r) ** 2 for d, r in axes if r) <= 1.0
-                    if self.shape == "cuboid" or inside:
-                        offsets.append((dx, dy, dz))
+        if self.shape == "cuboid":
+            return tuple(box)
 
-        return tuple(offsets)
+        def inside(offset: RadiusType) -> bool:
+            axes = zip(offset, self.radius, strict=True)
+            return sum((d / r) ** 2 for d, r in axes if r) <= 1.0
+
+        return tuple(filter(inside, box))
 
     @jaxtyped(typechecker=beartype)
     @override
