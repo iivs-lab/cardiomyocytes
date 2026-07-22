@@ -1,6 +1,13 @@
 from __future__ import annotations
 
-__all__ = ("Kernel", "KernelShape", "MedianKernel", "MedianParams", "Radius")
+__all__ = (
+    "Kernel",
+    "KernelShape",
+    "MedianKernel",
+    "MedianParams",
+    "Radius",
+    "RadiusLike",
+)
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -14,10 +21,46 @@ from torch.nn.functional import pad
 
 KernelShape = Literal["ellipsoid", "cuboid"]
 
+# The stored form is always the triple; `RadiusLike` is what a caller may write.
 Radius = tuple[int, int, int]
+RadiusLike = int | tuple[int, int] | Radius
 
 FrameType = Float32[Tensor, "H W"]
 WindowType = Float32[Tensor, "T H W"]
+
+
+def _normalize_radius(radius: RadiusLike) -> Radius:
+    """Expand `radius` to the `(rx, ry, rz)` every kernel stores.
+
+    The two-value form exists because the in-plane axes are almost always equal
+    while `rz` is not free to follow them: it counts frames, so it tracks the
+    frame rate rather than the spatial extent. Writing `(2, 5)` says that
+    directly, where `(2, 2, 5)` leaves a reader checking whether the repetition
+    was meant.
+
+    Args:
+        radius: `r` for every axis, `(r_spatial, r_temporal)` to set the two
+            in-plane axes together, or an explicit `(rx, ry, rz)`.
+
+    Returns:
+        The half-extent per axis, in `(rx, ry, rz)` order.
+
+    Raises:
+        ValueError: If `radius` is none of those three forms.
+    """
+    match radius:
+        case int():
+            return radius, radius, radius
+        case (spatial, temporal):
+            return spatial, spatial, temporal
+        case (rx, ry, rz):
+            return rx, ry, rz
+        case _:
+            msg = (
+                f"invalid radius {radius!r}: expected r, (r_spatial, r_temporal), "
+                "or (rx, ry, rz)"
+            )
+            raise ValueError(msg)
 
 
 class Kernel(ABC):
@@ -36,20 +79,36 @@ class Kernel(ABC):
     buffering, and the window arithmetic untouched.
 
     Args:
-        radius: `(rx, ry, rz)` half-extent per axis, so an axis reaches `2r + 1`
-            samples wide and `0` disables it. Subclasses may derive it rather
-            than take it directly.
+        radius: half-extent per axis, so an axis spans `2r + 1` samples and `0`
+            disables it. Written as `r`, `(r_spatial, r_temporal)`, or an
+            explicit `(rx, ry, rz)`; stored normalized to the triple. Subclasses
+            may derive it rather than take it directly.
 
     Raises:
-        ValueError: If any radius is negative.
+        ValueError: If `radius` is not one of those forms, or any axis is
+            negative.
     """
 
-    def __init__(self, radius: Radius) -> None:
-        if min(radius) < 0:
-            msg = f"negative radius {radius}: each axis needs 0 or more (0 disables it)"
+    def __init__(self, radius: RadiusLike) -> None:
+        normalized = _normalize_radius(radius)
+        if min(normalized) < 0:
+            msg = (
+                f"negative radius {normalized}: each axis needs 0 or more "
+                "(0 disables it)"
+            )
             raise ValueError(msg)
 
-        self.radius = radius
+        self.radius = normalized
+
+    @property
+    def spatial_radius(self) -> tuple[int, int]:
+        """The in-plane half-extent, `(rx, ry)`.
+
+        A kernel pads for these itself, so they never reach `FilteredSequence`
+        -- which is the asymmetry with `temporal_radius`, not an oversight.
+        """
+        rx, ry, _ = self.radius
+        return rx, ry
 
     @property
     def temporal_radius(self) -> int:
@@ -57,8 +116,8 @@ class Kernel(ABC):
 
         The time-axis half-extent, in frames -- `rz` here, but a subclass
         deriving its footprint reports whatever its own reduction needs.
-        `FilteredSequence` reads this alone to size a window: the spatial radii
-        never leave `apply`, which pads for them itself.
+        `FilteredSequence` reads this alone to size a window, which is why it
+        is the one axis the base class promises.
         """
         return self.radius[2]
 
@@ -95,13 +154,31 @@ class MedianParams:
     Separate from the kernel so a config file, a CLI, or the cache sidecar can
     carry the settings without holding a live object -- and so what a later run
     reconstructs is exactly what was recorded.
+
+    `radius` is normalized to the `(rx, ry, rz)` triple on construction, so two
+    records describing one kernel compare equal however each was written. That
+    matters here and not on the kernel: this is the value a cache is looked up
+    by, and `MedianParams(2) != MedianParams((2, 2, 2))` would miss a cache the
+    same settings had already built. Whether the axes make a usable kernel is
+    still the kernel's to say, and is raised by `build`.
+
+    Attributes:
+        radius: the normalized `(rx, ry, rz)`, whichever form was passed.
+        shape: the footprint the offsets are drawn from.
     """
 
-    radius: Radius
+    radius: RadiusLike
     shape: KernelShape = "ellipsoid"
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "radius", _normalize_radius(self.radius))
+
     def build(self) -> MedianKernel:
-        """Construct the kernel these describe."""
+        """Construct the kernel these describe.
+
+        Raises:
+            ValueError: If any axis of `radius` is negative.
+        """
         return MedianKernel(self.radius, shape=self.shape)
 
 
@@ -113,10 +190,11 @@ class MedianKernel(Kernel):
     -- which is why `torch.median`, returning the lower, cannot serve here.
 
     Args:
-        radius: `(rx, ry, rz)` half-extent per axis; `0` disables that axis.
-            Left required because there is no safe default: `rz` counts frames
-            but damage tracks the time a window spans, so it has to follow the
-            frame rate rather than a constant.
+        radius: half-extent per axis; `0` disables that axis. Left required
+            because there is no safe default: `rz` counts frames but damage
+            tracks the time a window spans, so it has to follow the frame rate
+            rather than a constant -- which is also why `(r_spatial,
+            r_temporal)` is usually the form to reach for over a bare `r`.
         shape: `ellipsoid` weighs the axes against their radii together, taking
             33 offsets at radius `(2, 2, 2)`; `cuboid` takes the whole box, 125.
 
@@ -124,7 +202,7 @@ class MedianKernel(Kernel):
         ValueError: If any radius is negative.
     """
 
-    def __init__(self, radius: Radius, *, shape: KernelShape = "ellipsoid") -> None:
+    def __init__(self, radius: RadiusLike, *, shape: KernelShape = "ellipsoid") -> None:
         super().__init__(radius)
         self.shape = shape
         self._offsets = self._build_offsets()
@@ -171,7 +249,7 @@ class MedianKernel(Kernel):
         """
         self._validate_center(window, center)
         _, height, width = window.shape
-        rx, ry, _ = self.radius
+        rx, ry = self.spatial_radius
 
         # NaN marks "no sample here", so an edge offset drops out of the median
         # instead of contributing a padded value.

@@ -46,6 +46,55 @@ def _brute_median(
     return out
 
 
+# ------------------------------ radius forms ------------------------------ #
+
+
+def test_a_scalar_radius_applies_to_every_axis():
+    assert MedianKernel(2).radius == (2, 2, 2)
+
+
+def test_a_pair_sets_both_spatial_axes_and_the_temporal_one_apart():
+    # The values differ so a swapped or copied element cannot pass: `(2, 5)`
+    # means rx = ry = 2 and rz = 5, never (2, 5, 5) or (2, 2, 2).
+    kernel = MedianKernel((2, 5))
+
+    assert kernel.radius == (2, 2, 5)
+    assert kernel.spatial_radius == (2, 2)
+    assert kernel.temporal_radius == 5
+
+
+def test_an_explicit_triple_is_kept_axis_by_axis():
+    kernel = MedianKernel((3, 2, 1))
+
+    assert kernel.radius == (3, 2, 1)
+    assert kernel.spatial_radius == (3, 2)
+    assert kernel.temporal_radius == 1
+
+
+def test_the_three_forms_agree_where_they_describe_one_kernel():
+    # Not just equal radii: the offsets they sample must match too, so a form
+    # that normalized correctly but was read elsewhere would still fail.
+    window = torch.from_numpy(_frames(5))
+
+    scalar = MedianKernel(1)
+    pair = MedianKernel((1, 1))
+    triple = MedianKernel((1, 1, 1))
+
+    assert scalar.offsets == pair.offsets == triple.offsets
+    assert torch.equal(scalar.apply(window, 2), triple.apply(window, 2))
+
+
+def test_a_radius_of_no_recognised_form_is_rejected():
+    with pytest.raises(ValueError, match=r"expected r, \(r_spatial, r_temporal\)"):
+        MedianKernel((1, 1, 1, 1))  # ty: ignore[invalid-argument-type]
+
+
+def test_a_negative_scalar_is_caught_after_expansion():
+    # The check runs on the normalized triple, so no form can slip past it.
+    with pytest.raises(ValueError, match="negative radius"):
+        MedianKernel(-1)
+
+
 # ------------------------------- shared base ------------------------------ #
 
 
@@ -140,6 +189,27 @@ def test_params_build_the_kernel_they_describe():
     assert isinstance(kernel, MedianKernel)
     assert kernel.radius == (2, 1, 0)
     assert kernel.shape == "cuboid"  # not the default, so it came from the params
+
+
+def test_params_normalize_the_radius_they_were_given():
+    # A cache is looked up by this value, so the same settings written three
+    # ways must be one record -- otherwise a hit is missed and the filtered
+    # sequence is rebuilt from scratch.
+    assert MedianParams(2).radius == (2, 2, 2)
+    assert MedianParams((2, 5)).radius == (2, 2, 5)
+
+    assert MedianParams(2) == MedianParams((2, 2)) == MedianParams((2, 2, 2))
+    assert len({MedianParams(2), MedianParams((2, 2, 2))}) == 1
+
+
+def test_params_leave_a_negative_radius_for_the_kernel_to_reject():
+    # Normalizing is not validating: the record still round-trips, and the
+    # complaint arrives from the one place that owns the rule.
+    params = MedianParams((1, -1))
+
+    assert params.radius == (1, 1, -1)
+    with pytest.raises(ValueError, match="negative radius"):
+        params.build()
 
 
 def test_params_are_frozen_records():
