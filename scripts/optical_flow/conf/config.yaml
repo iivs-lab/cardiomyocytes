@@ -1,0 +1,47 @@
+defaults:
+  - preprocess: legacy
+  - _self_
+
+# Where the fixtures were extracted, and which time-lapse under it to read.
+fixtures: fixtures
+sample: 10hz_tif
+
+pairs: 0 # consecutive pairs to score; 0 means every one
+repeats: 3 # timed runs per backend, reported as a median
+
+# A CUDA backend's SSIM may sit at most this far below its CPU counterpart
+# before the single-run verdict calls it a regression.
+ssim_tolerance: 0.02
+
+# Each entry is built once per device it lists. `_partial_: true` leaves
+# `device` for the script to supply, so one params object feeds every device and
+# the shared parameters are identical by construction. Sweep a parameter by
+# overriding into `params`, e.g.
+#
+#   --multirun algorithms.farneback.estimator.params.win_size=9,15,21
+#
+# Drop an algorithm from a run with `~algorithms.deepflow`.
+algorithms:
+  farneback:
+    devices: [cpu, cuda]
+    estimator:
+      _target_: iivs_cardio.optical_flow.estimators.Farneback
+      _partial_: true
+      params:
+        _target_: iivs_cardio.optical_flow.estimators.FarnebackParams
+
+  dualtvl1:
+    devices: [cpu, cuda]
+    estimator:
+      _target_: iivs_cardio.optical_flow.estimators.DualTVL1
+      _partial_: true
+      params:
+        _target_: iivs_cardio.optical_flow.estimators.DualTVL1Params
+
+  # OpenCV ships no CUDA DeepFlow, so this one is a CPU-only reference and is
+  # never part of the verdict.
+  deepflow:
+    devices: [cpu]
+    estimator:
+      _target_: iivs_cardio.optical_flow.estimators.DeepFlow
+      _partial_: true

@@ -1,0 +1,14 @@
+# The pipeline `cardio-force-legacy` used: 3D median filter, then a uint8
+# rescale per frame pair.
+
+filter:
+  _target_: iivs_cardio.data.preprocessing.filtering.MedianKernel
+  # `r`, `[r_xy, r_z]`, or `[rx, ry, rz]`. `r_z` counts frames, so it tracks the
+  # frame rate rather than the spatial extent -- override it per sample.
+  radius: [2, 2, 2]
+  shape: ellipsoid
+
+# pairwise | perframe | injected. `perframe` breaks the brightness constancy
+# every estimator assumes; `injected` scales the whole sequence by one range,
+# which the script measures up front.
+normalize: pairwise

@@ -26,16 +26,14 @@ Reading the quality columns -- this is the part that is easy to get wrong:
   gain *and* stays self-consistent.
 
 Preprocessing follows the legacy pipeline -- read, 3D median filter, normalize to
-uint8, then flow -- and now runs on `iivs_cardio.data.preprocessing`, which the
-prototype that used to live here was written to specify. `--filter-radius none`
-and `--normalize` switch the stages off or between modes, so their effect on flow
-quality is measurable rather than assumed.
+uint8, then flow -- on `iivs_cardio.data.preprocessing`. `preprocess=raw` and
+`preprocess.normalize` switch the stages off or between modes, so their effect on
+flow quality is measurable rather than assumed.
 
-One number moved in the handover: the prototype truncated when converting to
-uint8, as the legacy does, while `FrameNormalizer` rounds. Half the pixels shift
-by a single level, which removes a systematic downward bias rather than adding
-noise. Quality columns are not comparable across that change at the fifth
-decimal.
+Note that `FrameNormalizer` rounds where the legacy truncated. Half the pixels
+shift by a single level of 256, which removes a systematic downward bias rather
+than adding noise -- but quality columns from before that change are not
+comparable at the fifth decimal.
 
 That matters for the parameter defaults. Measured on *raw* frames, no parameter
 change improved both quality axes at once, which argued for keeping the
@@ -44,16 +42,29 @@ tuned for: the median filter exists to remove exactly the noise the tuning was
 overfitting to, and pairwise normalization gives each pair the full 256 levels.
 Re-run the sweep through this pipeline before trusting that conclusion.
 
-    uv run scripts/optical_flow/benchmark_opencv.py --sample 10hz_tif
+`hydra` supplies the configuration, so every knob is a config override and a
+sweep is the same command with `--multirun`:
+
+    uv run scripts/optical_flow/benchmark_opencv.py sample=10hz_tif
+    uv run scripts/optical_flow/benchmark_opencv.py --multirun \\
+        preprocess=legacy,raw \\
+        algorithms.farneback.estimator.params.win_size=9,15,21
+
+Each run writes `benchmark.json` -- every row plus the configuration that
+produced it -- next to its log under `outputs/`, so a sweep can be collected
+afterwards rather than read off the terminal.
+
+The two modes end differently. A single run is a gate: exit code 0 only if every
+CUDA backend is both faster and within the SSIM tolerance of its CPU counterpart.
+A sweep is collecting combinations, so a failing one is a finding rather than a
+broken run and the exit code reports only whether the runs executed. DeepFlow has
+no CUDA backend and is reported as a CPU-only reference either way.
 
 The fixtures are the private `iivs-lab/iivs-lib-fixtures` release; extract the
-samples under `fixtures/` (or point `--fixtures` at a checkout that has them,
+samples under `fixtures/` (or point `fixtures=` at a checkout that has them,
 such as `iivs-lib/tests/fixtures`):
 
     gh release download v1 -R iivs-lab/iivs-lib-fixtures -D fixtures
-
-Exit code is 0 only if every CUDA backend is both faster and within the SSIM
-tolerance of its CPU counterpart; DeepFlow is reported as a CPU-only reference.
 
 **WIP.** Quality conclusions from this script are provisional: the fixtures are
 20-frame excerpts, which is 2 s at 10 Hz and 1 s at 20 Hz -- around one beat.
@@ -62,7 +73,8 @@ Settle algorithm and parameter choices on a full dataset.
 
 from __future__ import annotations
 
-import argparse
+import json
+import logging
 import statistics
 import time
 from itertools import pairwise
@@ -70,49 +82,30 @@ from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 import cv2
+import hydra
 import numpy as np
 import torch
+from hydra.core.hydra_config import HydraConfig
+from hydra.types import RunMode
+from hydra.utils import instantiate
 from iivs.dhm.data.phase import PhaseBinFolder
+from omegaconf import OmegaConf
 
 from iivs_cardio.common.warp import backward_warp
 from iivs_cardio.data.preprocessing.filtering import FilteredSequence, MedianKernel
 from iivs_cardio.data.preprocessing.normalization import FrameNormalizer
-from iivs_cardio.optical_flow.estimators import (
-    DeepFlow,
-    DualTVL1,
-    DualTVL1Params,
-    Farneback,
-    FarnebackParams,
-    OpticalFlowEstimator,
-)
 from iivs_cardio.optical_flow.evaluation import warp_consistency
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from omegaconf import DictConfig
+
     from iivs_cardio.data.preprocessing.filtering import Kernel
     from iivs_cardio.data.preprocessing.normalization import NormalizationMode
+    from iivs_cardio.optical_flow.estimators import OpticalFlowEstimator
 
-SSIM_TOLERANCE = 0.02  # A CUDA backend's SSIM may sit at most this far below CPU.
-
-# (label, factory, devices) -- one params object per algorithm feeds every device,
-# so the shared parameters are identical by construction. TV-L1's iteration counts
-# still differ because the CPU API exposes inner/outer where CUDA exposes one count.
-ALGORITHMS: tuple[
-    tuple[str, Callable[[str], OpticalFlowEstimator], tuple[str, ...]], ...
-] = (
-    (
-        "Farneback",
-        lambda device: Farneback(FarnebackParams(), device=device),
-        ("cpu", "cuda"),
-    ),
-    (
-        "Dual TV-L1",
-        lambda device: DualTVL1(DualTVL1Params(), device=device),
-        ("cpu", "cuda"),
-    ),
-    ("DeepFlow", lambda device: DeepFlow(device=device), ("cpu",)),
-)
+LOGGER = logging.getLogger(__name__)
 
 
 class Result(NamedTuple):
@@ -254,140 +247,147 @@ def measure(
     )
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--fixtures", type=Path, default=Path("fixtures"), help="fixture root"
-    )
-    parser.add_argument("--sample", default="10hz_tif", help="time-lapse folder name")
-    parser.add_argument(
-        "--pairs", type=int, default=0, help="consecutive pairs to score (0 = all)"
-    )
-    parser.add_argument("--repeats", type=int, default=3, help="timed runs per backend")
-    parser.add_argument(
-        "--filter-radius",
-        default="2,2,2",
-        help="3D median filter radius: r, r_xy,r_z, or x,y,z; 'none' to skip",
-    )
-    parser.add_argument(
-        "--footprint", default="ellipsoid", choices=("ellipsoid", "cuboid")
-    )
-    parser.add_argument(
-        "--normalize",
-        default="pairwise",
-        choices=("pairwise", "perframe", "injected"),
-        help="uint8 normalization mode; 'injected' is sequence-wide (legacy: pairwise)",
-    )
-    args = parser.parse_args()
-
-    if cv2.cuda.getCudaEnabledDeviceCount() < 1:
-        print("[!] No CUDA device -- this benchmark compares CPU against CUDA.")
-        return 1
-
-    sample = args.fixtures / args.sample
-    if not (sample / "Phase" / "Float" / "Bin").is_dir():
-        print(f"[!] No phase sequence at {sample}.")
-        print("    gh release download v1 -R iivs-lab/iivs-lib-fixtures -D fixtures")
-        return 1
-
-    kernel = None
-    filter_note = "no filter"
-    if args.filter_radius != "none":
-        try:
-            values = tuple(int(value) for value in args.filter_radius.split(","))
-            kernel = MedianKernel(
-                values[0] if len(values) == 1 else values, shape=args.footprint
-            )
-        except ValueError as error:  # the kernel names the forms it accepts
-            print(f"[!] --filter-radius {args.filter_radius!r}: {error}")
-            return 1
-        filter_note = (
-            f"3D median r={kernel.radius} {args.footprint} "
-            f"({len(kernel.offsets)} samples)"
-        )
-
-    # The filter is preprocessing, not a benchmarked path, so run it wherever it
-    # is fastest and hand the estimators an identical result either way.
-    where = "cuda" if torch.cuda.is_available() else "cpu"
-    frames = load_frames(sample, kernel, where)
-    frame_count = len(frames)
-    height, width = frames[0].shape
-
-    pairs = normalize_pairs(frames, args.normalize)
-    if args.pairs:
-        pairs = pairs[: args.pairs]
-    baseline = identity_ssim(pairs)
-
-    print(
-        f"Sample {args.sample}: {frame_count} frames of {height}x{width}, "
-        f"{len(pairs)} pair(s) scored, {args.repeats} timed run(s) per backend."
-    )
-    print(f"Preprocessing: {filter_note}, {args.normalize} normalization.")
-    print(
-        "calc = one-shot (CUDA: upload + kernel + download); push = streaming, per pair."
-    )
-    print(
-        f"Identity baseline (zero flow) SSIM {baseline:.5f} -- read 'gain', not 'SSIM'."
-    )
-    print("Warming up and benchmarking (TV-L1 and DeepFlow are slow) ...\n")
-
-    results = [
-        measure(name, device, factory, pairs, baseline, args.repeats)
-        for name, factory, devices in ALGORITHMS
-        for device in devices
-    ]
-
+def render(results: list[Result], baseline: float) -> list[str]:
+    """The result table, as lines, so it can be both printed and logged."""
     header = (
         f"{'Algorithm':<11} {'Device':<7} {'calc (s)':>9} {'push (s)':>9} "
         f"{'SSIM':>8} {'gain':>9} {'FB-err':>8} {'|flow|':>7}"
     )
-    print(header)
-    print("-" * len(header))
-    for r in results:
-        print(
-            f"{r.algorithm:<11} {r.device:<7} {r.calc_seconds:>9.4f} "
-            f"{r.push_seconds:>9.4f} {r.ssim:>8.5f} {r.ssim_gain:>+9.5f} "
-            f"{r.fb_error:>8.4f} {r.magnitude:>7.3f}"
-        )
-    print("(gain = SSIM above the identity baseline; FB-err in px, lower is better.)")
-    print("(A flow is good only if it earns gain AND stays self-consistent.)")
+    lines = [
+        f"Identity baseline (zero flow) SSIM {baseline:.5f} -- read 'gain', not 'SSIM'.",
+        header,
+        "-" * len(header),
+    ]
+    lines += [
+        f"{r.algorithm:<11} {r.device:<7} {r.calc_seconds:>9.4f} "
+        f"{r.push_seconds:>9.4f} {r.ssim:>8.5f} {r.ssim_gain:>+9.5f} "
+        f"{r.fb_error:>8.4f} {r.magnitude:>7.3f}"
+        for r in results
+    ]
+    lines.append(
+        "(gain = SSIM above the identity baseline; FB-err in px, lower is better.)"
+    )
+    lines.append("(A flow is good only if it earns gain AND stays self-consistent.)")
 
-    by_key = {(r.algorithm, r.device): r for r in results}
-    all_ok = True
-    print("\nVerdict -- CUDA must be faster and keep SSIM within tolerance:")
-    for algorithm, _, devices in ALGORITHMS:
-        if "cuda" not in devices:
-            reference = by_key[algorithm, "cpu"]
-            print(
-                f"  {algorithm:<11} REF : CPU-only reference, "
+    return lines
+
+
+def verdicts(results: list[Result], tolerance: float) -> tuple[list[str], bool]:
+    """Per-algorithm CPU-vs-CUDA lines, and whether every comparable pair passed.
+
+    An algorithm with no CUDA backend is reported and skipped rather than
+    counted, so a CPU-only reference cannot fail the run.
+    """
+    by_name: dict[str, dict[str, Result]] = {}
+    for result in results:
+        by_name.setdefault(result.algorithm, {})[result.device] = result
+
+    lines, passed = [], True
+    for name, devices in by_name.items():
+        cpu, gpu = devices.get("cpu"), devices.get("cuda")
+        if cpu is None or gpu is None:
+            reference = next(iter(devices.values()))  # non-empty by construction
+            lines.append(
+                f"  {name:<11} REF : {reference.device}-only reference, "
                 f"{reference.calc_seconds:.4f}s, gain {reference.ssim_gain:+.5f}"
             )
             continue
 
-        cpu = by_key[algorithm, "cpu"]
-        gpu = by_key[algorithm, "cuda"]
-        calc_speedup = (
-            cpu.calc_seconds / gpu.calc_seconds
-            if gpu.calc_seconds > 0
-            else float("inf")
-        )
-        push_speedup = (
-            cpu.push_seconds / gpu.push_seconds
-            if gpu.push_seconds > 0
-            else float("inf")
-        )
-        passed = gpu.calc_seconds < cpu.calc_seconds and (
-            gpu.ssim >= cpu.ssim - SSIM_TOLERANCE
-        )
-        all_ok = all_ok and passed
-        print(
-            f"  {algorithm:<11} {'PASS' if passed else 'FAIL'}: CUDA "
-            f"{calc_speedup:>4.1f}x calc / {push_speedup:>4.1f}x push, "
+        ok = gpu.calc_seconds < cpu.calc_seconds and gpu.ssim >= cpu.ssim - tolerance
+        passed = passed and ok
+        lines.append(
+            f"  {name:<11} {'PASS' if ok else 'FAIL'}: CUDA "
+            f"{cpu.calc_seconds / gpu.calc_seconds:>4.1f}x calc / "
+            f"{cpu.push_seconds / gpu.push_seconds:>4.1f}x push, "
             f"SSIM {gpu.ssim:.4f} vs CPU {cpu.ssim:.4f} "
             f"(delta {gpu.ssim - cpu.ssim:+.4f})"
         )
 
-    return 0 if all_ok else 1
+    return lines, passed
 
 
-raise SystemExit(main())
+@hydra.main(version_base=None, config_path="conf", config_name="config")
+def main(cfg: DictConfig) -> None:
+    """Score every configured backend, then record the run.
+
+    Raises:
+        SystemExit: In a single run whose verdict failed. A sweep leaves the exit
+            code alone, since one bad combination is a finding rather than a
+            broken run.
+    """
+    if cv2.cuda.getCudaEnabledDeviceCount() < 1:
+        LOGGER.error("No CUDA device -- this benchmark compares CPU against CUDA.")
+        raise SystemExit(1)
+
+    sample = Path(cfg.fixtures) / cfg.sample
+    if not (sample / "Phase" / "Float" / "Bin").is_dir():
+        LOGGER.error("No phase sequence at %s.", sample)
+        LOGGER.error(
+            "  gh release download v1 -R iivs-lab/iivs-lib-fixtures -D fixtures"
+        )
+        raise SystemExit(1)
+
+    kernel: Kernel | None = instantiate(cfg.preprocess.filter)
+    where = "cuda" if torch.cuda.is_available() else "cpu"
+    frames = load_frames(sample, kernel, where)
+
+    pairs = normalize_pairs(frames, cfg.preprocess.normalize)
+    if cfg.pairs:
+        pairs = pairs[: cfg.pairs]
+    baseline = identity_ssim(pairs)
+
+    filter_note = (
+        f"3D median r={kernel.radius} ({len(kernel.offsets)} samples)"
+        if isinstance(kernel, MedianKernel)
+        else "no filter"
+    )
+    LOGGER.info(
+        "Sample %s: %d frames of %dx%d, %d pair(s) scored, %d timed run(s) per backend.",
+        cfg.sample,
+        len(frames),
+        *frames[0].shape,
+        len(pairs),
+        cfg.repeats,
+    )
+    LOGGER.info(
+        "Preprocessing: %s, %s normalization.", filter_note, cfg.preprocess.normalize
+    )
+    LOGGER.info("Warming up and benchmarking (TV-L1 and DeepFlow are slow) ...")
+
+    results = [
+        measure(
+            name, device, instantiate(entry.estimator), pairs, baseline, cfg.repeats
+        )
+        for name, entry in cfg.algorithms.items()
+        for device in entry.devices
+    ]
+
+    for line in render(results, baseline):
+        LOGGER.info("%s", line)
+
+    lines, passed = verdicts(results, cfg.ssim_tolerance)
+    LOGGER.info("Verdict -- CUDA must be faster and keep SSIM within tolerance:")
+    for line in lines:
+        LOGGER.info("%s", line)
+
+    output = Path(HydraConfig.get().runtime.output_dir) / "benchmark.json"
+    output.write_text(
+        json.dumps(
+            {
+                "config": OmegaConf.to_container(cfg, resolve=True),
+                "baseline_ssim": baseline,
+                "passed": passed,
+                "results": [r._asdict() for r in results],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    LOGGER.info("Wrote %s", output)
+
+    # A sweep is collecting combinations, so a failing one is data, not an error.
+    if not passed and HydraConfig.get().mode is RunMode.RUN:
+        raise SystemExit(1)
+
+
+main()
