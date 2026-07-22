@@ -134,11 +134,13 @@ class MedianParams:
     shape: KernelShape = "ellipsoid"
 
 
-# Sample counts at which CUDA's `topk` beats its `sort`. Below the range `sort`
-# still has its shared-memory fast path, which it leaves above 32 elements at a
-# 3x step; above the range `topk`'s own `k` has grown too large to pay off.
-# Measured on one GPU -- re-measure before trusting the bounds on another.
-_CUDA_TOPK_SAMPLES = range(33, 65)
+# Sample counts where CUDA's `topk` beats its `sort`. Both leave the same
+# shared-memory path once they must order more than 32 elements, and both step
+# about 3x when they do -- `sort` orders every sample, so it steps at 33, while
+# `topk` orders `samples // 2 + 1`, so it steps at 64. Between those two steps
+# only `sort` is paying. Measured on one GPU, but both bounds turn on the same
+# threshold, which is why this is a range rather than a fitted cutoff.
+_CUDA_TOPK_SAMPLES = range(33, 64)
 
 
 class MedianKernel(Kernel):
