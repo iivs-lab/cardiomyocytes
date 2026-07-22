@@ -29,6 +29,13 @@ BatchFlowType = Float32[Tensor, "N 2 H W"]
 ChunkFlowType = Float32[Tensor, "M 2 H W"]
 
 
+def _stack_flows(flows: list[Tensor], frames: Tensor) -> Tensor:
+    """Stack the flows, or an empty `(0, 2, H, W)` float32 when there are none."""
+    if not flows:
+        return frames.new_empty((0, 2, *frames.shape[1:]), dtype=torch.float32)
+    return torch.stack(flows)
+
+
 class OpenCVEstimator(OpticalFlowEstimator):
     """Optical-flow estimators backed by OpenCV's `cv2` / `cv2.cuda` algorithms.
 
@@ -100,7 +107,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
             flow = push(frame)
             if flow is not None:
                 flows.append(flow)
-        return self._stack_flows(flows, frames)
+        return _stack_flows(flows, frames)
 
     @jaxtyped(typechecker=beartype)
     @override
@@ -119,14 +126,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
         self.validate_device(curr)
         calc = self._calc_cuda if self.is_cuda else self._calc_cpu
         flows = [calc(p, c) for p, c in zip(prev, curr, strict=True)]
-        return self._stack_flows(flows, prev)
-
-    @staticmethod
-    def _stack_flows(flows: list[Tensor], frames: Tensor) -> Tensor:
-        """Stack the flows, or an empty `(0, 2, H, W)` float32 when there are none."""
-        if not flows:
-            return frames.new_empty((0, 2, *frames.shape[1:]), dtype=torch.float32)
-        return torch.stack(flows)
+        return _stack_flows(flows, prev)
 
     # ----------------------------- cpu (numpy) ----------------------------- #
 
