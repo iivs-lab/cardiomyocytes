@@ -52,8 +52,14 @@ class Kernel(ABC):
         self.radius = radius
 
     @property
-    def reach(self) -> int:
-        """How many frames either side of the centre a window must carry: `rz`."""
+    def temporal_radius(self) -> int:
+        """How many frames either side of the centre a window must carry.
+
+        The time-axis half-extent, in frames -- `rz` here, but a subclass
+        deriving its footprint reports whatever its own reduction needs.
+        `FilteredSequence` reads this alone to size a window: the spatial radii
+        never leave `apply`, which pads for them itself.
+        """
         return self.radius[2]
 
     @abstractmethod

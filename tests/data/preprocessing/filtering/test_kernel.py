@@ -49,8 +49,11 @@ def _brute_median(
 # ------------------------------- shared base ------------------------------ #
 
 
-def test_reach_reports_the_frames_a_window_needs_either_side():
-    assert MedianKernel((2, 1, 3)).reach == 3
+def test_temporal_radius_reports_the_frames_a_window_needs_either_side():
+    # The z radius alone, not the largest of the three: the spatial radii are
+    # `apply`'s business, and a window is sized only in frames.
+    assert MedianKernel((2, 1, 3)).temporal_radius == 3
+    assert MedianKernel((5, 4, 1)).temporal_radius == 1
 
 
 def test_apply_rejects_a_center_outside_the_window():
@@ -78,7 +81,7 @@ def test_a_zero_radius_disables_that_axis():
 
     assert {dz for _, _, dz in spatial.offsets} == {0}
     assert len(spatial.offsets) == 5  # the cross: centre plus one step each way
-    assert spatial.reach == 0
+    assert spatial.temporal_radius == 0
 
 
 def test_a_zero_radius_everywhere_is_the_identity():

@@ -90,10 +90,10 @@ class FilteredSequence[M](DataSequence["Tensor", M]):
     def get_item(self, index: int) -> Tensor:
         """Return source frame `index` filtered against its neighbours."""
         index = self._resolve(index)
-        reach = self.kernel.reach
+        radius = self.kernel.temporal_radius
 
-        start = max(0, index - reach)
-        stop = min(len(self), index + reach + 1)
+        start = max(0, index - radius)
+        stop = min(len(self), index + radius + 1)
 
         return self.kernel.apply(self._window(range(start, stop)), index - start)
 
