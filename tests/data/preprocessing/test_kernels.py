@@ -1,0 +1,127 @@
+from __future__ import annotations
+
+from statistics import median
+from typing import TYPE_CHECKING
+
+import numpy as np
+import pytest
+import torch
+
+from iivs_cardio.data.preprocessing.kernels import MedianKernel
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+
+def _frames(count: int, height: int = 4, width: int = 5) -> NDArray[np.float32]:
+    rng = np.random.default_rng(0)
+    return rng.random((count, height, width), dtype=np.float32)
+
+
+def _in_bounds(shape: tuple[int, int, int], z: int, y: int, x: int) -> bool:
+    depth, height, width = shape
+    return 0 <= z < depth and 0 <= y < height and 0 <= x < width
+
+
+def _brute_median(
+    frames: NDArray[np.float32], kernel: MedianKernel, index: int
+) -> torch.Tensor:
+    """Median per pixel from an explicit neighbour list, in plain Python.
+
+    Independent of the implementation: `statistics.median` averages the middle
+    two of an even count by definition, and the bounds check spells out
+    truncation one neighbour at a time.
+    """
+    _, height, width = frames.shape
+    out = torch.zeros(height, width)
+    for y in range(height):
+        for x in range(width):
+            samples = [
+                float(frames[index + dz, y + dy, x + dx])
+                for dx, dy, dz in kernel.offsets
+                if _in_bounds(frames.shape, index + dz, y + dy, x + dx)
+            ]
+            out[y, x] = median(samples)
+    return out
+
+
+# ------------------------------- shared base ------------------------------ #
+
+
+def test_reach_reports_the_frames_a_window_needs_either_side():
+    assert MedianKernel((2, 1, 3)).reach == 3
+
+
+def test_apply_rejects_a_center_outside_the_window():
+    with pytest.raises(ValueError, match="not an index into"):
+        MedianKernel((1, 1, 1)).apply(torch.zeros(3, 4, 4), 3)
+
+
+def test_apply_rejects_a_window_that_is_not_float32():
+    with pytest.raises(Exception, match=r"\[3,4,4\]"):
+        MedianKernel((1, 1, 0)).apply(torch.zeros(3, 4, 4, dtype=torch.float64), 0)
+
+
+# --------------------------------- median --------------------------------- #
+
+
+def test_ellipsoid_samples_fewer_offsets_than_the_cuboid_box():
+    # The whole point of the ellipsoid: 33 samples per pixel instead of 125.
+    assert len(MedianKernel((2, 2, 2)).offsets) == 33
+    assert len(MedianKernel((2, 2, 2), shape="cuboid").offsets) == 125
+
+
+def test_a_zero_radius_disables_that_axis():
+    # Legacy could not express this -- it divides by each radius unguarded.
+    spatial = MedianKernel((1, 1, 0))
+
+    assert {dz for _, _, dz in spatial.offsets} == {0}
+    assert len(spatial.offsets) == 5  # the cross: centre plus one step each way
+    assert spatial.reach == 0
+
+
+def test_a_zero_radius_everywhere_is_the_identity():
+    kernel = MedianKernel((0, 0, 0))
+    window = torch.rand(1, 4, 4)
+
+    assert kernel.offsets == ((0, 0, 0),)
+    assert torch.equal(kernel.apply(window, 0), window[0])
+
+
+def test_median_rejects_a_negative_radius():
+    with pytest.raises(ValueError, match="negative radius"):
+        MedianKernel((1, -1, 1))
+
+
+def test_border_pixels_drop_offsets_and_average_the_middle_two():
+    # A column of 1, 2, 10 with a vertical radius of 1. The middle pixel sees
+    # all three -> 2. Each end loses one offset to the border, leaving an even
+    # two to average: (1 + 2) / 2 and (2 + 10) / 2. `torch.median` would return
+    # the lower of each pair instead, giving [1, 2, 2] -- which is why it cannot
+    # be used directly, and what this test exists to catch.
+    window = torch.tensor([[[1.0], [2.0], [10.0]]])  # (T=1, H=3, W=1)
+
+    out = MedianKernel((0, 1, 0)).apply(window, 0)
+
+    assert out.squeeze().tolist() == pytest.approx([1.5, 2.0, 6.0])
+
+
+def test_a_spike_is_replaced_by_its_neighbourhood():
+    # What the median is for: one hot pixel is outvoted by the four around it.
+    window = torch.zeros(1, 5, 5)
+    window[0, 2, 2] = 100.0
+
+    assert torch.equal(MedianKernel((1, 1, 0)).apply(window, 0), torch.zeros(5, 5))
+
+
+def test_median_matches_a_brute_force_pass_over_explicit_neighbours():
+    # Everything at once -- offset selection, truncation at all six borders, and
+    # even-count averaging -- against a computation sharing no code with it.
+    frames = _frames(5)
+    kernel = MedianKernel((2, 1, 1))
+    window = torch.from_numpy(frames)
+
+    for index in range(len(frames)):
+        assert torch.allclose(
+            kernel.apply(window, index), _brute_median(frames, kernel, index)
+        )
