@@ -130,9 +130,24 @@ def test_temporal_radius_reports_the_frames_a_window_needs_either_side():
     assert MedianKernel((5, 4, 1)).temporal_radius == 1
 
 
-def test_apply_rejects_a_center_outside_the_window():
+def test_apply_rejects_a_target_outside_the_window():
     with pytest.raises(ValueError, match="not an index into"):
         MedianKernel((1, 1, 1)).apply(torch.zeros(3, 4, 4), 3)
+
+
+def test_a_target_need_not_be_the_middle_of_its_window():
+    # What the old name `center` claimed and a truncated window disproves: at a
+    # sequence end the frame being filtered sits at the edge of its own window.
+    window = torch.zeros(3, 4, 4)
+    window[0] = 5.0
+
+    first = MedianKernel((0, 0, 1)).apply(window, 0)
+    middle = MedianKernel((0, 0, 1)).apply(window, 1)
+
+    # Frame 0 sees only itself and frame 1 -> median of (5, 0) averages to 2.5.
+    assert torch.equal(first, torch.full((4, 4), 2.5))
+    # Frame 1 sees all three -> median of (5, 0, 0) is 0.
+    assert torch.equal(middle, torch.zeros(4, 4))
 
 
 def test_apply_rejects_a_window_that_is_not_float32():

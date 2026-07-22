@@ -102,28 +102,28 @@ class Kernel(ABC):
         return self.radius[2]
 
     @abstractmethod
-    def apply(self, window: WindowType, center: int) -> FrameType:
-        """Reduce the neighbourhood of each pixel of frame `center` in `window`.
+    def apply(self, window: WindowType, target: int) -> FrameType:
+        """Reduce the neighbourhood of each pixel of frame `target` in `window`.
 
         A pure function of its arguments, so a caller holding a whole sequence
         gets exactly what the streaming pass would produce for the same frame.
 
         Args:
             window: `(T, H, W)` consecutive float32 frames.
-            center: index in `window` of the frame to filter.
+            target: index in `window` of the frame to filter.
 
         Returns:
             The `(H, W)` filtered frame.
 
         Raises:
-            ValueError: If `center` is not an index into `window`.
+            ValueError: If `target` is not an index into `window`.
         """
 
-    def _validate_center(self, window: Tensor, center: int) -> None:
-        """Raise if `center` does not index a frame of `window`."""
+    def _validate_target(self, window: Tensor, target: int) -> None:
+        """Raise if `target` does not index a frame of `window`."""
         frames = window.shape[0]
-        if not 0 <= center < frames:
-            msg = f"center {center} is not an index into a {frames}-frame window"
+        if not 0 <= target < frames:
+            msg = f"target {target} is not an index into a {frames}-frame window"
             raise ValueError(msg)
 
 
@@ -185,21 +185,21 @@ class MedianKernel(Kernel):
 
     @jaxtyped(typechecker=beartype)
     @override
-    def apply(self, window: WindowType, center: int) -> FrameType:
+    def apply(self, window: WindowType, target: int) -> FrameType:
         """Take the median over each pixel's in-range neighbours.
 
         Args:
             window: `(T, H, W)` consecutive float32 frames.
-            center: index in `window` of the frame to filter.
+            target: index in `window` of the frame to filter.
 
         Returns:
             The `(H, W)` filtered frame, each pixel the median of however many
             of its neighbours fell inside the window and the frame.
 
         Raises:
-            ValueError: If `center` is not an index into `window`.
+            ValueError: If `target` is not an index into `window`.
         """
-        self._validate_center(window, center)
+        self._validate_target(window, target)
         _, height, width = window.shape
         rx, ry = self.spatial_radius
 
@@ -210,10 +210,10 @@ class MedianKernel(Kernel):
         gathered = torch.stack(
             [
                 padded[
-                    center + dz, ry + dy : ry + dy + height, rx + dx : rx + dx + width
+                    target + dz, ry + dy : ry + dy + height, rx + dx : rx + dx + width
                 ]
                 for dx, dy, dz in self._offsets
-                if 0 <= center + dz < window.shape[0]
+                if 0 <= target + dz < window.shape[0]
             ]
         )
 
