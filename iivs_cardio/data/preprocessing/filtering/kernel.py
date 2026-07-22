@@ -32,17 +32,9 @@ WindowType = Float32[Tensor, "T H W"]
 def _normalize_radius(radius: RadiusLike) -> RadiusType:
     """Expand `radius` to the `(rx, ry, rz)` every kernel stores.
 
-    The two-value form exists because the in-plane axes are almost always equal
-    while `rz` is not free to follow them: it counts frames, so it tracks the
-    frame rate rather than the spatial extent. Writing `(2, 5)` says that
-    directly, where `(2, 2, 5)` leaves a reader checking whether the repetition
-    was meant.
-
-    Each element is matched as an `int`, not merely counted. A radius that
-    reaches here from a config file has been through YAML or JSON, where `2` and
-    `2.0` look alike and a quoted `"2"` is easy to write; unchecked, those get
-    as far as `range()` inside a kernel and fail on something that never names
-    the radius.
+    The two-value form is usually the one to reach for: the in-plane axes are
+    almost always equal, while `rz` is not free to follow them because it counts
+    frames and so tracks the frame rate.
 
     Args:
         radius: `r` for every axis, `(r_spatial, r_temporal)` to set the two

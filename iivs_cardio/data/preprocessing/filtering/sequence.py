@@ -76,10 +76,8 @@ class FilteredSequence[M](DataSequence["Tensor", M]):
             params: which kernel to build, and with what.
             device: where filtering runs and the returned tensors live.
         """
-        # Temporary: constructing the kernel here hard-codes the one params
-        # type there is. `hydra` is the intended owner of this step, and takes
-        # it over via `_target_`, which is why nothing more general is built
-        # in the meantime.
+        # Temporary: `hydra` takes this step over via `_target_`, so nothing
+        # more general is built in the meantime.
         kernel = MedianKernel(params.radius, shape=params.shape)
 
         return cls(source, kernel, device=device)
