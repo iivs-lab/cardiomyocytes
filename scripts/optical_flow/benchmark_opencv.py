@@ -25,12 +25,17 @@ Reading the quality columns -- this is the part that is easy to get wrong:
   perfectly self-consistent. **Read the two together** -- a good flow earns SSIM
   gain *and* stays self-consistent.
 
-Preprocessing reproduces the legacy pipeline -- read, 3D median filter, normalize
-to uint8, then flow -- and is implemented here rather than in `iivs_cardio`
-because this script is where `data/preprocessing/` is meant to get its
-requirements from (see TODO.md). `--filter-radius none` and `--normalize` switch
-the stages off or between modes, so their effect on flow quality is measurable
-rather than assumed.
+Preprocessing follows the legacy pipeline -- read, 3D median filter, normalize to
+uint8, then flow -- and now runs on `iivs_cardio.data.preprocessing`, which the
+prototype that used to live here was written to specify. `--filter-radius none`
+and `--normalize` switch the stages off or between modes, so their effect on flow
+quality is measurable rather than assumed.
+
+One number moved in the handover: the prototype truncated when converting to
+uint8, as the legacy does, while `FrameNormalizer` rounds. Half the pixels shift
+by a single level, which removes a systematic downward bias rather than adding
+noise. Quality columns are not comparable across that change at the fifth
+decimal.
 
 That matters for the parameter defaults. Measured on *raw* frames, no parameter
 change improved both quality axes at once, which argued for keeping the
@@ -52,8 +57,7 @@ tolerance of its CPU counterpart; DeepFlow is reported as a CPU-only reference.
 
 **WIP.** Quality conclusions from this script are provisional: the fixtures are
 20-frame excerpts, which is 2 s at 10 Hz and 1 s at 20 Hz -- around one beat.
-Settle algorithm and parameter choices on a full dataset, and once
-`data/preprocessing/` exists, call it instead of the prototype below.
+Settle algorithm and parameter choices on a full dataset.
 """
 
 from __future__ import annotations
@@ -71,6 +75,8 @@ import torch
 from iivs.dhm.data.phase import PhaseBinFolder
 
 from iivs_cardio.common.warp import backward_warp
+from iivs_cardio.data.preprocessing.filtering import FilteredSequence, MedianKernel
+from iivs_cardio.data.preprocessing.normalization import FrameNormalizer
 from iivs_cardio.optical_flow.estimators import (
     DeepFlow,
     DualTVL1,
@@ -83,6 +89,9 @@ from iivs_cardio.optical_flow.evaluation import warp_consistency
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+    from iivs_cardio.data.preprocessing.filtering import Kernel
+    from iivs_cardio.data.preprocessing.normalization import NormalizationMode
 
 SSIM_TOLERANCE = 0.02  # A CUDA backend's SSIM may sit at most this far below CPU.
 
@@ -118,141 +127,45 @@ class Result(NamedTuple):
 
 
 # --------------------------------------------------------------------------- #
-#                       Preprocessing (prototype, see TODO)                     #
+#                                Preprocessing                                  #
 # --------------------------------------------------------------------------- #
-# Ported from `cardio-force-legacy` (`Python/calc_optflows.py`) to reproduce the
-# pipeline the legacy results came from: read -> 3D median filter -> normalize to
-# uint8 -> optical flow. It lives here rather than in `iivs_cardio` on purpose --
-# this is where the real `data/preprocessing/` module gets its requirements from,
-# so keep the semantics faithful and the reasons written down.
+# The legacy pipeline -- read -> 3D median filter -> normalize to uint8 -> flow
+# -- now assembled from `iivs_cardio.data.preprocessing`, which this script's
+# prototype was written to specify. Everything below is wiring: the semantics
+# live in the modules.
 
 
-def load_phase(sample: Path) -> torch.Tensor:
-    """A time-lapse as a `(T, H, W)` float32 phase volume, unnormalized."""
-    sequence = PhaseBinFolder(sample / "Phase" / "Float" / "Bin")
-    return torch.stack(
-        [torch.as_tensor(np.asarray(sequence[i])) for i in range(len(sequence))]
-    )
+def load_frames(sample: Path, kernel: Kernel | None, device: str) -> list[torch.Tensor]:
+    """A time-lapse as float32 frames, filtered when a `kernel` is given.
 
-
-def footprint_offsets(
-    radius: tuple[int, int, int], footprint: str
-) -> list[tuple[int, int, int]]:
-    """`(dz, dy, dx)` offsets of the filter footprint, radius given as `(x, y, z)`.
-
-    The ellipsoid keeps offsets with `(dx/rx)^2 + (dy/ry)^2 + (dz/rz)^2 <= 1` --
-    at radius `(2, 2, 2)` that is 33 samples against the cuboid's 125, so it is
-    both cheaper and more isotropic. This is the legacy's `build_filter_kernel`,
-    extended to allow a zero radius, which switches that axis off entirely
-    (`(2, 2, 0)` is a purely spatial filter). The legacy could not express that.
+    `PhaseBinFolder` is already the sequence `FilteredSequence` reads, so the
+    filter wraps it rather than a volume held in memory.
     """
-    rx, ry, rz = radius
-    offsets = []
-    for dz in range(-rz, rz + 1):
-        for dy in range(-ry, ry + 1):
-            for dx in range(-rx, rx + 1):
-                # A zero radius contributes only its zero offset, so it adds
-                # nothing to the ellipsoid test rather than dividing by zero.
-                extent = sum(
-                    (delta / r) ** 2
-                    for delta, r in ((dx, rx), (dy, ry), (dz, rz))
-                    if r > 0
-                )
-                if footprint == "cuboid" or extent <= 1.0:
-                    offsets.append((dz, dy, dx))
-    return offsets
+    source = PhaseBinFolder(sample / "Phase" / "Float" / "Bin")
+    if kernel is None:
+        return [torch.as_tensor(np.asarray(frame)) for frame in source]
 
-
-def median_filter_3d(
-    volume: torch.Tensor, radius: tuple[int, int, int], footprint: str
-) -> torch.Tensor:
-    """Spatiotemporal median filter over a `(T, H, W)` volume.
-
-    Border policy is **truncate**: neighbours outside the volume are dropped
-    rather than padded, so pixels near an edge take the median of fewer samples.
-    Implemented by padding with NaN and ignoring it, which makes "outside" and
-    "excluded by the footprint" the same case.
-
-    The median matches the legacy exactly, including the even-count rule: with an
-    even number of valid samples it averages the middle two. `torch.median`
-    returns the lower of the two instead, so this cannot be delegated to it.
-    """
-    rx, ry, rz = radius
-    offsets = footprint_offsets(radius, footprint)
-    padded = torch.nn.functional.pad(
-        volume[None, None], (rx, rx, ry, ry, rz, rz), value=float("nan")
-    )[0, 0]
-
-    frames, height, width = volume.shape
-    out = torch.empty_like(volume)
-    for t in range(frames):
-        # One output frame at a time: the whole (K, T, H, W) stack would be GBs.
-        stack = torch.stack(
-            [
-                padded[
-                    t + rz + dz, ry + dy : ry + dy + height, rx + dx : rx + dx + width
-                ]
-                for dz, dy, dx in offsets
-            ]
-        )
-        ordered, _ = torch.sort(stack, dim=0)  # NaN sorts last, so valid values lead
-        count = (~torch.isnan(stack)).sum(dim=0)
-        middle = count // 2
-        upper = ordered.gather(0, middle[None])[0]
-        lower = ordered.gather(0, (middle - 1).clamp(min=0)[None])[0]
-        out[t] = torch.where(count % 2 == 1, upper, (lower + upper) / 2)
-    return out
-
-
-def to_uint8(frame: torch.Tensor, low: float, high: float) -> torch.Tensor:
-    """Scale `[low, high]` onto `[0, 255]`, clamped. Truncates, as the legacy does."""
-    if high <= low:
-        return torch.zeros_like(frame, dtype=torch.uint8)
-    return (((frame - low) * (255.0 / (high - low))).clamp(0.0, 255.0)).to(torch.uint8)
+    return [frame.cpu() for frame in FilteredSequence(source, kernel, device=device)]
 
 
 def normalize_pairs(
-    volume: torch.Tensor, mode: str
+    frames: list[torch.Tensor], mode: NormalizationMode
 ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-    """Consecutive frame pairs as uint8, normalized by `mode`.
+    """Consecutive frame pairs as uint8, each scaled by `mode`.
 
-    Pairs rather than frames because **`pairwise` cannot produce a single
-    normalized frame list**: a frame is scaled differently depending on which
-    pair it is in, so it appears twice with two different uint8 encodings. Any
-    real API has to be built around pairs (or windows) for this mode to exist at
-    all -- the one structural constraint to carry into `data/preprocessing/`.
-
-    The modes trade dynamic range against cross-frame comparability:
-
-    - `per_frame` scales each frame by its own range, which *breaks brightness
-      constancy* -- a static point changes value when the frame's extremes move.
-      Every estimator here assumes constancy, so this is the unsafe one.
-    - `pairwise` (the legacy's choice) scales both frames of a pair by their
-      joint range. Constancy holds within the pair, which is all optical flow
-      needs, and each pair gets the full 256 levels.
-    - `sequence` uses one range for the whole time-lapse: comparable across the
-      sequence, but each pair only occupies the fraction of the 256 levels its
-      own span covers, which costs quantization resolution.
+    Pairs rather than frames because `pairwise` scales a frame by the joint
+    range of whichever pair it is in, so it appears twice with two encodings and
+    no single normalized frame list exists. `injected` is the sequence-wide
+    scope: one range measured over every frame, which is the pass this does up
+    front.
     """
-    pairs = []
-    if mode == "sequence":
-        low, high = float(volume.min()), float(volume.max())
+    normalizer = FrameNormalizer(mode, dtype=torch.uint8)
+    if mode == "injected":
+        low = min(float(frame.min()) for frame in frames)
+        high = max(float(frame.max()) for frame in frames)
+        normalizer.source_range = (low, high)
 
-    for prev, curr in pairwise(volume):
-        if mode == "pairwise":
-            low = float(min(prev.min(), curr.min()))
-            high = float(max(prev.max(), curr.max()))
-            pairs.append((to_uint8(prev, low, high), to_uint8(curr, low, high)))
-        elif mode == "per_frame":
-            pairs.append(
-                (
-                    to_uint8(prev, float(prev.min()), float(prev.max())),
-                    to_uint8(curr, float(curr.min()), float(curr.max())),
-                )
-            )
-        else:  # sequence
-            pairs.append((to_uint8(prev, low, high), to_uint8(curr, low, high)))
-    return pairs
+    return [normalizer.apply(prev, curr) for prev, curr in pairwise(frames)]
 
 
 def forward_backward_error(forward: torch.Tensor, backward: torch.Tensor) -> float:
@@ -354,7 +267,7 @@ def main() -> int:
     parser.add_argument(
         "--filter-radius",
         default="2,2,2",
-        help="3D median filter radius as x,y,z (legacy default); 'none' to skip",
+        help="3D median filter radius: r, r_xy,r_z, or x,y,z; 'none' to skip",
     )
     parser.add_argument(
         "--footprint", default="ellipsoid", choices=("ellipsoid", "cuboid")
@@ -362,8 +275,8 @@ def main() -> int:
     parser.add_argument(
         "--normalize",
         default="pairwise",
-        choices=("pairwise", "per_frame", "sequence"),
-        help="uint8 normalization mode (legacy used pairwise)",
+        choices=("pairwise", "perframe", "injected"),
+        help="uint8 normalization mode; 'injected' is sequence-wide (legacy: pairwise)",
     )
     args = parser.parse_args()
 
@@ -377,24 +290,30 @@ def main() -> int:
         print("    gh release download v1 -R iivs-lab/iivs-lib-fixtures -D fixtures")
         return 1
 
-    volume = load_phase(sample)
-    frame_count, height, width = volume.shape
-
-    if args.filter_radius == "none":
-        filter_note = "no filter"
-    else:
-        radius = tuple(int(value) for value in args.filter_radius.split(","))
-        if len(radius) != 3:
-            print(f"[!] --filter-radius needs three values, got {args.filter_radius!r}")
+    kernel = None
+    filter_note = "no filter"
+    if args.filter_radius != "none":
+        try:
+            values = tuple(int(value) for value in args.filter_radius.split(","))
+            kernel = MedianKernel(
+                values[0] if len(values) == 1 else values, shape=args.footprint
+            )
+        except ValueError as error:  # the kernel names the forms it accepts
+            print(f"[!] --filter-radius {args.filter_radius!r}: {error}")
             return 1
-        # The filter is preprocessing, not a benchmarked path, so run it wherever
-        # it is fastest and hand the estimators an identical result either way.
-        where = "cuda" if torch.cuda.is_available() else "cpu"
-        volume = median_filter_3d(volume.to(where), radius, args.footprint).cpu()
-        taps = len(footprint_offsets(radius, args.footprint))
-        filter_note = f"3D median r={radius} {args.footprint} ({taps} taps)"
+        filter_note = (
+            f"3D median r={kernel.radius} {args.footprint} "
+            f"({len(kernel.offsets)} samples)"
+        )
 
-    pairs = normalize_pairs(volume, args.normalize)
+    # The filter is preprocessing, not a benchmarked path, so run it wherever it
+    # is fastest and hand the estimators an identical result either way.
+    where = "cuda" if torch.cuda.is_available() else "cpu"
+    frames = load_frames(sample, kernel, where)
+    frame_count = len(frames)
+    height, width = frames[0].shape
+
+    pairs = normalize_pairs(frames, args.normalize)
     if args.pairs:
         pairs = pairs[: args.pairs]
     baseline = identity_ssim(pairs)
