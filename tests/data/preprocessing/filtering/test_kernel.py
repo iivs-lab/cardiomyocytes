@@ -9,6 +9,7 @@ import pytest
 import torch
 
 from iivs_cardio.data.preprocessing.filtering import MedianKernel, MedianParams
+from iivs_cardio.data.preprocessing.filtering.kernel import _median_cpu, _median_cuda
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -230,6 +231,34 @@ def test_a_spike_is_replaced_by_its_neighbourhood():
     window[0, 2, 2] = 100.0
 
     assert torch.equal(MedianKernel((1, 1, 0)).apply(window, 0), torch.zeros(5, 5))
+
+
+@pytest.mark.parametrize(
+    "taps",
+    (
+        pytest.param(1, id="single-tap"),
+        pytest.param(7, id="below-the-cuda-window"),
+        pytest.param(33, id="first-in-the-cuda-window"),
+        pytest.param(64, id="last-in-the-cuda-window"),
+        pytest.param(65, id="just-above-the-cuda-window"),
+        pytest.param(125, id="well-above"),
+    ),
+)
+@pytest.mark.parametrize("dropped", (0.0, 0.5, 0.95))
+def test_the_two_median_routes_agree(taps, dropped):
+    # They are chosen by device for speed alone, so they must be one function.
+    # Both are pure in `gathered`, which is what lets this run without a GPU.
+    generator = torch.Generator().manual_seed(taps)
+    gathered = torch.rand(taps, 16, 16, generator=generator)
+    if dropped:
+        missing = torch.rand(gathered.shape, generator=generator) < dropped
+        gathered = gathered.masked_fill(missing, float("nan"))
+    gathered[0] = torch.rand((16, 16), generator=generator)  # centre never drops
+
+    # The tap counts straddle the window `_median_cuda` switches on, so both of
+    # its branches run; the coverage gate is what keeps that true.
+    assert torch.equal(_median_cpu(gathered), _median_cuda(gathered))
+    assert not _median_cpu(gathered).isnan().any()  # the centre always survives
 
 
 def test_median_matches_a_brute_force_pass_over_explicit_neighbours():

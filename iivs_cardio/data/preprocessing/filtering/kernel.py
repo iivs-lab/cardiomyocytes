@@ -134,6 +134,62 @@ class MedianParams:
     shape: KernelShape = "ellipsoid"
 
 
+# Tap counts at which CUDA's `topk` beats its `sort`. Below the window `sort`
+# still has its shared-memory fast path, which it leaves above 32 elements at a
+# 3x step; above the window `topk`'s own `k` has grown too large to pay off.
+# Measured on one GPU -- re-measure before trusting the bounds on another.
+_CUDA_TOPK_TAPS = range(33, 65)
+
+
+def _lower_half(gathered: Tensor) -> Tensor:
+    """The smallest `K // 2 + 1` samples per pixel, ascending, NaNs sorting last.
+
+    As much of the order as a median can reach: at most `K` samples are valid,
+    so neither central rank lies past `K // 2`.
+    """
+    k = gathered.shape[0] // 2 + 1
+
+    return gathered.topk(k, dim=0, largest=False, sorted=True).values
+
+
+def _middle_two(ordered: Tensor, gathered: Tensor) -> Tensor:
+    """Average each pixel's two central valid samples.
+
+    One element for an odd count and the middle two for an even one -- the
+    latter being what `torch.median`, returning the lower, cannot give.
+
+    Args:
+        ordered: `gathered` sorted ascending along axis 0, or any prefix of that
+            order reaching rank `K // 2`.
+        gathered: the same samples unsorted, read only for how many are valid.
+    """
+    valid = (~gathered.isnan()).sum(dim=0)  # >= 1: the centre offset never drops
+    pair = ordered.gather(0, torch.stack(((valid - 1) // 2, valid // 2)))
+
+    return (pair[0] + pair[1]) / 2
+
+
+def _median_cpu(gathered: Tensor) -> Tensor:
+    """Reduce `gathered` by sorting only as far as the median can reach.
+
+    `topk` beat a full sort at every tap count measured here, so this route
+    takes no decision.
+    """
+    return _middle_two(_lower_half(gathered), gathered)
+
+
+def _median_cuda(gathered: Tensor) -> Tensor:
+    """Reduce `gathered` by whichever of `topk` and `sort` the tap count favours.
+
+    Unlike the CPU route this one has to choose, and `_CUDA_TOPK_TAPS` is the
+    range where the choice goes the other way.
+    """
+    if gathered.shape[0] in _CUDA_TOPK_TAPS:
+        return _middle_two(_lower_half(gathered), gathered)
+
+    return _middle_two(gathered.sort(dim=0).values, gathered)
+
+
 class MedianKernel(Kernel):
     """A 3D median over a discrete neighbourhood, robust to isolated spikes.
 
@@ -200,30 +256,27 @@ class MedianKernel(Kernel):
             ValueError: If `target` is not an index into `window`.
         """
         self._validate_target(window, target)
-        _, height, width = window.shape
+        gathered = self._gather(window, target)
+
+        median = _median_cuda if gathered.is_cuda else _median_cpu
+
+        return median(gathered)
+
+    def _gather(self, window: Tensor, target: int) -> Tensor:
+        """Stack every in-range neighbour of frame `target` along a new axis 0."""
+        frames, height, width = window.shape
         rx, ry = self.spatial_radius
 
         # NaN marks "no sample here", so an edge offset drops out of the median
         # instead of contributing a padded value.
         padded = pad(window, (rx, rx, ry, ry), value=float("nan"))
 
-        gathered = torch.stack(
+        return torch.stack(
             [
                 padded[
                     target + dz, ry + dy : ry + dy + height, rx + dx : rx + dx + width
                 ]
                 for dx, dy, dz in self._offsets
-                if 0 <= target + dz < window.shape[0]
+                if 0 <= target + dz < frames
             ]
         )
-
-        # Sorting puts the NaNs last, so the valid samples occupy `[0, valid)`
-        # and the median sits at `(valid - 1) // 2` and `valid // 2` -- the same
-        # element for an odd count, the middle two to average for an even one.
-        ordered = gathered.sort(dim=0).values
-        valid = (~ordered.isnan()).sum(dim=0)  # >= 1: the centre offset never drops
-
-        lower = ordered.gather(0, ((valid - 1) // 2).unsqueeze(0))
-        upper = ordered.gather(0, (valid // 2).unsqueeze(0))
-
-        return ((lower + upper) / 2).squeeze(0)
