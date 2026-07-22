@@ -56,10 +56,7 @@ def _normalize_radius(radius: RadiusLike) -> Radius:
         case (rx, ry, rz):
             return rx, ry, rz
         case _:
-            msg = (
-                f"invalid radius {radius!r}: expected r, (r_spatial, r_temporal), "
-                "or (rx, ry, rz)"
-            )
+            msg = f"invalid radius {radius!r}: expected r, (r_xy, r_z), or (rx, ry, rz)"
             raise ValueError(msg)
 
 
@@ -90,15 +87,12 @@ class Kernel(ABC):
     """
 
     def __init__(self, radius: RadiusLike) -> None:
-        normalized = _normalize_radius(radius)
-        if min(normalized) < 0:
-            msg = (
-                f"negative radius {normalized}: each axis needs 0 or more "
-                "(0 disables it)"
-            )
+        radii = _normalize_radius(radius)
+        if min(radii) < 0:
+            msg = f"negative radius {radii}: each axis needs 0 or more (0 disables it)"
             raise ValueError(msg)
 
-        self.radius = normalized
+        self.radius = radii
 
     @property
     def spatial_radius(self) -> tuple[int, int]:

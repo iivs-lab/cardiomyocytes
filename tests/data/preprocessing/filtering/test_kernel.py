@@ -85,7 +85,9 @@ def test_the_three_forms_agree_where_they_describe_one_kernel():
 
 
 def test_a_radius_of_no_recognised_form_is_rejected():
-    with pytest.raises(ValueError, match=r"expected r, \(r_spatial, r_temporal\)"):
+    with pytest.raises(
+        ValueError, match=r"expected r, \(r_xy, r_z\), or \(rx, ry, rz\)"
+    ):
         MedianKernel((1, 1, 1, 1))  # ty: ignore[invalid-argument-type]
 
 
