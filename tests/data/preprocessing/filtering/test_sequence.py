@@ -118,6 +118,45 @@ def test_frames_come_back_as_float32_tensors():
     assert frame.shape == (4, 5)
 
 
+def test_a_non_float32_source_is_read_as_float32_and_filtered_the_same():
+    # A uint8 phase-image source is as valid as a float32 one; the kernel reduces
+    # float32 regardless, and an even-count median lands on a half no integer
+    # dtype could hold -- so casting must happen before the reduction, not after.
+    frames = (_frames(4) * 255).astype(np.uint8)
+    filtered = FilteredSequence(_Frames(frames), MedianKernel((1, 1, 1)))
+    reference = MedianKernel((1, 1, 1)).apply(torch.from_numpy(frames).float(), 0)
+
+    assert filtered[0].dtype == torch.float32
+    assert torch.equal(filtered[0], reference)
+
+
+class _Uint8Frames(DataSequence[NDArray[np.uint8], None]):
+    """A source whose declared dtype is uint8, to fix the type parameter."""
+
+    @override
+    def __len__(self) -> int:
+        return 4
+
+    @override
+    def get_item(self, index: int) -> NDArray[np.uint8]:
+        return np.full((3, 3), index, dtype=np.uint8)
+
+    @override
+    def get_meta(self, index: int) -> None:
+        return None
+
+
+def test_the_source_dtype_is_carried_on_the_type_parameter():
+    # `source` reflects the declared dtype rather than a hard-coded float32, so a
+    # uint8 source is describable without a lie in the signature.
+    filtered: FilteredSequence[None, np.uint8] = FilteredSequence(
+        _Uint8Frames(), MedianKernel(0)
+    )
+
+    assert filtered.source.get_item(2).dtype == np.uint8
+    assert filtered[2].dtype == torch.float32
+
+
 # ------------------------------ from_params ------------------------------- #
 
 

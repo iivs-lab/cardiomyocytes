@@ -4,22 +4,23 @@ __all__ = ("FilteredSequence",)
 
 from typing import TYPE_CHECKING, override
 
+import numpy as np
 import torch
 from kaparoo.data.sequences import DataSequence
 
 from iivs_cardio.common.device import resolve_device
-from iivs_cardio.data.preprocessing.filtering.kernel import MedianKernel
 
 if TYPE_CHECKING:
-    import numpy as np
     from numpy.typing import NDArray
     from torch import Tensor
 
-    from iivs_cardio.data.preprocessing.filtering.kernel import Kernel, MedianParams
+    from iivs_cardio.data.preprocessing.filtering.kernel import Kernel, KernelParams
 
 
-class FilteredSequence[M](DataSequence["Tensor", M]):
-    """A filtered view over a phase sequence, itself a sequence.
+class FilteredSequence[M, T: np.floating | np.integer = np.float32](
+    DataSequence["Tensor", M]
+):
+    """A filtered view over a source sequence, itself a sequence.
 
     Wraps `source` rather than consuming it, so `filtered[i]` is the kernel
     applied at `source[i - rz .. i + rz]` -- determined by `i` alone, whatever
@@ -36,8 +37,14 @@ class FilteredSequence[M](DataSequence["Tensor", M]):
     It is sized for that sequential pass -- building the filtered cache -- not
     for a shuffled `DataLoader`, which should read the finished cache instead.
 
+    Type Parameters:
+        M: the source's per-frame metadata, which filtering passes through.
+        T: the source's numpy dtype, any real (integer or floating) kind; each
+            frame is read as float32, since that is what a kernel reduces and
+            what the output carries. Defaults to `float32`, the usual source.
+
     Args:
-        source: the float32 phase frames to filter, all the same shape.
+        source: the frames to filter, all the same shape.
         kernel: the neighbourhood to reduce, and the reduction.
         device: where filtering runs and the returned tensors live.
 
@@ -47,7 +54,7 @@ class FilteredSequence[M](DataSequence["Tensor", M]):
 
     def __init__(
         self,
-        source: DataSequence[NDArray[np.float32], M],
+        source: DataSequence[NDArray[T], M],
         kernel: Kernel,
         *,
         device: str | torch.device = "cpu",
@@ -60,30 +67,22 @@ class FilteredSequence[M](DataSequence["Tensor", M]):
     @classmethod
     def from_params(
         cls,
-        source: DataSequence[NDArray[np.float32], M],
-        params: MedianParams,
+        source: DataSequence[NDArray[T], M],
+        params: KernelParams,
         *,
         device: str | torch.device = "cpu",
-    ) -> FilteredSequence[M]:
+    ) -> FilteredSequence[M, T]:
         """Build the kernel `params` describes, and filter `source` with it.
 
-        The entry point for configuration-driven callers -- a CLI, a config
-        file, a cache sidecar being replayed -- which hold settings rather than
-        a live kernel.
-
         Args:
-            source: the float32 phase frames to filter.
+            source: the frames to filter.
             params: which kernel to build, and with what.
             device: where filtering runs and the returned tensors live.
         """
-        # Temporary: `hydra` takes this step over via `_target_`, so nothing
-        # more general is built in the meantime.
-        kernel = MedianKernel(params.radius, shape=params.shape)
-
-        return cls(source, kernel, device=device)
+        return cls(source, params.build(), device=device)
 
     @property
-    def source(self) -> DataSequence[NDArray[np.float32], M]:
+    def source(self) -> DataSequence[NDArray[T], M]:
         """The unfiltered sequence this reads from."""
         return self._source
 
@@ -100,7 +99,8 @@ class FilteredSequence[M](DataSequence["Tensor", M]):
         start = max(0, index - radius)
         stop = min(len(self), index + radius + 1)
 
-        return self.kernel.apply(self._window(range(start, stop)), index - start)
+        window = self._window(range(start, stop))
+        return self.kernel.apply(window, index - start)
 
     @override
     def get_meta(self, index: int) -> M:
@@ -108,11 +108,15 @@ class FilteredSequence[M](DataSequence["Tensor", M]):
         return self._source.get_meta(self._normalize_index(index))
 
     def _window(self, indices: range) -> Tensor:
-        """Stack the source frames at `indices`, reading only what is not buffered."""
+        """Stack the source frames at `indices` as float32, reading past the buffer.
+
+        Reads only frames not already buffered, and casts each to float32 on the
+        way in -- the dtype a kernel reduces, whatever the source stored.
+        """
         self._buffer = {i: f for i, f in self._buffer.items() if i in indices}
 
         missing = [i for i in indices if i not in self._buffer]
         for i, frame in zip(missing, self._source.get_items(missing), strict=True):
-            self._buffer[i] = torch.from_numpy(frame).to(self.device)
+            self._buffer[i] = torch.from_numpy(frame).to(self.device, torch.float32)
 
         return torch.stack([self._buffer[i] for i in indices])
