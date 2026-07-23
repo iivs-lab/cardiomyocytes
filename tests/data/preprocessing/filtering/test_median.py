@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import UserList
 from dataclasses import FrozenInstanceError
 from statistics import median
 from typing import TYPE_CHECKING
@@ -117,6 +118,15 @@ def test_a_sequence_is_accepted_however_a_config_parser_spelled_it():
     # YAML and JSON have no tuple, so a radius arrives as a list.
     assert MedianKernel([2, 5]).radius == (2, 2, 5)
     assert MedianKernel([3, 2, 1]).radius == (3, 2, 1)
+
+
+def test_a_non_list_sequence_is_accepted_like_a_list():
+    # OmegaConf hands a `ListConfig`, which is a `Sequence` but not a `list`
+    # subclass; unhandled it falls through to the scalar branch and becomes
+    # `([2, 5], [2, 5], [2, 5])`. `UserList` reproduces that shape here without a
+    # config dependency the default test env does not carry.
+    assert MedianKernel(UserList([2, 5])).radius == (2, 2, 5)
+    assert MedianKernel(UserList([3, 2, 1])).radius == (3, 2, 1)
 
 
 def test_a_negative_scalar_is_caught_after_expansion():

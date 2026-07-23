@@ -3,6 +3,7 @@ from __future__ import annotations
 __all__ = ("Kernel", "KernelParams", "RadiusLike", "RadiusType")
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 
 from jaxtyping import Float32
 from torch import Tensor
@@ -21,19 +22,20 @@ def _normalize_triple[T](
     """Expand a scalar / `(spatial, temporal)` / `(x, y, z)` to the `(x, y, z)` triple.
 
     Shape only -- element validation is the caller's, since a radius and a sigma
-    admit different values. Any two- or three-element sequence is accepted, so
-    the lists a config parser produces pass as readily as tuples.
+    admit different values. Any two- or three-element `Sequence` is accepted, not
+    only `list`/`tuple`, so OmegaConf's `ListConfig` and the lists a config parser
+    produces pass as readily as tuples.
 
     Raises:
         ValueError: If `value` is none of the three shapes.
     """
-    if isinstance(value, tuple | list):
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes):
         match list(value):
             case [x, y, z]:
                 return x, y, z
             case [spatial, temporal]:
                 return spatial, spatial, temporal
-    elif not isinstance(value, str):
+    elif not isinstance(value, str | bytes):
         return value, value, value
 
     msg = f"invalid {name} {value!r}: expected a scalar, (spatial, temporal), or (x, y, z)"
