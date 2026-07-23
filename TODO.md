@@ -284,6 +284,14 @@ Roughly in dependency order: each one is easier once the previous has landed.
   - **Worker count follows the estimator's device**: cores for a CPU estimator,
     where the gain is near-linear, but only as many as there are GPUs for a CUDA
     one, which serialises on the device no matter how many processes queue on it.
+  - **`hydra.instantiate` warns without a target whitelist (1.4).** Building a
+    config-controlled `_target_` with no `_target_whitelist_` is deprecated,
+    because the dotted path is arbitrary code — the config decides what gets
+    imported and called. Our configs are our own, so the risk is low, but the
+    driver's `instantiate` calls should pass a whitelist of the estimator/kernel
+    classes they mean to build (or `UNSAFE_ALLOW_ALL_TARGETS` to keep the legacy
+    any-target behaviour and silence the warning). The whitelist is the honest
+    form; wire it in when `benchmark_estimator.py` starts instantiating.
 
   Where the time actually goes, per frame pair: the flow dominates everything.
   CPU Dual TV-L1 is ~150x the median filter and ~15x CPU Farneback; on CUDA the
