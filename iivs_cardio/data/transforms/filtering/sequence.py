@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
     from torch import Tensor
 
-    from iivs_cardio.data.preprocessing.filtering.kernel import Kernel, KernelParams
+    from iivs_cardio.data.transforms.filtering.kernel import FilterKernel, KernelParams
 
 
 class FilteredSequence[M, T: np.floating | np.integer = np.float32](
@@ -55,7 +55,7 @@ class FilteredSequence[M, T: np.floating | np.integer = np.float32](
     def __init__(
         self,
         source: DataSequence[NDArray[T], M],
-        kernel: Kernel,
+        kernel: FilterKernel,
         *,
         device: str | torch.device = "cpu",
     ) -> None:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("Kernel", "KernelParams", "RadiusLike", "RadiusType")
+__all__ = ("FilterKernel", "KernelParams", "RadiusLike", "RadiusType")
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
@@ -70,7 +70,7 @@ def _normalize_radius(radius: RadiusLike) -> RadiusType:
     return triple
 
 
-class Kernel(ABC):
+class FilterKernel(ABC):
     """The neighbourhood a 3D filter reads, and what it reduces it to.
 
     Holds the sampling geometry only, never frames, so one kernel serves any
@@ -136,13 +136,13 @@ class Kernel(ABC):
 class KernelParams(ABC):
     """A kernel's constructor arguments as one value, buildable into the kernel.
 
-    Separate from `Kernel` so a config, a CLI, or the cache sidecar carries the
+    Separate from `FilterKernel` so a config, a CLI, or the cache sidecar carries the
     settings without a live object -- and what a later run reconstructs is
-    exactly what was recorded. Closed at the same family as `Kernel`; each
+    exactly what was recorded. Closed at the same family as `FilterKernel`; each
     concrete params is a plain frozen record that neither expands nor validates
     its fields, leaving the kernel the one place that interprets them.
     """
 
     @abstractmethod
-    def build(self) -> Kernel:
+    def build(self) -> FilterKernel:
         """Construct the kernel these describe."""

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import torch
 
-from iivs_cardio.data.preprocessing.filtering import (
+from iivs_cardio.data.transforms.filtering import (
     GaussianKernel,
     GaussianParams,
     KernelParams,

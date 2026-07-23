@@ -11,9 +11,9 @@ from beartype import beartype
 from jaxtyping import jaxtyped
 from torch.nn.functional import pad
 
-from iivs_cardio.data.preprocessing.filtering.kernel.base import (
+from iivs_cardio.data.transforms.filtering.kernel.base import (
+    FilterKernel,
     FrameType,
-    Kernel,
     KernelParams,
     RadiusLike,
     RadiusType,
@@ -31,7 +31,7 @@ KernelShape = Literal["ellipsoid", "cuboid"]
 _CUDA_TOPK_SAMPLES = range(33, 64)
 
 
-class MedianKernel(Kernel):
+class MedianKernel(FilterKernel):
     """A 3D median over a discrete neighbourhood, robust to isolated spikes.
 
     Dropping out-of-range neighbours shortens the sample list rather than

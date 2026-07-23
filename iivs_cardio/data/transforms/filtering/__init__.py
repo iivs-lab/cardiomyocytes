@@ -1,8 +1,8 @@
 __all__ = (
+    "FilterKernel",
     "FilteredSequence",
     "GaussianKernel",
     "GaussianParams",
-    "Kernel",
     "KernelParams",
     "KernelShape",
     "MedianKernel",
@@ -13,10 +13,10 @@ __all__ = (
     "SigmaType",
 )
 
-from iivs_cardio.data.preprocessing.filtering.kernel import (
+from iivs_cardio.data.transforms.filtering.kernel import (
+    FilterKernel,
     GaussianKernel,
     GaussianParams,
-    Kernel,
     KernelParams,
     KernelShape,
     MedianKernel,
@@ -26,4 +26,4 @@ from iivs_cardio.data.preprocessing.filtering.kernel import (
     SigmaLike,
     SigmaType,
 )
-from iivs_cardio.data.preprocessing.filtering.sequence import FilteredSequence
+from iivs_cardio.data.transforms.filtering.sequence import FilteredSequence

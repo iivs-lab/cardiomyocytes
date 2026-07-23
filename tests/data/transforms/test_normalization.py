@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import torch
 
-from iivs_cardio.data.preprocessing.normalization import FrameNormalizer
+from iivs_cardio.data.transforms.normalization import FrameNormalizer
 
 
 def _ramp(low: float, high: float, h: int = 8, w: int = 8) -> torch.Tensor:

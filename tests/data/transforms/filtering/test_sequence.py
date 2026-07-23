@@ -8,7 +8,7 @@ import torch
 from kaparoo.data.sequences import DataSequence
 from numpy.typing import NDArray
 
-from iivs_cardio.data.preprocessing.filtering import (
+from iivs_cardio.data.transforms.filtering import (
     FilteredSequence,
     MedianKernel,
     MedianParams,

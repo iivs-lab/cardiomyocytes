@@ -101,7 +101,7 @@ Roughly in dependency order: each one is easier once the previous has landed.
   `NDArray[np.float32]`, so this layer owns the numpy → torch (+ device)
   boundary. Mind the marker-vs-concrete trap documented in `foundations.md` §7.
 
-- **`data/preprocessing/` has landed, both kernels included.**
+- **`data/transforms/` has landed, both kernels included.**
   `filtering/` (`kernel/` package + `sequence.py`) and `normalization.py` are
   written, tested, and driven from `scripts/optical_flow/`. What follows records
   what was settled, so the reasons outlive the code that now encodes them.
@@ -111,7 +111,7 @@ Roughly in dependency order: each one is easier once the previous has landed.
   > frames, so settle radii and parameters on a full dataset. The mechanical
   > facts below are exact.
 
-  `filtering/kernel/` — a `Kernel` base (`base.py`) with two reductions beside
+  `filtering/kernel/` — a `FilterKernel` base (`base.py`) with two reductions beside
   it, `MedianKernel` (`median.py`) and `GaussianKernel` (`gaussian.py`). Both
   read a per-axis neighbourhood and **drop** out-of-range neighbours rather than
   pad them; they differ only in the reduction. Radius is written as `r`,
@@ -250,7 +250,7 @@ Roughly in dependency order: each one is easier once the previous has landed.
 
 - **Rewrite the benchmark as `scripts/optical_flow/run_estimator.py`.**
   Estimators, `common/warp.py`, `optical_flow/evaluation.py` and
-  `data/preprocessing/` are done; `benchmark_opencv.py` runs on them but scores a
+  `data/transforms/` are done; `benchmark_opencv.py` runs on them but scores a
   single sample against a CPU-vs-CUDA verdict. The replacement sweeps every
   sequence under a root, aggregating per sequence, which is the shape the
   parameter search needs.

@@ -11,9 +11,9 @@ from jaxtyping import jaxtyped
 from torch import Tensor
 from torch.nn.functional import conv2d
 
-from iivs_cardio.data.preprocessing.filtering.kernel.base import (
+from iivs_cardio.data.transforms.filtering.kernel.base import (
+    FilterKernel,
     FrameType,
-    Kernel,
     KernelParams,
     WindowType,
     _normalize_triple,
@@ -48,7 +48,7 @@ def _normalize_sigma(sigma: SigmaLike) -> SigmaType:
     return values
 
 
-class GaussianKernel(Kernel):
+class GaussianKernel(FilterKernel):
     """A separable 3D Gaussian, renormalized over whatever neighbours survive.
 
     Dropping out-of-range neighbours would darken every border, so the weights

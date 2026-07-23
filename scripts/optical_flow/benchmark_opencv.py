@@ -26,7 +26,7 @@ Reading the quality columns -- this is the part that is easy to get wrong:
   gain *and* stays self-consistent.
 
 Preprocessing follows the legacy pipeline -- read, 3D median filter, normalize to
-uint8, then flow -- on `iivs_cardio.data.preprocessing`. `preprocess=raw` and
+uint8, then flow -- on `iivs_cardio.data.transforms`. `preprocess=raw` and
 `preprocess.normalize` switch the stages off or between modes, so their effect on
 flow quality is measurable rather than assumed.
 
@@ -92,8 +92,8 @@ from iivs.dhm.data.phase import PhaseBinFolder
 from omegaconf import OmegaConf
 
 from iivs_cardio.common.warp import backward_warp
-from iivs_cardio.data.preprocessing.filtering import FilteredSequence, MedianKernel
-from iivs_cardio.data.preprocessing.normalization import FrameNormalizer
+from iivs_cardio.data.transforms.filtering import FilteredSequence, MedianKernel
+from iivs_cardio.data.transforms.normalization import FrameNormalizer
 from iivs_cardio.optical_flow.evaluation import warp_consistency
 
 if TYPE_CHECKING:
@@ -101,8 +101,8 @@ if TYPE_CHECKING:
 
     from omegaconf import DictConfig
 
-    from iivs_cardio.data.preprocessing.filtering import Kernel
-    from iivs_cardio.data.preprocessing.normalization import NormalizationMode
+    from iivs_cardio.data.transforms.filtering import FilterKernel
+    from iivs_cardio.data.transforms.normalization import NormalizationMode
     from iivs_cardio.optical_flow.estimators import OpticalFlowEstimator
 
 LOGGER = logging.getLogger(__name__)
@@ -123,12 +123,14 @@ class Result(NamedTuple):
 #                                Preprocessing                                  #
 # --------------------------------------------------------------------------- #
 # The legacy pipeline -- read -> 3D median filter -> normalize to uint8 -> flow
-# -- now assembled from `iivs_cardio.data.preprocessing`, which this script's
+# -- now assembled from `iivs_cardio.data.transforms`, which this script's
 # prototype was written to specify. Everything below is wiring: the semantics
 # live in the modules.
 
 
-def load_frames(sample: Path, kernel: Kernel | None, device: str) -> list[torch.Tensor]:
+def load_frames(
+    sample: Path, kernel: FilterKernel | None, device: str
+) -> list[torch.Tensor]:
     """A time-lapse as float32 frames, filtered when a `kernel` is given.
 
     `PhaseBinFolder` is already the sequence `FilteredSequence` reads, so the
@@ -327,7 +329,7 @@ def main(cfg: DictConfig) -> None:
         )
         raise SystemExit(1)
 
-    kernel: Kernel | None = instantiate(cfg.preprocess.filter)
+    kernel: FilterKernel | None = instantiate(cfg.preprocess.filter)
     where = "cuda" if torch.cuda.is_available() else "cpu"
     frames = load_frames(sample, kernel, where)
 
