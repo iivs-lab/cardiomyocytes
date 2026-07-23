@@ -1,4 +1,0 @@
-# Unfiltered frames, to measure what the median filter is worth.
-
-filter: null
-normalize: pairwise
