@@ -101,26 +101,37 @@ Roughly in dependency order: each one is easier once the previous has landed.
   `NDArray[np.float32]`, so this layer owns the numpy → torch (+ device)
   boundary. Mind the marker-vs-concrete trap documented in `foundations.md` §7.
 
-- **`data/preprocessing/` has landed; a gaussian kernel has not.**
-  `filtering/` (`kernel.py` + `sequence.py`) and `normalization.py` are written,
-  tested, and driven from `scripts/optical_flow/`. What follows records what was
-  settled, so the reasons outlive the code that now encodes them.
+- **`data/preprocessing/` has landed, both kernels included.**
+  `filtering/` (`kernel/` package + `sequence.py`) and `normalization.py` are
+  written, tested, and driven from `scripts/optical_flow/`. What follows records
+  what was settled, so the reasons outlive the code that now encodes them.
 
   > Quantitative claims from the benchmark are **provisional**: they come from
   > 20-frame excerpts, about one beat. Ranking flipped between raw and filtered
   > frames, so settle radii and parameters on a full dataset. The mechanical
   > facts below are exact.
 
-  `filtering/kernel.py` — 3D spatiotemporal median, ellipsoid/cuboid footprint,
-  per-axis radius. Legacy semantics, verified against `scipy`: ellipsoid = offsets
-  with `(dx/rx)^2 + (dy/ry)^2 + (dz/rz)^2 <= 1` (33 samples at radius 2 against a
-  cuboid's 125); border **truncate** (out-of-range neighbours dropped, not
-  padded); and with an even number of valid samples the median **averages the
+  `filtering/kernel/` — a `Kernel` base (`base.py`) with two reductions beside
+  it, `MedianKernel` (`median.py`) and `GaussianKernel` (`gaussian.py`). Both
+  read a per-axis neighbourhood and **drop** out-of-range neighbours rather than
+  pad them; they differ only in the reduction. Radius is written as `r`,
+  `(r_spatial, r_temporal)`, or `(rx, ry, rz)` and normalized to the triple; a
+  zero axis disables it, which the legacy could not express.
+
+  The **median** keeps legacy semantics, verified against `scipy`: ellipsoid =
+  offsets with `(dx/rx)^2 + (dy/ry)^2 + (dz/rz)^2 <= 1` (33 samples at radius 2
+  against a cuboid's 125); with an even number of valid samples it **averages the
   middle two**, so `torch.median` — which returns the lower — cannot be used
-  directly. A zero radius disables an axis, which the legacy could not express.
-  Decided: torch only (no numba / scipy). **Still to write**: the gaussian
-  kernel, by per-axis `sigma` + `truncate`. It was drafted and withdrawn, so
-  `Kernel` currently has one subclass.
+  directly. The **gaussian** takes per-axis `sigma` + `truncate` (radius derived
+  as `int(truncate * sigma + 0.5)`, scipy's rule) and is separable; dropping a
+  border neighbour would darken the edge, so it divides by the weight that
+  actually landed, one division at the end, which equals the full 3D normalized
+  result exactly. Decided: torch only (no numba / scipy).
+
+  Kernel arguments also exist as records (`MedianParams` / `GaussianParams`,
+  `KernelParams.build()`), so a config or the cache sidecar carries settings
+  without a live object and `FilteredSequence.from_params` dispatches through
+  `build()` with no per-kernel branch.
 
   **Reversed: `FilteredSequence` owns its source and is randomly accessible.**
   The earlier note here banned random access, on the grounds that "frame i" would
