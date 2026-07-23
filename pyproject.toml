@@ -74,6 +74,9 @@ dev = [
     "ruff>=0.15.18",
     "ty>=0.0.51",
 ]
+scripts = [
+    "hydra-core>=1.4.0.dev6",
+]
 
 [tool.uv.build-backend]
 module-name = "iivs_cardio"

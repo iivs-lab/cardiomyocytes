@@ -150,7 +150,11 @@ Roughly in dependency order: each one is easier once the previous has landed.
   though never a wrong value. Worker *processes* each hold their own instance, so
   a `DataLoader` is unaffected; a thread pool is not. Neither is a defect to fix
   until something needs it: the contract is a sequential pass that builds a
-  cache, and a shuffled consumer should read the finished cache.
+  cache, and a shuffled consumer should read the finished cache. **Not
+  implemented, recorded here on purpose.** When a thread-pool consumer does need
+  it, a `threading.local()` buffer isolates threads while keeping the sequential
+  one-read-per-frame; a lock (serialises `_window`) or a per-call buffer (drops
+  the buffer's whole point) are the cruder fallbacks.
 
   **The temporal radius must scale with the frame rate.** Damage tracks the time
   the window spans, not its frame count, so the legacy's fixed `(2,2,2)` is a
@@ -290,16 +294,22 @@ Roughly in dependency order: each one is easier once the previous has landed.
   `calc` and output over a `cv2.cuda.Stream` (today everything runs on the single
   default stream). And evaluation, now that it outweighs the flow it scores.
 
-- **Decide whether `hydra` is worth its blocker.** A config-driven driver was
-  written (`conf/` plus a `hydra.main` entry point) and is committed unrunnable:
-  `hydra.main` builds an `argparse` parser with a non-string `help`, which
-  **Python 3.14 rejects outright**, so `hydra-core` 1.3.4 cannot start a job on
-  this interpreter. 1.4.0.dev6 fixes it, and under that version the config
-  composes, config groups select, and `_target_` with `_partial_` builds each
-  estimator with the script supplying `device` — which is also exactly the recipe
-  shape the workers above need. The choice is between pinning a dev release,
-  dropping to 3.13, and giving up `--multirun`; none of them is about this
-  script, which is why it is parked rather than decided.
+- **`hydra` decided: `hydra-core >= 1.4.0.dev6`, in a `scripts` dependency
+  group.** The config-driven driver (`conf/` plus a `hydra.main` entry point)
+  was committed unrunnable on Python 3.14: `hydra.main` builds an `argparse`
+  parser with a non-string `help`, which 3.14 rejects, so `hydra-core` 1.3.4
+  cannot start a job. 1.4.0.dev6 fixes it, and under it the config composes,
+  config groups select, and `_target_` with `_partial_` builds each estimator
+  with the script supplying `device` — the same recipe shape the parallel
+  workers need. Of the three ways out — pin the dev release, drop to 3.13, or
+  give up `--multirun` — the dev pin was taken: dropping the interpreter and
+  losing the sweep both cost more than depending on a pre-release does. Only
+  `scripts/` import `hydra`, not `iivs_cardio/`, so it lives in a PEP 735
+  dependency group beside `dev` (`uv sync --group scripts`) rather than the
+  runtime dependencies -- not published, so a group fits better than an extra,
+  and a default sync stays lean and free of the pre-release. The spec is
+  explicit about the pre-release, so `uv sync` resolves it without a
+  project-wide prerelease mode. Revisit when a 1.4 stable ships.
 
 - **Propagate the CHW tensor layout to the kinematic kernels.** The layout is
   settled — CHW (`(2,H,W)`/`(N,2,H,W)`), rationale and channel-first kernel
