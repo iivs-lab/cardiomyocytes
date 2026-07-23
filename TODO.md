@@ -248,7 +248,7 @@ Roughly in dependency order: each one is easier once the previous has landed.
   boundary happens to sit. `FrameNormalizer` takes tensors, so the two folder
   shapes need that conversion made explicit rather than inherited by accident.
 
-- **Rewrite the benchmark as `scripts/optical_flow/benchmark_estimator.py`.**
+- **Rewrite the benchmark as `scripts/optical_flow/run_estimator.py`.**
   Estimators, `common/warp.py`, `optical_flow/evaluation.py` and
   `data/preprocessing/` are done; `benchmark_opencv.py` runs on them but scores a
   single sample against a CPU-vs-CUDA verdict. The replacement sweeps every
@@ -291,7 +291,7 @@ Roughly in dependency order: each one is easier once the previous has landed.
     driver's `instantiate` calls should pass a whitelist of the estimator/kernel
     classes they mean to build (or `UNSAFE_ALLOW_ALL_TARGETS` to keep the legacy
     any-target behaviour and silence the warning). The whitelist is the honest
-    form; wire it in when `benchmark_estimator.py` starts instantiating.
+    form; wire it in when `run_estimator.py` starts instantiating.
 
   Where the time actually goes, per frame pair: the flow dominates everything.
   CPU Dual TV-L1 is ~150x the median filter and ~15x CPU Farneback; on CUDA the
