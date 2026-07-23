@@ -1,138 +1,26 @@
 from __future__ import annotations
 
-__all__ = (
-    "Kernel",
-    "KernelShape",
-    "MedianKernel",
-    "MedianParams",
-    "RadiusLike",
-    "RadiusType",
-)
+__all__ = ("KernelShape", "MedianKernel", "MedianParams")
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from itertools import product
 from typing import Literal, override
 
 import torch
 from beartype import beartype
-from jaxtyping import Float32, jaxtyped
-from torch import Tensor
+from jaxtyping import jaxtyped
 from torch.nn.functional import pad
 
+from iivs_cardio.data.preprocessing.filtering.kernel.base import (
+    FrameType,
+    Kernel,
+    KernelParams,
+    RadiusLike,
+    RadiusType,
+    WindowType,
+)
+
 KernelShape = Literal["ellipsoid", "cuboid"]
-
-# The stored form is always the triple; `RadiusLike` is what a caller may write.
-RadiusType = tuple[int, int, int]
-RadiusLike = int | tuple[int, int] | RadiusType
-
-FrameType = Float32[Tensor, "H W"]
-WindowType = Float32[Tensor, "T H W"]
-
-
-def _normalize_radius(radius: RadiusLike) -> RadiusType:
-    """Expand `radius` to the `(rx, ry, rz)` every kernel stores.
-
-    The two-value form is usually the one to reach for: the in-plane axes are
-    almost always equal, while `rz` is not free to follow them because it counts
-    frames and so tracks the frame rate.
-
-    Args:
-        radius: `r` for every axis, `(r_spatial, r_temporal)` to set the two
-            in-plane axes together, or an explicit `(rx, ry, rz)`. Any sequence
-            will do, so the lists a config parser produces are accepted.
-
-    Returns:
-        The half-extent per axis, in `(rx, ry, rz)` order.
-
-    Raises:
-        ValueError: If `radius` is none of those three forms, or holds anything
-            that is not an `int`.
-    """
-    match radius:
-        case int():
-            return radius, radius, radius
-        case (int() as spatial, int() as temporal):
-            return spatial, spatial, temporal
-        case (int() as rx, int() as ry, int() as rz):
-            return rx, ry, rz
-
-    msg = f"invalid radius {radius!r}: expected int r, (r_xy, r_z), or (rx, ry, rz)"
-    raise ValueError(msg)
-
-
-class Kernel(ABC):
-    """The neighbourhood a 3D filter reads, and what it reduces it to.
-
-    Holds the sampling geometry only, never frames, so one kernel serves any
-    number of sequences and `FilteredSequence` owns the reading and buffering.
-
-    Out-of-range neighbours -- past a sequence end in time, past an edge in
-    space -- are **dropped, not padded**, in every subclass. A pixel near a
-    border is therefore reduced over fewer samples, and each subclass says what
-    that means for its own reduction.
-
-    `FilteredSequence` is written against this type rather than a concrete
-    kernel, so a new reduction is written here and leaves the reading, the
-    buffering, and the window arithmetic untouched.
-
-    Args:
-        radius: half-extent per axis, so an axis spans `2r + 1` samples and `0`
-            disables it. Written as `r`, `(r_spatial, r_temporal)`, or an
-            explicit `(rx, ry, rz)`; stored normalized to the triple. Subclasses
-            may derive it rather than take it directly.
-
-    Raises:
-        ValueError: If `radius` is not one of those forms, or any axis is
-            negative.
-    """
-
-    def __init__(self, radius: RadiusLike) -> None:
-        radius = _normalize_radius(radius)
-        if any(r < 0 for r in radius):
-            msg = f"negative radius {radius}: each axis needs 0 or more (0 disables it)"
-            raise ValueError(msg)
-        self.radius = radius
-
-    @property
-    def spatial_radius(self) -> tuple[int, int]:
-        return self.radius[:2]
-
-    @property
-    def temporal_radius(self) -> int:
-        return self.radius[2]
-
-    @abstractmethod
-    def apply(self, window: WindowType, target: int) -> FrameType:
-        """Reduce the neighbourhood of each pixel of frame `target` in `window`.
-
-        A pure function of its arguments, so a caller holding a whole sequence
-        gets exactly what the streaming pass would produce for the same frame.
-
-        Args:
-            window: `(T, H, W)` consecutive float32 frames.
-            target: index in `window` of the frame to filter.
-
-        Returns:
-            The `(H, W)` filtered frame.
-
-        Raises:
-            ValueError: If `target` is not an index into `window`.
-        """
-
-    def _validate_target(self, window: Tensor, target: int) -> None:
-        """Raise if `target` does not index a frame of `window`."""
-        frames = window.shape[0]
-        if not 0 <= target < frames:
-            msg = f"target {target} is not an index into a {frames}-frame window"
-            raise ValueError(msg)
-
-
-@dataclass(frozen=True, slots=True)
-class MedianParams:
-    radius: RadiusLike
-    shape: KernelShape = "ellipsoid"
-
 
 # Sample counts where CUDA's `topk` beats its `sort`. Both leave the same
 # shared-memory path once they must order more than 32 elements, and both step
@@ -154,9 +42,8 @@ class MedianKernel(Kernel):
         radius: half-extent per axis; `0` disables that axis. Left required
             because there is no safe default: `rz` counts frames but damage
             tracks the time a window spans, so it has to follow the frame rate
-            rather than a constant -- which is also why
-            `(r_spatial, r_temporal)` is usually the form to reach for over a
-            bare `r`.
+            rather than a constant -- which is also why `(r_spatial, r_temporal)`
+            is usually the form to reach for over a bare `r`.
         shape: `ellipsoid` weighs the axes against their radii together, taking
             33 offsets at radius `(2, 2, 2)`; `cuboid` takes the whole box, 125.
 
@@ -246,3 +133,13 @@ class MedianKernel(Kernel):
         pair = ordered.gather(0, torch.stack(((valid - 1) // 2, valid // 2)))
 
         return (pair[0] + pair[1]) / 2
+
+
+@dataclass(frozen=True, slots=True)
+class MedianParams(KernelParams):
+    radius: RadiusLike
+    shape: KernelShape = "ellipsoid"
+
+    @override
+    def build(self) -> MedianKernel:
+        return MedianKernel(self.radius, shape=self.shape)

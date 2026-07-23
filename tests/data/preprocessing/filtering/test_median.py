@@ -8,7 +8,11 @@ import numpy as np
 import pytest
 import torch
 
-from iivs_cardio.data.preprocessing.filtering import MedianKernel, MedianParams
+from iivs_cardio.data.preprocessing.filtering import (
+    KernelParams,
+    MedianKernel,
+    MedianParams,
+)
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -85,7 +89,7 @@ def test_the_three_forms_agree_where_they_describe_one_kernel():
 
 
 def test_a_radius_of_no_recognised_form_is_rejected():
-    with pytest.raises(ValueError, match=r"expected int r"):
+    with pytest.raises(ValueError, match="invalid radius"):
         MedianKernel((1, 1, 1, 1))  # ty: ignore[invalid-argument-type]
 
 
@@ -97,13 +101,14 @@ def test_a_radius_of_no_recognised_form_is_rejected():
         pytest.param((2, 2, 5.0), id="float-in-a-triple"),
         pytest.param(("2", "5"), id="digits-as-strings"),
         pytest.param((None, 1), id="none"),
+        pytest.param("2", id="a-bare-string"),
     ),
 )
 def test_a_radius_holding_a_non_int_is_rejected(radius):
     # A config file reaches here having been through YAML or JSON, where `2.0`
     # and a quoted `"2"` are easy to write. Unchecked, a float gets as far as
     # `range()` in `_build_offsets` and raises there, naming neither the radius
-    # nor the caller's mistake.
+    # nor the caller's mistake. A bare string is caught as a shape, before that.
     with pytest.raises(ValueError, match="invalid radius"):
         MedianKernel(radius)  # ty: ignore[invalid-argument-type]
 
@@ -307,3 +312,15 @@ def test_params_are_frozen_records():
     assert params.shape == "ellipsoid"
     with pytest.raises(FrozenInstanceError):
         params.radius = (2, 2, 2)  # ty: ignore[invalid-assignment]
+
+
+def test_build_expands_the_held_radius_into_a_kernel():
+    # `build` is the `KernelParams` contract, and the step that finally
+    # interprets a short radius the record kept verbatim.
+    params = MedianParams((1, 0), shape="cuboid")
+    kernel = params.build()
+
+    assert isinstance(params, KernelParams)
+    assert isinstance(kernel, MedianKernel)
+    assert kernel.radius == (1, 1, 0)
+    assert kernel.shape == "cuboid"
