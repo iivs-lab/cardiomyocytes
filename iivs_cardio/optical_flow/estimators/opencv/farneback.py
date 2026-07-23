@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, override
 import cv2
 from kaparoo.utils.optional import unwrap_or_factory
 
+from iivs_cardio.optical_flow.estimators.base import EstimatorParams
 from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVEstimator
 
 if TYPE_CHECKING:
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class FarnebackParams:
+class FarnebackParams(EstimatorParams):
     num_levels: int = 3
     pyr_scale: float = 0.5
     fast_pyramids: bool = False
@@ -26,6 +27,10 @@ class FarnebackParams:
     poly_n: int = 5
     poly_sigma: float = 1.2
     flags: int = 0
+
+    @override
+    def build(self, device: str | torch.device = "cpu") -> Farneback:
+        return Farneback(self, device=device)
 
 
 class Farneback(OpenCVEstimator):

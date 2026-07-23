@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-__all__ = ("DeepFlow",)
+__all__ = ("DeepFlow", "DeepFlowParams")
 
-from typing import override
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, override
 
 import cv2
 
+from iivs_cardio.optical_flow.estimators.base import EstimatorParams
 from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVEstimator
+
+if TYPE_CHECKING:
+    import torch
 
 
 class DeepFlow(OpenCVEstimator):
@@ -15,3 +20,16 @@ class DeepFlow(OpenCVEstimator):
     @override
     def _create_algorithm(self) -> cv2.DenseOpticalFlow:
         return cv2.optflow.createOptFlow_DeepFlow()  # no tunable parameters
+
+
+@dataclass(frozen=True, slots=True)
+class DeepFlowParams(EstimatorParams):
+    """DeepFlow's (empty) recipe: it exposes no tunable parameters.
+
+    Held anyway so every estimator has a buildable `EstimatorParams`, letting a
+    worker construct any of them through the one `build` interface.
+    """
+
+    @override
+    def build(self, device: str | torch.device = "cpu") -> DeepFlow:
+        return DeepFlow(device=device)

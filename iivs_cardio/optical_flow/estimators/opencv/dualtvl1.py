@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, override
 import cv2
 from kaparoo.utils.optional import unwrap_or_factory
 
+from iivs_cardio.optical_flow.estimators.base import EstimatorParams
 from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVEstimator
 
 if TYPE_CHECKING:
@@ -17,7 +18,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class DualTVL1Params:
+class DualTVL1Params(EstimatorParams):
     tau: float = 0.25
     lambda_: float = 0.05
     theta: float = 0.3
@@ -32,6 +33,10 @@ class DualTVL1Params:
     median_filtering: int = 5
     # CUDA-only (ignored on CPU):
     iterations: int = 300
+
+    @override
+    def build(self, device: str | torch.device = "cpu") -> DualTVL1:
+        return DualTVL1(self, device=device)
 
 
 class DualTVL1(OpenCVEstimator):

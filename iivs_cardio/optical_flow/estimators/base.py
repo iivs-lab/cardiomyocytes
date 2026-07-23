@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("OpticalFlowEstimator",)
+__all__ = ("EstimatorParams", "OpticalFlowEstimator")
 
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, ClassVar
@@ -70,3 +70,19 @@ class OpticalFlowEstimator(ABC):
 
         `prev` and `curr` are `(N, ...)`; returns `(N, ...)` stacked flows.
         """
+
+
+class EstimatorParams(ABC):
+    """An estimator's constructor arguments as one value, buildable into it.
+
+    Separate from `OpticalFlowEstimator` so a config, a CLI, or a process-pool
+    recipe carries the settings without a live estimator -- which cannot cross a
+    process boundary, holding a `cv2` object that does not pickle. `build`
+    reconstructs one on the target device inside the worker. Mirrors
+    `filtering.kernel.KernelParams`; `device` is the one addition, since an
+    estimator is device-bound where a kernel is not.
+    """
+
+    @abstractmethod
+    def build(self, device: str | torch.device = "cpu") -> OpticalFlowEstimator:
+        """Construct the estimator these describe, on `device`."""
