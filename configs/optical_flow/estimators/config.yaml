@@ -1,0 +1,11 @@
+# @package _global_
+
+defaults:
+  # Optional filter, defaulting to a 2x2x2 ellipsoid median. Disable it with
+  #   ~data/transforms/filtering@data.filtering
+  # or swap the option for another file in that group (e.g. median_cuboid_2x2x2).
+  - /data/transforms/filtering@data.filtering: median_ellipsoid_2x2x2
+  - _self_
+
+data:
+  root: ??? # required: the folder to search for phase .bin sequences
