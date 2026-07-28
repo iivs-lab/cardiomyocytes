@@ -205,6 +205,45 @@ def test_backward_warp_module_rebuilds_grid_on_size_change(monkeypatch):
     assert out.shape == (32, 32)
 
 
+def test_backward_warp_module_reuses_scale_across_calls(monkeypatch):
+    # The pixel->[-1, 1] scale is keyed on (H, W, device) exactly as the grid is,
+    # and materializing it per call costs a host-to-device copy on CUDA. It is the
+    # only `torch.tensor` call on the warp path, so spying there counts rebuilds.
+    real_tensor = torch.tensor
+    calls = 0
+
+    def counting(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_tensor(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "tensor", counting)
+    module = BackwardWarp()
+    img = _textured()
+    offset = _uniform_offset(3.0, 2.0)
+    for _ in range(3):
+        module(img, offset)
+    assert calls == 1  # built once, reused across the 3 warps
+
+    small = torch.zeros((32, 32), dtype=torch.uint8)
+    module(small, torch.zeros((2, 32, 32), dtype=torch.float32))
+    assert calls == 2  # size changed -> rebuilt alongside the grid
+
+
+def test_backward_warp_module_scale_matches_function():
+    # The cached scale must produce the same warp as the freshly built one, for a
+    # non-uniform offset -- a uniform one cannot distinguish a wrong scale.
+    img = _textured().to(torch.float32)
+    y, x = np.mgrid[0:64, 0:64]
+    offset = torch.zeros((2, 64, 64), dtype=torch.float32)
+    offset[0] = torch.as_tensor((x / 16.0).astype(np.float32))  # varies along x
+    offset[1] = torch.as_tensor((y / 24.0).astype(np.float32))  # varies along y
+
+    module = BackwardWarp()
+    module(img, offset)  # populate the cache
+    assert torch.equal(module(img, offset), backward_warp(img, offset))
+
+
 @requires_cuda
 def test_backward_warp_module_stays_on_cuda():
     # The grid must be built on the input's device, else grid_sample would raise

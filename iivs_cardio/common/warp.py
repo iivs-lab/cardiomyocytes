@@ -15,50 +15,56 @@ OffsetType = Float32[Tensor, "*dim 2 H W"]
 PaddingMode = Literal["border", "zeros", "reflection"]
 
 
-def _norm_scale(shape: tuple[int, int]) -> tuple[float, float]:
-    """The `(x, y)` pixel-to-normalized scale for `shape`: `(2/(W-1), 2/(H-1))`.
+def _norm_scale(image: Tensor) -> Tensor:
+    """The `(2,)` float32 `(x, y)` pixel-to-normalized scale, on `image`'s device.
 
-    One pixel step spans this much of grid_sample's `[-1, 1]` range
-    (`align_corners=True`), for the x and y axes respectively.
-    """
-    height, width = shape
-    return 2.0 / (width - 1), 2.0 / (height - 1)
-
-
-def _identity_grid(image: Tensor) -> Tensor:
-    """The identity sampling grid `(H, W, 2)` for `image`, last dim `(x, y)`.
-
-    The grid a zero offset samples; `_warp_with_grid` broadcasts it over the batch
-    and offsets it, so the per-call path needs no `meshgrid`/stack. Cacheable --
-    depends only on `image`'s size and device.
+    `(2/(W-1), 2/(H-1))` -- one pixel step spans this much of grid_sample's `[-1, 1]`
+    range under `align_corners=True`. An axis of extent 1 has no pixel step to
+    measure, and scales by `0`.
     """
     *_, height, width = image.shape
-    grid_y, grid_x = torch.meshgrid(
-        torch.arange(height, dtype=torch.float32, device=image.device),
+    norm_x = 2.0 / (width - 1) if width > 1 else 0.0
+    norm_y = 2.0 / (height - 1) if height > 1 else 0.0
+    return torch.tensor((norm_x, norm_y), dtype=torch.float32, device=image.device)
+
+
+def _identity_grid(image: Tensor, scale: Tensor) -> Tensor:
+    """The identity sampling grid `(H, W, 2)` for `image`, last dim `(x, y)`.
+
+    The grid a zero offset samples. Like `scale`, it depends only on `image`'s `(H, W)`
+    and device, so the two are built together.
+
+    Args:
+        image: the field whose `(H, W)` and device the grid is built for.
+        scale: `_norm_scale(image)`, ordered `(x, y)` to match the stacked axes.
+    """
+    *_, height, width = image.shape
+    grid_x, grid_y = torch.meshgrid(  # `xy` gives each axis as (H, W), x first
         torch.arange(width, dtype=torch.float32, device=image.device),
-        indexing="ij",
+        torch.arange(height, dtype=torch.float32, device=image.device),
+        indexing="xy",
     )
-    scale_x, scale_y = _norm_scale((height, width))
-    norm_x = grid_x * scale_x - 1.0  # pixel coords -> [-1, 1]
-    norm_y = grid_y * scale_y - 1.0
-    return torch.stack((norm_x, norm_y), dim=-1)
+    return torch.stack((grid_x, grid_y), dim=-1) * scale - 1.0
+
+
+def _grid_is_stale(grid: Tensor, image: Tensor) -> bool:
+    """Test whether `grid` was built for a different size or device than `image`."""
+    return grid.shape[:2] != image.shape[-2:] or grid.device != image.device
 
 
 def _warp_with_grid(
-    image: Tensor, offset: Tensor, base: Tensor, padding_mode: PaddingMode
+    image: Tensor,
+    offset: Tensor,
+    grid: Tensor,
+    scale: Tensor,
+    padding_mode: PaddingMode,
 ) -> Tensor:
-    # `base` is the identity grid `(H, W, 2)` (fresh or cached); per call we only
-    # shift it by the offset -- no meshgrid, no stack -- then sample and restore
-    # `image`'s dtype. Batch dims are flattened to one N.
     *batch, height, width = image.shape
     images = image.reshape(-1, height, width)
     offsets = offset.reshape(-1, 2, height, width)
 
-    # sample = grid + offset in normalized coords; `_norm_scale` is the per-axis
-    # pixel->[-1, 1] factor. View `offsets` as (N, H, W, 2) to line up with
-    # `base`; `scale` is explicitly float32 so the shift is float.
-    scale = offsets.new_tensor(_norm_scale((height, width)), dtype=torch.float32)
-    grid = base + offsets.permute(0, 2, 3, 1) * scale  # (N, H, W, 2)
+    # Rebind rather than shift in place: `grid` may be a caller's cached tensor.
+    grid = grid + offsets.permute(0, 2, 3, 1) * scale  # (N, H, W, 2)
 
     sampled = grid_sample(
         images.float()[:, None],
@@ -86,38 +92,47 @@ def backward_warp(
     """Sample `image` at ``grid + offset`` (bilinear pull sampling), batched.
 
     The output pixel at `x` takes `image[x + offset(x)]`, so `offset` says where
-    to *read from*, not where to move content to. **Note the sign**: content ends
-    up displaced by `-offset`, so to move an image *by* a displacement, negate it.
+    to *read from*, not where to move content to. **Note the sign**: content ends up
+    displaced by `-offset`, so to move an image *by* a displacement, negate it.
 
     A forward optical flow `A -> B` is exactly this offset: it is defined on `A`'s
-    grid, which is the output grid here, so `backward_warp(B, flow)` reconstructs
-    `A` with no inverse involved. That is the operation warp-consistency scoring
-    and Lagrangian differencing both need -- pass the flow directly.
+    grid, which is the output grid here, so `backward_warp(B, flow)` reconstructs `A`
+    with no inverse involved. Warp-consistency scoring and Lagrangian differencing
+    both need exactly that, so pass the flow directly.
 
-    Sampling runs in float32 and the result is cast back to `image`'s dtype --
-    integers rounded and clamped to their range, floats kept fractional. Shared
-    leading dims are warped together.
+    The coordinate grid is rebuilt on every call; reach for `BackwardWarp` to reuse it
+    across same-size warps.
 
     Args:
-        image: `(*dim, H, W)` field(s) to sample, any real (integer or float)
-            dtype -- a frame, a height map, one component of a vector field.
-        offset: `(*dim, 2, H, W)` float32 sampling offset (channel 0 = dx, 1 = dy).
+        image: `(*dim, H, W)` field(s) to sample, any real (integer or float) dtype
+            -- a frame, a height map, or one component of a vector field.
+        offset: `(*dim, 2, H, W)` float32 sampling offset (channel 0 = dx, 1 = dy),
+            sharing `image`'s leading dims. Those dims warp together.
         padding_mode: out-of-bounds policy (`border`, `zeros`, or `reflection`).
+
+    Returns:
+        The sampled field, shaped and dtyped like `image`. Sampling runs in float32:
+        a float dtype keeps its fractional values, an integer dtype is rounded
+        and clamped back to its range.
+
+    Raises:
+        TypeError: If a shape, dtype, or `padding_mode` breaks the contract above --
+            a `jaxtyping.TypeCheckError`, raised at the call boundary.
     """
-    base = _identity_grid(image)
-    return _warp_with_grid(image, offset, base, padding_mode)
+    scale = _norm_scale(image)
+    grid = _identity_grid(image, scale)
+    return _warp_with_grid(image, offset, grid, scale, padding_mode)
 
 
 class BackwardWarp(nn.Module):
-    """Sample images at an offset grid, caching the coordinate grid.
+    """`backward_warp` with the coordinate grid cached across same-size calls.
 
-    `forward(image, offset)` takes a `(*dim, H, W)` field of any real dtype and a
-    `(*dim, 2, H, W)` float32 sampling offset (channel 0 = dx, 1 = dy), sampling
-    `image` at ``grid + offset`` in float32 and casting back to `image`'s dtype
-    (integers rounded and clamped, floats kept fractional). See `backward_warp`
-    for the sign convention and why a forward flow is passed unchanged. The
-    `(H, W)` grid depends only on image size and device, so it is built once and
-    reused across same-size calls, rebuilt lazily on a size/device change.
+    The grid and its scale depend only on `(H, W)` and device, so both are built once
+    and reused, rebuilt lazily when either changes.
+
+    See `backward_warp` for the sign convention and why a forward flow is passed
+    unchanged. Unlike it, `forward` skips the runtime typecheck, but holds callers
+    to the same contract.
 
     Args:
         padding_mode: out-of-bounds policy (`border`, `zeros`, or `reflection`).
@@ -126,18 +141,31 @@ class BackwardWarp(nn.Module):
     def __init__(self, *, padding_mode: PaddingMode = "border") -> None:
         super().__init__()
         self.padding_mode = padding_mode
-        self._grid: Tensor | None = None  # cached (H, W, 2) identity grid
+        self._cache: tuple[Tensor, Tensor] | None = None  # (grid, scale), one size
 
-    def _base_grid(self, image: Tensor) -> Tensor:
-        """The cached `(H, W, 2)` grid for `image`, rebuilt on a size/device change."""
-        shape = image.shape[-2:]
-        grid = self._grid
-        if grid is None or grid.shape[:2] != shape or grid.device != image.device:
-            grid = _identity_grid(image)
-            self._grid = grid
-        return grid
+    def _coords(self, image: Tensor) -> tuple[Tensor, Tensor]:
+        """The cached grid and scale for `image`, rebuilt on a size/device change."""
+        cache = self._cache
+
+        if cache is None or _grid_is_stale(cache[0], image):
+            scale = _norm_scale(image)
+            grid = _identity_grid(image, scale)
+            cache = grid, scale
+            self._cache = cache
+
+        return cache
 
     def forward(self, image: Tensor, offset: Tensor) -> Tensor:
-        """Return `image` sampled at `grid + offset`, reusing the cached grid."""
-        base = self._base_grid(image)
-        return _warp_with_grid(image, offset, base, self.padding_mode)
+        """Return `image` sampled at ``grid + offset``, reusing the cached grid.
+
+        Args:
+            image: `(*dim, H, W)` field(s) to sample, any real integer or float dtype.
+            offset: `(*dim, 2, H, W)` float32 offset (channel 0 = dx, 1 = dy),
+                sharing `image`'s leading dims.
+
+        Returns:
+            The sampled field, shaped and dtyped like `image` -- integers rounded
+            and clamped to their range, floats kept fractional.
+        """
+        grid, scale = self._coords(image)
+        return _warp_with_grid(image, offset, grid, scale, self.padding_mode)
