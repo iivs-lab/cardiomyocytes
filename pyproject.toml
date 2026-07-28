@@ -76,8 +76,8 @@ GitHub = "https://www.github.com/iivs-lab/cardiomyocytes"
 dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
-    "ruff>=0.15.18",
-    "ty>=0.0.51",
+    "ruff>=0.16.0",
+    "ty>=0.0.64",
     { include-group = "scripts" },
 ]
 scripts = [
@@ -161,7 +161,7 @@ exclude_lines = [
 directory = ".cache/coverage/htmlcov"
 
 [tool.ruff]
-required-version = ">=0.15.18"
+required-version = ">=0.16.0"
 cache-dir = "./.cache/ruff"
 extend-exclude = [
     ".cache",
@@ -176,6 +176,7 @@ indent-width = 4
 # preview = true  # Uncomment to enable unstable features
 
 [tool.ruff.format]
+exclude = ["*.md"]
 quote-style = "double"
 indent-style = "space"
 docstring-code-format = true
@@ -323,7 +324,7 @@ ignore-overlong-task-comments = true
 [tool.ruff.lint.pydoclint]
 ignore-one-line-docstrings = true
 
-# Following sections use default values and are omitted (ruff v0.15.18):
+# Following sections use default values and are omitted (ruff v0.16.0):
 # - tool.ruff.analyze
 # - tool.ruff.lint.flake8-boolean-trap
 # - tool.ruff.lint.flake8-bugbear

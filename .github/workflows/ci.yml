@@ -35,10 +35,10 @@ jobs:
       # needs none of the project's GPU-only dependencies installed. Pinned to
       # the dev group's ruff so CI and local agree on formatting/lint rules.
       - name: Ruff format check
-        run: uvx ruff@0.15.18 format --check .
+        run: uvx ruff@0.16.0 format --check .
 
       - name: Ruff lint
-        run: uvx ruff@0.15.18 check .
+        run: uvx ruff@0.16.0 check .
 
   lock:
     name: Verify lockfile

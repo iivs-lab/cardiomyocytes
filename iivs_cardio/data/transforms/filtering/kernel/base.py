@@ -4,6 +4,7 @@ __all__ = ("FilterKernel", "KernelParams", "RadiusLike", "RadiusType")
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from typing import cast
 
 from jaxtyping import Float32
 from torch import Tensor
@@ -30,7 +31,9 @@ def _normalize_triple[T](
         ValueError: If `value` is none of the three shapes.
     """
     if isinstance(value, Sequence) and not isinstance(value, str | bytes):
-        match list(value):
+        # The narrowing proves `value` is a Sequence but drops its element type
+        # to `object`, which the annotation already pins to `T`.
+        match list(cast("Sequence[T]", value)):
             case [x, y, z]:
                 return x, y, z
             case [spatial, temporal]:
