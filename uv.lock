@@ -214,8 +214,10 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "hydra-core" },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "python-dotenv" },
     { name = "ruff" },
     { name = "ty" },
 ]
@@ -243,8 +245,10 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "hydra-core", specifier = ">=1.4.0.dev6" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-cov", specifier = ">=7.1.0" },
+    { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "ruff", specifier = ">=0.15.18" },
     { name = "ty", specifier = ">=0.0.51" },
 ]
