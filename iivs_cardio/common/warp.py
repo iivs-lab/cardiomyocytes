@@ -60,19 +60,19 @@ def _warp_with_grid(
     padding_mode: PaddingMode,
 ) -> Tensor:
     *batch, height, width = image.shape
-    images = image.reshape(-1, height, width)
+    images = image.reshape(-1, 1, height, width)  # the (N, C, H, W) grid_sample wants
     offsets = offset.reshape(-1, 2, height, width)
 
     # Rebind rather than shift in place: `grid` may be a caller's cached tensor.
     grid = grid + offsets.permute(0, 2, 3, 1) * scale  # (N, H, W, 2)
 
     sampled = grid_sample(
-        images.float()[:, None],
+        images.float(),
         grid,
         mode="bilinear",
         padding_mode=padding_mode,
         align_corners=True,
-    )[:, 0]
+    )[:, 0]  # remove redundant channel dim, back to (N, H, W)
 
     if image.dtype.is_floating_point:
         warped = sampled.to(image.dtype)
