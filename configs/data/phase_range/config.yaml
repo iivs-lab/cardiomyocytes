@@ -1,0 +1,27 @@
+# @package _global_
+
+defaults:
+  - _self_
+  - /compute@compute: cpu
+  - /data/transforms/filtering@filter: median_ellipsoid_2x2x2
+
+source:
+  root: ??? # the folder to search for phase .bin sequences
+  unit: null # unit to read values in; null keeps the stored one
+  include: null # a file of subpaths, or the subpaths as a list; null takes all
+  exclude: null # same, for sequences to skip
+  frame_step: 1 # take every Nth frame
+
+target:
+  root: ??? # where the config snapshot, the log, and the outputs land
+  save_ranges: true # one JSON of the dataset, sequence, and frame ranges
+  save_frames: false # the filtered frames as a .bin tree, laid out like the source
+
+filter: null # set by the defaults above; null scans raw frames
+
+hydra:
+  run:
+    dir: ${target.root}
+  sweep:
+    dir: ${target.root}
+    subdir: ${hydra.job.num} # a group override's `/` would nest the job directories

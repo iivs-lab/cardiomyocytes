@@ -1,0 +1,2 @@
+device: cpu
+workers: 0 # 0 stays in this process, N workers, null one per core
