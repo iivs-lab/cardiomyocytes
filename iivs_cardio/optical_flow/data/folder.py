@@ -67,8 +67,8 @@ def read_flow_npy_header(path: StrPath) -> tuple[tuple[int, int, int], np.dtype[
         path: The `.npy` file to inspect.
 
     Returns:
-        The `(2, H, W)` shape and the stored dtype, which the caller checks -- a flow
-        folder wants float32, but reading a foreign dtype is not itself an error.
+        The `(2, H, W)` shape and the stored dtype, left for the caller to judge. A
+        flow folder wants float32, but reading a foreign dtype is not itself an error.
 
     Raises:
         FileNotFoundError: If `path` does not exist.
@@ -160,7 +160,7 @@ def save_flow_folder(
     """Write `flows` into `dest` as a numbered folder `OpticalFlowFolder` reads back.
 
     `flows` is consumed one field at a time, so a whole sequence is never held in
-    memory, and the folder is built atomically -- a failure part-way leaves any
+    memory, and the folder is built atomically. A failure part-way leaves any
     existing `dest` untouched rather than a half-written folder.
 
     Args:
@@ -191,16 +191,12 @@ class OpticalFlowFolder(
 ):
     """An ordered folder of numbered `{index:05d}_flow.npy` float32 flow fields.
 
-    One estimator run over one sequence: `N` frames give `N - 1` fields, each
-    `(2, H, W)` with channel `0` = dx and `1` = dy, in pixels. Items come back as
-    `numpy` arrays, the boundary every `iivs-lib` folder keeps; wrap the folder to
-    reach `torch` -- `FilteredSequence` and `TransformedSequence` are how the rest of
-    this project crosses it.
+    One estimator run over one sequence. `N` frames give `N - 1` fields of `(2, H, W)`,
+    channel `0` = dx and `1` = dy, in pixels.
 
     Validation has three depths, and the middle one is why the default is affordable:
     `"names"` reads no file at all, `"headers"` reads each `.npy` header (shape and
-    dtype, no pixels), and `"data"` decodes every field. On a 1000-field folder that
-    is roughly 0 ms, 100 ms, and 4 s.
+    dtype, no pixels), and `"data"` decodes every field.
 
     Args:
         root: The folder to scan.
@@ -249,7 +245,7 @@ class OpticalFlowFolder(
 
         Raises:
             ValueError: If the field is not float32, its frame shape differs from the
-                first file's, or -- at `"data"` -- it holds non-finite values.
+                first file's, or, at `"data"`, it holds non-finite values.
         """
         shape, dtype = read_flow_npy_header(path)
 
