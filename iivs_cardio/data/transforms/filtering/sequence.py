@@ -16,10 +16,11 @@ if TYPE_CHECKING:
 
     from iivs_cardio.data.transforms.filtering.kernel import FilterKernel, KernelParams
 
+type NumPyRealDType = np.floating | np.integer
+"""Any real numpy dtype. Complex is excluded: casting one drops its phase."""
 
-class FilteredSequence[M, T: np.floating | np.integer = np.float32](
-    DataSequence["Tensor", M]
-):
+
+class FilteredSequence[M, T: NumPyRealDType = np.float32](DataSequence["Tensor", M]):
     """A filtered view over a source sequence, itself a sequence.
 
     Wraps `source` rather than consuming it, so `filtered[i]` is the kernel
