@@ -85,21 +85,21 @@ def test_folder_rejects_non_contiguous_numbering(tmp_path):
 def test_folder_rejects_a_field_without_a_channel_axis(tmp_path):
     root = _folder(tmp_path / "flows", count=2)
     np.save(root / "00001_flow.npy", np.zeros((6, 8), dtype=np.float32))
-    with pytest.raises(ValueError, match=r"must hold one \(2, H, W\) flow field"):
+    with pytest.raises(ValueError, match=r"expected a \(2, H, W\) flow field"):
         OpticalFlowFolder(root)
 
 
 def test_folder_rejects_a_wrong_channel_count(tmp_path):
     root = _folder(tmp_path / "flows", count=2)
     np.save(root / "00001_flow.npy", np.zeros((3, 6, 8), dtype=np.float32))
-    with pytest.raises(ValueError, match=r"got shape \(3, 6, 8\)"):
+    with pytest.raises(ValueError, match=r"got \(3, 6, 8\)"):
         OpticalFlowFolder(root)
 
 
 def test_folder_rejects_a_frame_shape_that_differs_from_the_first(tmp_path):
     root = _folder(tmp_path / "flows", count=2)
     np.save(root / "00001_flow.npy", _flow(1, height=6, width=9))
-    with pytest.raises(ValueError, match=r"must match the first file \(6, 8\)"):
+    with pytest.raises(ValueError, match=r"expected the first file's frame \(6, 8\)"):
         OpticalFlowFolder(root)
 
 
@@ -107,8 +107,20 @@ def test_folder_rejects_a_non_float32_dtype(tmp_path):
     # Only the header level catches this; the shape alone is right.
     root = _folder(tmp_path / "flows", count=2)
     np.save(root / "00001_flow.npy", np.zeros((2, 6, 8), dtype=np.float64))
-    with pytest.raises(ValueError, match="must be float32"):
+    with pytest.raises(ValueError, match="expected a float32 field"):
         OpticalFlowFolder(root)
+
+
+def test_folder_error_ends_with_the_offending_full_path(tmp_path):
+    # A bare filename is ambiguous once several sequences are in flight, and every
+    # file in a folder shares the stem. The message names what was expected first
+    # and the full path last, so the actionable part is where a reader stops.
+    root = _folder(tmp_path / "flows", count=2)
+    offender = root / "00001_flow.npy"
+    np.save(offender, np.zeros((2, 6, 8), dtype=np.float64))
+    with pytest.raises(ValueError, match="expected a float32 field") as excinfo:
+        OpticalFlowFolder(root)
+    assert str(excinfo.value).endswith(str(offender))
 
 
 def test_folder_names_level_accepts_what_headers_rejects(tmp_path):
@@ -117,7 +129,7 @@ def test_folder_names_level_accepts_what_headers_rejects(tmp_path):
     root = _folder(tmp_path / "flows", count=2)
     np.save(root / "00001_flow.npy", np.zeros((2, 6, 8), dtype=np.float64))
     OpticalFlowFolder(root, validate="names")  # must not raise
-    with pytest.raises(ValueError, match="must be float32"):
+    with pytest.raises(ValueError, match="expected a float32 field"):
         OpticalFlowFolder(root, validate="headers")
 
 
@@ -197,7 +209,9 @@ def test_read_flow_npy_header_rejects_an_unsupported_npy_version(tmp_path):
     raw = bytearray(path.read_bytes())
     raw[6] = 3
     path.write_bytes(raw)
-    with pytest.raises(ValueError, match=r"unsupported \.npy format version \(3, 0\)"):
+    with pytest.raises(
+        ValueError, match=r"expected \.npy format 1\.0 or 2\.0, got \(3, 0\)"
+    ):
         read_flow_npy_header(path)
 
 
@@ -212,7 +226,7 @@ def test_save_flow_npy_round_trips(tmp_path):
 
 
 def test_save_flow_npy_rejects_a_non_flow_array(tmp_path):
-    with pytest.raises(ValueError, match=r"must hold one \(2, H, W\) flow field"):
+    with pytest.raises(ValueError, match=r"expected a \(2, H, W\) flow field"):
         save_flow_npy(tmp_path / "00000_flow.npy", np.zeros((6, 8), dtype=np.float32))
 
 

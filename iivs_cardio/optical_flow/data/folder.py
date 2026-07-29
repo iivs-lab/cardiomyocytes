@@ -43,14 +43,14 @@ _HEADER_READERS = {
 }
 
 
-def _validate_flow_shape(shape: tuple[int, ...], name: str) -> tuple[int, int, int]:
-    """Narrow `shape` to `(2, H, W)`, naming `name` if it is anything else.
+def _validate_flow_shape(shape: tuple[int, ...], path: Path) -> tuple[int, int, int]:
+    """Narrow `shape` to `(2, H, W)`, naming `path` if it is anything else.
 
     Raises:
         ValueError: If `shape` is not `FLOW_NDIM` axes leading with `FLOW_CHANNELS`.
     """
     if len(shape) != FLOW_NDIM or shape[0] != FLOW_CHANNELS:
-        msg = f"{name} must hold one ({FLOW_CHANNELS}, H, W) flow field, got shape {shape}"
+        msg = f"expected a ({FLOW_CHANNELS}, H, W) flow field, got {shape}: {path}"
         raise ValueError(msg)
     return shape[0], shape[1], shape[2]
 
@@ -81,10 +81,10 @@ def read_flow_npy_header(path: StrPath) -> tuple[tuple[int, int, int], np.dtype[
         version = np.lib.format.read_magic(file)
         reader = _HEADER_READERS.get(version)
         if reader is None:
-            msg = f"unsupported .npy format version {version}: expected 1.0 or 2.0"
+            msg = f"expected .npy format 1.0 or 2.0, got {version}: {path}"
             raise ValueError(msg)
         shape, _fortran_order, dtype = reader(file)
-    return _validate_flow_shape(shape, path.name), dtype
+    return _validate_flow_shape(shape, path), dtype
 
 
 def load_flow_npy(
@@ -110,7 +110,7 @@ def load_flow_npy(
     """
     path = ensure_file_exists(path)
     data = np.load(path, allow_pickle=False)
-    _validate_flow_shape(data.shape, path.name)
+    _validate_flow_shape(data.shape, path)
     return validate_float32_array(
         data, ndim=FLOW_NDIM, on_nonfinite=on_nonfinite, allow_stack=False
     )
@@ -143,7 +143,7 @@ def save_flow_npy(
         FileNotFoundError: If the parent directory of `path` does not exist.
     """
     path = ensure_file_extension(path, OpticalFlowFolder.FILE_EXT, add=True)
-    _validate_flow_shape(flow.shape, path.name)
+    _validate_flow_shape(flow.shape, path)
     flow = validate_float32_array(
         flow, ndim=FLOW_NDIM, on_nonfinite=on_nonfinite, allow_stack=False
     )
@@ -254,12 +254,12 @@ class OpticalFlowFolder(
         shape, dtype = read_flow_npy_header(path)
 
         if dtype != np.float32:
-            msg = f"dtype of {path.name} must be float32 (got {dtype})"
+            msg = f"expected a float32 field, got {dtype}: {path}"
             raise ValueError(msg)
 
         if (frame := (shape[1], shape[2])) != self.frame_shape:
             expected = self.frame_shape
-            msg = f"frame of {path.name} must match the first file {expected} (got {frame})"
+            msg = f"expected the first file's frame {expected}, got {frame}: {path}"
             raise ValueError(msg)
 
         if level == "data":
