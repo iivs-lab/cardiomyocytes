@@ -3,6 +3,83 @@
 Tracked items that are not yet captured in code or tests. Promote an
 item to a CHANGELOG entry once it lands.
 
+## In flight — `scan_phase_range` and the script-level gaps
+
+Immediate work, unlike the design questions below. `scripts/data/scan_phase_range.py`
+splits `cfg` into typed sections and builds the filter kernel; everything after
+that is open, and its three `F841` findings mark exactly which sections are
+parsed but not yet consumed.
+
+- **Two upstream requests are written up beside this repository**, in
+  `D:\Dev\iivs-lab\`, each with the reasoning, the proposed signature, and the
+  tests worth writing. Neither blocks progress; both have a workaround in place.
+
+  `HANDOFF-iivs-lib.md` asks for `PhaseFileList.with_unit(unit) -> Self`, because
+  `source.unit` has nowhere to go: `target_unit` is a constructor-only, read-only
+  property, and none of `search_timelapses`, `KoalaTimelapse.__init__`, or
+  `PhaseGroup.bin_folder` offers the argument. A setter was rejected on evidence —
+  `ValueRangeMixin._global_value_range` is a `cached_property` with no unit in its
+  key, so a later `value_range()` would return the previous unit's numbers without
+  failing. Meanwhile the caller reopens the folder, which substitutes constructor
+  defaults for whatever `PhaseGroup._open` passed; revisit if `validate` ever
+  stops being `"headers"`.
+
+  `HANDOFF-kaparoo-python.md` asks for `read_entries` and `select_by_name`, so
+  `source.include` / `source.exclude` can be either an inline list of subpaths or
+  a text file listing them. Both are domain-free, hence `kaparoo-python`. The
+  listings apply *after* the search rather than as walk-time pruning, so a typo
+  raises instead of silently narrowing the dataset. Part 2 of that document holds
+  a deferred `balance` (weighted split across workers or GPUs) with measurements;
+  nothing needs it yet.
+
+- **Move `search_sources` to `search_timelapses(root, require=["Phase"])`.**
+  `KoalaTimelapse.root` is the folder a user names in `include` / `exclude`, where
+  `PhaseBinFolder.root` sits three levels below it, so the current key would have
+  to climb `parents[2]` and would break silently if the layout moved. It also
+  carries `num_frames` and `timestamps`, which the beating-profile work needs
+  later. Filter a `None` out of `tl.phase.bin_folder`: `require=["Phase"]`
+  guarantees a `Phase` folder, not a `Float/Bin` under it.
+
+- **`source.frame_step` belongs to the sequence, not the search.** It slices the
+  source, so it lands with the `FrameSequence` construction rather than in the
+  folder lookup. Stride before filtering, never after — filtering first lets
+  discarded frames leak into the kept ones and biases any frame-rate comparison.
+
+- **Ranging and writing are unwritten.** `FrameSequence(source, kernel,
+  device=...)` takes the built kernel directly (`from_params` is for callers
+  holding params instead). `target.save_ranges` writes one nested JSON of the
+  dataset, per-sequence, and per-frame ranges — flat CSV was rejected because all
+  three levels would share one table. `target.save_frames` writes the filtered
+  frames as a `.bin` tree laid out like the source.
+
+- **Measure before wiring `compute.workers` / `compute.gpu_ids`.** The scan reads
+  every file to compute min/max, so it is dominated by IO and may not scale at
+  all; compare `workers=1` against `workers=4` first. If it does scale, prefer a
+  work queue over a static split — a queue is list scheduling driven by actual
+  completion times, so it matches the static optimum and additionally absorbs a
+  wrong weight estimate (uneven frame shapes, heterogeneous GPUs).
+
+- **Delete `scripts/data/scan_value_range_old.py`** once the new script covers the
+  same ground. It is the earlier full implementation, kept as a reference; its
+  `CONFIG_NAME` already points at a renamed path, so it does not run.
+
+- **`ty` now checks `scripts/`, and it found four real defects in
+  `run_estimator.py`** — the wiring described further down, not yet built. A
+  mismatched return type at `:39`, both arguments to `FrameNormalizer.apply` wrong
+  at `:52` (against `iivs_cardio/data/transforms/normalization.py:142`), and a
+  wrong argument to `process_sequence` at `:76`. `ruff` adds an unused loop
+  variable at `:51` and two flows computed and dropped at `:53`-`:54`. Separately,
+  `check_compute_env.py` has two `invalid-assignment` errors at `:31` and `:44`
+  from its `torch = None` / `cv2 = None` import fallbacks; annotate those names as
+  optional modules rather than suppressing the rule.
+
+- **Deferred by decision, recorded so they are not rediscovered.** Renaming the
+  `Params` suffix to `Config` on `KernelParams` and the optical-flow params
+  classes. Reading frames on multiple threads inside `FrameSequence.value_range`.
+  Putting `FrameShapedMixin` / `ValueRangeMixin` on `FrameSequence` — the latter is
+  unusable on tensors as written, since it tests emptiness with `finite.size == 0`
+  and a `Tensor`'s `size` is a method, so the comparison is never true.
+
 ## Analysis — what to settle on the full dataset
 
 Experiments and policy rather than modules. These decide what the caches will
