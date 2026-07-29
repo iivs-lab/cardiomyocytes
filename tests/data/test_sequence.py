@@ -38,6 +38,7 @@ def _bin_folder(root, frames: list[np.ndarray]):
             frame,
             pixel_size=PIXEL_SIZE,
             height_scale=HEIGHT_SCALE,
+            on_nonfinite="ignore",  # some cases write NaN on purpose
         )
     return root
 
@@ -260,3 +261,115 @@ def test_from_params_forwards_the_device(tmp_path):
     )
     assert sequence.device == torch.device("cpu")
     assert sequence[1].device.type == "cpu"
+
+
+# -------------------------------- value_range ----------------------------------- #
+
+
+def _ramp_folder(root, count: int = 5):
+    # Frame i holds only the value i, so every expected range is exact.
+    frames = [np.full((3, 4), float(i), dtype=np.float32) for i in range(count)]
+    return _bin_folder(root, frames)
+
+
+def test_value_range_of_one_frame(tmp_path):
+    sequence = FrameSequence(PhaseBinFolder(_ramp_folder(tmp_path / "Bin")))
+    assert sequence.value_range(3) == (3.0, 3.0)
+
+
+def test_value_range_of_a_negative_index(tmp_path):
+    sequence = FrameSequence(PhaseBinFolder(_ramp_folder(tmp_path / "Bin")))
+    assert sequence.value_range(-1) == (4.0, 4.0)
+
+
+@pytest.mark.parametrize(
+    ("selection", "expected"),
+    (
+        (slice(1, 4), (1.0, 3.0)),
+        (slice(None, None, 2), (0.0, 4.0)),
+        (slice(-2, None), (3.0, 4.0)),
+        (range(1, 3), (1.0, 2.0)),
+        ([4, 0], (0.0, 4.0)),
+        ((2,), (2.0, 2.0)),
+    ),
+)
+def test_value_range_of_a_selection(tmp_path, selection, expected):
+    sequence = FrameSequence(PhaseBinFolder(_ramp_folder(tmp_path / "Bin")))
+    assert sequence.value_range(selection) == expected
+
+
+def test_value_range_of_the_whole_sequence(tmp_path):
+    sequence = FrameSequence(PhaseBinFolder(_ramp_folder(tmp_path / "Bin")))
+    assert sequence.value_range() == (0.0, 4.0)
+    assert sequence.value_range() == sequence.value_range(slice(None))
+
+
+def test_value_range_ignores_non_finite_values(tmp_path):
+    # A NaN must be dropped, not propagated: `min` over a tensor holding one
+    # returns NaN, which would poison every range that touched the frame.
+    frames = [np.full((3, 4), float(i), dtype=np.float32) for i in range(3)]
+    frames[1][0, 0] = np.nan
+    root = _bin_folder(tmp_path / "Bin", frames)
+    sequence = FrameSequence(PhaseBinFolder(root))
+    assert sequence.value_range(1) == (1.0, 1.0)
+    assert sequence.value_range() == (0.0, 2.0)
+
+
+def test_value_range_rejects_a_frame_with_no_finite_value(tmp_path):
+    frames = [np.full((3, 4), np.nan, dtype=np.float32)]
+    root = _bin_folder(tmp_path / "Bin", frames)
+    sequence = FrameSequence(PhaseBinFolder(root))
+    with pytest.raises(ValueError, match="the selection holds no finite value"):
+        sequence.value_range(0)
+
+
+def test_value_range_rejects_an_empty_selection(tmp_path):
+    sequence = FrameSequence(PhaseBinFolder(_ramp_folder(tmp_path / "Bin")))
+    with pytest.raises(ValueError, match="undefined for an empty selection"):
+        sequence.value_range([])
+    with pytest.raises(ValueError, match="undefined for an empty selection"):
+        sequence.value_range(slice(2, 2))
+
+
+def test_value_range_rejects_an_out_of_range_index(tmp_path):
+    sequence = FrameSequence(PhaseBinFolder(_ramp_folder(tmp_path / "Bin")))
+    with pytest.raises(IndexError):
+        sequence.value_range(99)
+
+
+def test_value_range_caches_only_the_whole_sequence(monkeypatch, tmp_path):
+    # The global range reads every frame, so it is computed once; a subset is not
+    # cached, which a read counter shows and equal return values cannot.
+    sequence = FrameSequence(PhaseBinFolder(_ramp_folder(tmp_path / "Bin")))
+    reads = 0
+    real_get_item = type(sequence).get_item
+
+    def counting(self, index):
+        nonlocal reads
+        reads += 1
+        return real_get_item(self, index)
+
+    monkeypatch.setattr(type(sequence), "get_item", counting)
+
+    sequence.value_range()
+    after_first = reads
+    sequence.value_range()
+    assert reads == after_first == 5  # cached: no further reads
+
+    sequence.value_range(slice(0, 2))
+    sequence.value_range(slice(0, 2))
+    assert reads == after_first + 4  # recomputed both times
+
+
+def test_value_range_reports_the_filtered_values(tmp_path):
+    # Filtering changes the values, so the range must come from what this sequence
+    # yields rather than from the source it wraps. The spike is a single pixel:
+    # a whole frame of them would outvote its own neighbourhood and survive.
+    frames = [np.full((3, 4), float(i), dtype=np.float32) for i in range(5)]
+    frames[2][1, 1] = 100.0
+    root = _bin_folder(tmp_path / "Bin", frames)
+
+    plain = FrameSequence(PhaseBinFolder(root))
+    filtered = FrameSequence(PhaseBinFolder(root), MedianKernel(RADIUS))
+    assert plain.value_range() == (0.0, 100.0)
+    assert filtered.value_range() == (0.0, 4.0)  # the median deletes the spike
