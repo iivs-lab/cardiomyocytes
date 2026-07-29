@@ -95,17 +95,17 @@ def backward_warp(
     to *read from*, not where to move content to. **Note the sign**: content ends up
     displaced by `-offset`, so to move an image *by* a displacement, negate it.
 
-    A forward optical flow `A -> B` is exactly this offset: it is defined on `A`'s
-    grid, which is the output grid here, so `backward_warp(B, flow)` reconstructs `A`
-    with no inverse involved. Warp-consistency scoring and Lagrangian differencing
-    both need exactly that, so pass the flow directly.
+    An offset already defined *on the output grid* -- one that says where in `image`
+    each output position reads from -- is used exactly as given, with no inversion.
+    Deriving the opposite direction by negating only approximates that inverse,
+    with an error growing as `|offset| * |grad offset|`.
 
     The coordinate grid is rebuilt on every call; reach for `BackwardWarp` to reuse it
     across same-size warps.
 
     Args:
         image: `(*dim, H, W)` field(s) to sample, any real (integer or float) dtype
-            -- a frame, a height map, or one component of a vector field.
+            -- a frame, a mask, or one channel of a multi-channel field.
         offset: `(*dim, 2, H, W)` float32 sampling offset (channel 0 = dx, 1 = dy),
             sharing `image`'s leading dims. Those dims warp together.
         padding_mode: out-of-bounds policy (`border`, `zeros`, or `reflection`).
@@ -130,7 +130,7 @@ class BackwardWarp(nn.Module):
     The grid and its scale depend only on `(H, W)` and device, so both are built once
     and reused, rebuilt lazily when either changes.
 
-    See `backward_warp` for the sign convention and why a forward flow is passed
+    See `backward_warp` for the sign convention and why an output-grid offset is used
     unchanged. Unlike it, `forward` skips the runtime typecheck, but holds callers
     to the same contract.
 
