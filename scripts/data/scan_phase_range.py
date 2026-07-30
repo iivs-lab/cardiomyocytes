@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import hydra
 from dotenv import load_dotenv
+from hydra.core.hydra_config import HydraConfig
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import resolve_phase_unit, search_phase_bin_folders
 from kaparoo.filesystem import StagedFile, stringify_path
@@ -35,6 +36,7 @@ if TYPE_CHECKING:
 
     import torch
     from iivs.dhm.data.phase import PhaseFileFolder
+    from kaparoo.filesystem.types import StrPath
     from omegaconf import DictConfig
 
 
@@ -267,7 +269,7 @@ def scan_sequences(
 
 def save_dataset_range(
     dataset: DatasetRange,
-    target: TargetConfig,
+    directory: StrPath,
     source: SourceConfig,
     filtering: DictConfig | None = None,
 ) -> Path:
@@ -278,12 +280,20 @@ def save_dataset_range(
         "dataset": asdict(dataset),
     }
 
-    path = Path(target.root, RANGE_FILE)
+    path = Path(directory, RANGE_FILE)
 
     with StagedFile(path, overwrite=True, make_parents=True, encoding="utf-8") as file:
         file.write(json.dumps(document, indent=2))
 
     return path
+
+
+def output_directory() -> str:
+    # Hydra's own per-job directory, not `target.root`: a sweep runs every job in
+    # one process, so `RANGE_FILE` is the same name for all of them and writing
+    # them to one place would leave only the last. This is `hydra.run.dir` for a
+    # single run and `hydra.sweep.dir/<subdir>` for each job of a `--multirun`.
+    return HydraConfig.get().runtime.output_dir
 
 
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name=CONFIG_NAME)
@@ -301,7 +311,7 @@ def main(cfg: DictConfig) -> None:
     if target_config.save_ranges:
         scanned = scan_sequences(sequences, source_config, compute_config)
         dataset_range = DatasetRange(tuple(scanned))
-        save_dataset_range(dataset_range, target_config, source_config, cfg.filter)
+        save_dataset_range(dataset_range, output_directory(), source_config, cfg.filter)
 
     if target_config.save_frames:
         pass
