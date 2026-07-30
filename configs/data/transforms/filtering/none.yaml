@@ -1,5 +1,0 @@
-# No filter: frames are read as stored.
-#
-# An option rather than only `~data/transforms/filtering@<key>`, because a
-# removal cannot appear in a sweep list. Selecting it leaves the key present
-# and empty, so a consumer treats a falsy value as "no kernel".

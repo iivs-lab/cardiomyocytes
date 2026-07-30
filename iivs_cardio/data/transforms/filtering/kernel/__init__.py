@@ -2,6 +2,8 @@ __all__ = (
     "FilterKernel",
     "GaussianKernel",
     "GaussianParams",
+    "IdentityKernel",
+    "IdentityParams",
     "KernelParams",
     "KernelShape",
     "MedianKernel",
@@ -23,6 +25,10 @@ from iivs_cardio.data.transforms.filtering.kernel.gaussian import (
     GaussianParams,
     SigmaLike,
     SigmaType,
+)
+from iivs_cardio.data.transforms.filtering.kernel.identity import (
+    IdentityKernel,
+    IdentityParams,
 )
 from iivs_cardio.data.transforms.filtering.kernel.median import (
     KernelShape,

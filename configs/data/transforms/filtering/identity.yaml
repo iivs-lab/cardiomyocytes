@@ -1,0 +1,6 @@
+# No filtering: each frame is read as stored.
+#
+# A kernel rather than an absent one, so this option has the same shape as the
+# rest and can sit in a sweep list, which `~data/transforms/filtering@<key>`
+# cannot.
+_target_: iivs_cardio.data.transforms.filtering.kernel.identity.IdentityParams
