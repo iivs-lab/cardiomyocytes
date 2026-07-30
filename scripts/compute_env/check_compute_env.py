@@ -3,37 +3,52 @@ from __future__ import annotations
 import numpy as np
 
 
+def _print_torch_gpus() -> bool:
+    # Returning out of the `except` keeps the name bound to the module on every
+    # path that reads it, where a `torch = None` fallback would give one name two
+    # types for the sake of a guard the control flow already provides.
+    try:
+        import torch
+    except (ImportError, OSError):
+        return False
+
+    if not torch.cuda.is_available():
+        return False
+
+    for i in range(torch.cuda.device_count()):
+        props = torch.cuda.get_device_properties(i)
+        major, minor = torch.cuda.get_device_capability(i)
+        vram = props.total_memory / (1024**3)
+        print(f"   GPU {i}: {props.name} (cc {major}.{minor}, {vram:.2f} GB)")
+
+    return True
+
+
+def _print_opencv_gpus() -> bool:
+    try:
+        import cv2
+    except (ImportError, OSError):
+        return False
+
+    device_count = cv2.cuda.getCudaEnabledDeviceCount() if hasattr(cv2, "cuda") else 0
+    if device_count < 1:
+        return False
+
+    for i in range(device_count):
+        info = cv2.cuda.DeviceInfo(i)
+        vram = info.totalMemory() / (1024**3)
+        print(
+            f"   GPU {i}: cc {info.majorVersion()}.{info.minorVersion()}, {vram:.2f} GB"
+        )
+
+    return True
+
+
 def print_gpu_hardware() -> None:
     # Prefer torch (it exposes the device name); fall back to OpenCV's probe so
     # the hardware still shows when only OpenCV sees CUDA. Printed once so the
     # per-package sections carry only their own CUDA-linkage facts.
-    try:
-        import torch
-    except (ImportError, OSError):
-        torch = None
-
-    if torch is not None and torch.cuda.is_available():
-        for i in range(torch.cuda.device_count()):
-            props = torch.cuda.get_device_properties(i)
-            major, minor = torch.cuda.get_device_capability(i)
-            vram = props.total_memory / (1024**3)
-            print(f"   GPU {i}: {props.name} (cc {major}.{minor}, {vram:.2f} GB)")
-        return
-
-    try:
-        import cv2
-    except (ImportError, OSError):
-        cv2 = None
-
-    has_cv2_cuda = cv2 is not None and hasattr(cv2, "cuda")
-    device_count = cv2.cuda.getCudaEnabledDeviceCount() if has_cv2_cuda else 0
-    if device_count >= 1:
-        for i in range(device_count):
-            info = cv2.cuda.DeviceInfo(i)
-            vram = info.totalMemory() / (1024**3)
-            print(
-                f"   GPU {i}: cc {info.majorVersion()}.{info.minorVersion()}, {vram:.2f} GB"
-            )
+    if _print_torch_gpus() or _print_opencv_gpus():
         return
 
     print("   No CUDA GPU detected (CPU mode)")
