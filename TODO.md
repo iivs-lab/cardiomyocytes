@@ -35,13 +35,38 @@ opens them as `FrameSequence`s, ranges every frame, and writes one JSON per run;
   written frames: that would be a second copy of the same config, and a copy can
   desync.
 
-- **Measure on a real dataset before keeping the worker path.** On a small one,
-  three workers ran 850x slower than in-process -- all of it Windows spawn -- and
-  the default is `workers: 0`. The scan reads every file, and cutting
-  `_finite_range` by 84% made it more IO-bound still, so the parallel path may
-  not earn its five moving parts. The same run answers two other open questions:
-  whether a progress bar is worth a `tqdm` dependency, and whether the range
-  records fit in memory at 168 B per frame (40 MiB at 250k frames, 160 MiB at 1M).
+- **The worker path earns its keep, and a SATA SSD is what caps it.** Measured on
+  the 440-sequence / 448,800-frame set (900x900, 7x Quadro RTX 6000): seven GPUs
+  ran 3.59x one, not 7x, because reading peaked at 478 MiB/s against the drive's
+  560 MB/s rating. Only the two heaviest kernels are GPU-bound; the other eight
+  wait on the disk. Frame records cost 168 B each, so the whole dataset is 72 MiB
+  in memory and about 53 MiB of JSON at `indent=2` -- dropping the indent saves
+  40%, and gzip would save far more.
+
+  The 251 GiB of RAM is what makes the sweep loop worth inverting: chunk the
+  sequences to roughly 150 GiB, and run every filter over a chunk before moving
+  on, so only the first config of each chunk reads from the disk. That trades a
+  merge step and 121 output files for about three hours.
+
+- **Migrate the worker pool to `mpire`.** Prototyped against its real API, not
+  guessed. `WorkerPool(pass_worker_id=True, use_worker_state=True,
+  shared_objects=devices)` gives each worker its index and a private dict, so
+  `_WORKER_DEVICE`, the `SimpleQueue` that fills it, and `_adopt_device` all go
+  away -- the device becomes `state["device"] = devices[worker_id]`. Its default
+  start method is already spawn, which is what CUDA needs. `map` keeps input
+  order and takes `chunk_size`, so the dispatch behaviour is unchanged.
+
+  What it adds beyond the tidying: `progress_bar=True` with
+  `progress_bar_options={"desc": ..., "unit": "seq"}` passed straight to tqdm,
+  which an eight-hour silent run wants and which no longer costs a separate
+  dependency decision; `enable_insights=True` for per-worker timings, the way to
+  see whether one GPU lags; and `worker_lifespan`, a guard against the CUDA
+  allocator fragmenting -- running eleven kernels in one process is what once
+  made `cuboid (3,3,3)` measure 60x its isolated cost.
+
+  Costs: one dependency in the `scripts` group, and a worker signature whose
+  positional order (`worker_id, shared, state, *args`) shifts with the flags and
+  which `ty` cannot check -- easy to get wrong, as the prototype did first time.
 
 - **Deferred by decision, recorded so they are not rediscovered.** Renaming the
   `Params` suffix to `Config` on `KernelParams` and the optical-flow params
@@ -49,8 +74,9 @@ opens them as `FrameSequence`s, ranges every frame, and writes one JSON per run;
   Putting `FrameShapedMixin` / `ValueRangeMixin` on `FrameSequence` — the latter is
   unusable on tensors as written, since it tests emptiness with `finite.size == 0`
   and a `Tensor`'s `size` is a method, so the comparison is never true. Removing
-  `_WORKER_DEVICE`, which would mean one pool per device and a static split, and
-  so would bring back the `balance` decision the queue made unnecessary.
+  `_WORKER_DEVICE` by hand, which would mean one pool per device and a static
+  split, and so would bring back the `balance` decision the queue made
+  unnecessary -- `mpire` above removes it without that trade.
 
 - **`run_estimator.py` still holds four real defects**, surfaced once `ty` began
   checking `scripts/`: a mismatched return type at `:39`, both arguments to
