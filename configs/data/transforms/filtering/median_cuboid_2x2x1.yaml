@@ -1,0 +1,3 @@
+_target_: iivs_cardio.data.transforms.filtering.kernel.median.MedianParams
+radius: [2, 2, 1]
+shape: "cuboid"

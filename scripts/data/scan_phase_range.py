@@ -7,7 +7,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from functools import partial
-from multiprocessing import Manager
+from multiprocessing import Manager, get_context
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -246,8 +246,15 @@ def scan_sequences(
         for device in devices:
             queue.put(device)
 
+        # Spawn, never fork: `plan_devices` has already asked the driver what it
+        # can see, so this process holds a CUDA context, and a forked child
+        # inherits one it is not allowed to re-initialize. Linux would otherwise
+        # pick a fork-based default and fail only once a worker touches a GPU.
         with ProcessPoolExecutor(
-            max_workers, initializer=_adopt_device, initargs=(queue,)
+            max_workers,
+            mp_context=get_context("spawn"),
+            initializer=_adopt_device,
+            initargs=(queue,),
         ) as pool:
             scan = partial(_scan_on_worker, config=source)
             return list(pool.map(scan, sequences, chunksize=1))
