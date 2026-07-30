@@ -7,7 +7,7 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from functools import partial
-from multiprocessing import Manager, get_context
+from multiprocessing import get_context
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -31,7 +31,7 @@ from scripts.data._filtering import build_filter_kernel, describe_filter_kernel
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from queue import Queue
+    from multiprocessing import SimpleQueue
 
     import torch
     from iivs.dhm.data.phase import PhaseFileFolder
@@ -213,7 +213,7 @@ def scan_sequence(sequence: FrameSequence[Path], config: SourceConfig) -> Sequen
     return SequenceRange(source, tuple(frames))
 
 
-def _adopt_device(devices: Queue[torch.device]) -> None:
+def _adopt_device(devices: SimpleQueue[torch.device]) -> None:
     # `initargs` reaches every worker with the same value, so the queue is what
     # hands each a different device; it holds exactly one per worker.
     global _WORKER_DEVICE
@@ -237,27 +237,32 @@ def scan_sequences(
     if (max_workers := len(devices)) == 1:
         return [scan_sequence(sequence, source) for sequence in sequences]
 
+    # Spawn, never fork: `plan_devices` has already asked the driver what it can
+    # see, so this process holds a CUDA context, and a forked child inherits one
+    # it is not allowed to re-initialize. Linux would otherwise pick a fork-based
+    # default and fail only once a worker touched a GPU.
+    context = get_context("spawn")
+
+    # Drained once per worker, so each claims a different device where `initargs`
+    # would hand them all the same one. Taken from the pool's own context rather
+    # than a `Manager`, which would run a server process to proxy a queue that is
+    # written once and read `max_workers` times.
+    queue: SimpleQueue[torch.device] = context.SimpleQueue()
+    for device in devices:
+        queue.put(device)
+
     # A CUDA context costs seconds to build, so a worker claims its device once
     # and keeps it. `chunksize=1` then hands out the next sequence as each worker
     # frees up, which balances on real completion times rather than on a guess at
     # how long a sequence takes; `map` still returns in the order given.
-    with Manager() as manager:
-        queue: Queue[torch.device] = manager.Queue()
-        for device in devices:
-            queue.put(device)
-
-        # Spawn, never fork: `plan_devices` has already asked the driver what it
-        # can see, so this process holds a CUDA context, and a forked child
-        # inherits one it is not allowed to re-initialize. Linux would otherwise
-        # pick a fork-based default and fail only once a worker touches a GPU.
-        with ProcessPoolExecutor(
-            max_workers,
-            mp_context=get_context("spawn"),
-            initializer=_adopt_device,
-            initargs=(queue,),
-        ) as pool:
-            scan = partial(_scan_on_worker, config=source)
-            return list(pool.map(scan, sequences, chunksize=1))
+    with ProcessPoolExecutor(
+        max_workers,
+        mp_context=context,
+        initializer=_adopt_device,
+        initargs=(queue,),
+    ) as pool:
+        scan = partial(_scan_on_worker, config=source)
+        return list(pool.map(scan, sequences, chunksize=1))
 
 
 def save_dataset_range(
