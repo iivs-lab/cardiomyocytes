@@ -63,7 +63,24 @@ class FilteredSequence[M, T: NumPyRealDType = np.float32](DataSequence["Tensor",
         self._source = source
         self._buffer: dict[int, Tensor] = {}
         self.kernel = kernel
-        self.device = resolve_device(device)
+        self._device = resolve_device(device)
+
+    @property
+    def device(self) -> torch.device:
+        """Where filtering runs and the returned tensors live.
+
+        Reassignable: frames are placed as they are read, so a later device
+        takes effect from the next read. Buffered frames sit on the old one and
+        are dropped rather than moved, which costs one window of re-reads.
+        """
+        return self._device
+
+    @device.setter
+    def device(self, value: str | torch.device) -> None:
+        device = resolve_device(value)
+        if device != self._device:
+            self._buffer.clear()
+        self._device = device
 
     @classmethod
     def from_params(
@@ -112,12 +129,18 @@ class FilteredSequence[M, T: NumPyRealDType = np.float32](DataSequence["Tensor",
         """Stack the source frames at `indices` as float32, reading past the buffer.
 
         Reads only frames not already buffered, and casts each to float32 on the
-        way in -- the dtype a kernel reduces, whatever the source stored.
+        way in -- the dtype a kernel reduces, whatever the source stored. A
+        one-frame window is unsqueezed rather than stacked, since `torch.stack`
+        copies even a single frame while `unsqueeze` returns a view; every
+        `rz = 0` kernel reads through this path once per frame.
         """
         self._buffer = {i: f for i, f in self._buffer.items() if i in indices}
 
         missing = [i for i in indices if i not in self._buffer]
         for i, frame in zip(missing, self._source.get_items(missing), strict=True):
             self._buffer[i] = torch.from_numpy(frame).to(self.device, torch.float32)
+
+        if len(indices) == 1:
+            return self._buffer[indices[0]].unsqueeze(0)
 
         return torch.stack([self._buffer[i] for i in indices])
