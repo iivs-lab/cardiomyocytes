@@ -64,9 +64,21 @@ opens them as `FrameSequence`s, ranges every frame, and writes one JSON per run;
   allocator fragmenting -- running eleven kernels in one process is what once
   made `cuboid (3,3,3)` measure 60x its isolated cost.
 
+  A per-worker bar is possible on top of the pool's own, and is worth it only
+  for the two heaviest kernels. `worker_init` opens a `tqdm(position=worker_id +
+  1, leave=False)` -- the pool's bar holds position 0 -- and each task resets it
+  to the sequence length and renames it; `worker_exit` closes it. Verified
+  rendering seven independent lines under spawn. Below `cuboid (3,3,1)` it buys
+  nothing: seven workers finishing a sequence every 15 s already move the
+  sequence-level bar every couple of seconds, where `cuboid (3,3,3)` leaves it
+  still for over two minutes and looks hung. `tqdm.auto` goes quiet off a tty, so
+  a redirected run keeps a clean log either way; make it a config flag rather
+  than always-on, since seven lines collide with anything else on the terminal.
+
   Costs: one dependency in the `scripts` group, and a worker signature whose
-  positional order (`worker_id, shared, state, *args`) shifts with the flags and
-  which `ty` cannot check -- easy to get wrong, as the prototype did first time.
+  positional order shifts with the flags -- `(worker_id, shared, state, *args)`
+  with `shared_objects`, `(worker_id, state, *args)` without -- which `ty` cannot
+  check. The prototype tripped on it twice.
 
 - **Deferred by decision, recorded so they are not rediscovered.** Renaming the
   `Params` suffix to `Config` on `KernelParams` and the optical-flow params
