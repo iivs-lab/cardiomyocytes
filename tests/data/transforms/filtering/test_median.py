@@ -179,6 +179,29 @@ def test_ellipsoid_samples_fewer_offsets_than_the_cuboid_box():
     assert len(MedianKernel((2, 2, 2), shape="cuboid").offsets) == 125
 
 
+@pytest.mark.parametrize("shape", ("sphere", "Cuboid", "ELLIPSOID", ""))
+def test_a_shape_that_is_neither_name_is_rejected(shape):
+    # `_build_offsets` branches on `cuboid` alone, so without this check every
+    # other spelling would quietly filter as an ellipsoid. A config file is the
+    # likely source, hence the near-misses and the wrong casing.
+    with pytest.raises(ValueError, match="unsupported shape"):
+        MedianKernel((2, 2, 2), shape=shape)  # ty: ignore[invalid-argument-type]
+
+
+def test_the_rejection_message_names_both_valid_shapes():
+    with pytest.raises(ValueError, match="expected 'ellipsoid', 'cuboid'"):
+        MedianKernel((1, 1, 1), shape="sphere")  # ty: ignore[invalid-argument-type]
+
+
+def test_params_reject_a_bad_shape_when_built():
+    # `MedianParams` only records the fields; the check belongs to the kernel,
+    # so a config's typo surfaces at `build()` rather than being carried along.
+    params = MedianParams((1, 1, 1), shape="sphere")  # ty: ignore[invalid-argument-type]
+
+    with pytest.raises(ValueError, match="unsupported shape"):
+        params.build()
+
+
 def test_cuboid_takes_the_whole_box_in_scan_order():
     # `cuboid` applies no predicate at all. Spelled out with explicit loops
     # rather than the tool the source uses, so the two cannot agree by sharing

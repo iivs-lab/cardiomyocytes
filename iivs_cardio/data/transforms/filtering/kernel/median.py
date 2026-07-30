@@ -4,7 +4,7 @@ __all__ = ("KernelShape", "MedianKernel", "MedianParams")
 
 from dataclasses import dataclass
 from itertools import product
-from typing import Literal, override
+from typing import Final, Literal, get_args, override
 
 import torch
 from beartype import beartype
@@ -21,6 +21,7 @@ from iivs_cardio.data.transforms.filtering.kernel.base import (
 )
 
 KernelShape = Literal["ellipsoid", "cuboid"]
+KERNEL_SHAPES: Final[tuple[KernelShape, ...]] = get_args(KernelShape)
 
 # Sample counts where CUDA's `topk` beats its `sort`. Both leave the same
 # shared-memory path once they must order more than 32 elements, and both step
@@ -48,10 +49,15 @@ class MedianKernel(FilterKernel):
             33 offsets at radius `(2, 2, 2)`; `cuboid` takes the whole box, 125.
 
     Raises:
-        ValueError: If any radius is negative.
+        ValueError: If any radius is negative, or `shape` is neither name.
     """
 
     def __init__(self, radius: RadiusLike, *, shape: KernelShape = "ellipsoid") -> None:
+        if shape not in KERNEL_SHAPES:
+            listed = ", ".join(repr(name) for name in KERNEL_SHAPES)
+            msg = f"unsupported shape {shape!r}: expected {listed}"
+            raise ValueError(msg)
+
         super().__init__(radius)
         self.shape = shape
         self._offsets = self._build_offsets()
