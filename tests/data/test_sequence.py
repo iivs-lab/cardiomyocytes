@@ -414,6 +414,18 @@ def test_value_range_rejects_a_frame_with_no_finite_value(tmp_path):
         sequence.value_range(0)
 
 
+def test_value_range_rejects_a_frame_with_no_pixels():
+    # A zero-sized frame has no finite value either, and it has to be caught
+    # before the fused pass: `aminmax` raises on an empty tensor rather than
+    # reporting no bounds.
+    sequence = FrameSequence(
+        _InMemory([np.zeros((0, 4), np.float32)]), IdentityKernel()
+    )
+
+    with pytest.raises(ValueError, match="the selection holds no finite value"):
+        sequence.value_range(0)
+
+
 def test_value_range_rejects_an_empty_selection(tmp_path):
     sequence = FrameSequence(
         PhaseBinFolder(_ramp_folder(tmp_path / "Bin")), IdentityKernel()

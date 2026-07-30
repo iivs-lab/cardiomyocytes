@@ -34,7 +34,20 @@ def _finite_range(frame: Tensor) -> tuple[float, float] | None:
     background does not swallow the range. `torch.isfinite` is used over numpy's:
     a `Tensor`'s `size` is a method, so the emptiness test upstream libraries
     write as `finite.size == 0` is never true here.
+
+    `aminmax` answers in one pass and betrays a non-finite value by returning
+    one: NaN propagates through both bounds, and an infinity lands on the bound
+    it belongs to. Only then is the mask worth building, which costs a second
+    full-size allocation and a compacting copy -- measured at 512x512, taking
+    that route for every frame is about six times the fused pass.
     """
+    if frame.numel() == 0:
+        return None
+
+    low, high = torch.aminmax(frame)
+    if low.isfinite() and high.isfinite():
+        return float(low), float(high)
+
     finite = frame[torch.isfinite(frame)]
     if finite.numel() == 0:
         return None
