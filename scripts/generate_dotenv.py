@@ -1,14 +1,3 @@
-"""Write a `.env` with the project paths the scripts read.
-
-Finds the project root (the directory holding `pyproject.toml`) from this file's
-location and writes `PROJECT_ROOT` -- the one machine-specific path -- plus
-`CONFIGS_ROOT` interpolated from it. `CONFIGS_ROOT` is materialized here, rather
-than left for each script to re-join, so the `${PROJECT_ROOT}/configs` derivation
-lives in one place while `PROJECT_ROOT` stays the single source of truth. Refuses
-to clobber an existing `.env` unless `--force` is passed, since it is a
-machine-local, git-ignored file the user may have edited.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -21,7 +10,6 @@ CONFIGS_ROOT=${{PROJECT_ROOT}}/configs
 
 
 def _project_root() -> Path:
-    """The nearest ancestor of this file that holds a `pyproject.toml`."""
     for parent in Path(__file__).resolve().parents:
         if (parent / "pyproject.toml").is_file():
             return parent

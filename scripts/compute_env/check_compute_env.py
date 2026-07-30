@@ -1,21 +1,3 @@
-"""Check the CUDA compute environment and PyTorch / TorchVision / OpenCV.
-
-Run inside the project so it verifies the project's own environment:
-
-    uv run scripts/compute_env/check_compute_env.py
-
-It carries no PEP 723 inline metadata on purpose — `uv run` then resolves
-`torch` / `torchvision` / `opencv-contrib-python` / `numpy` from the project
-(`pyproject.toml` + `uv.lock`), so the check tests the exact pinned versions
-the project uses instead of drifting to the newest wheels in a throwaway env.
-
-CUDA is optional: each package must pass a CPU baseline (that is the exit-code
-contract), and GPU work is verified only where a CUDA device is present. A
-package fails only if it cannot import or its CPU baseline is wrong; a plain
-CPU-only machine reports "No CUDA" and still exits 0. The GPU hardware is
-enumerated once up front so the per-package sections need not repeat it.
-"""
-
 from __future__ import annotations
 
 import numpy as np
@@ -58,11 +40,6 @@ def print_gpu_hardware() -> None:
 
 
 def _conv_works_without_cudnn() -> bool:
-    """Whether a CUDA convolution succeeds once cuDNN is switched off.
-
-    Called only after a CUDA convolution has already failed: it separates "cuDNN
-    is the problem" from "CUDA itself is the problem", which need different fixes.
-    """
     import torch
 
     image = torch.zeros(1, 1, 3, 3, device="cuda")
@@ -79,7 +56,6 @@ def _conv_works_without_cudnn() -> bool:
 
 
 def _report_conv_fault() -> None:
-    """Explain a failed CUDA convolution and point at the matching fix."""
     if not _conv_works_without_cudnn():
         print("      Fails with cuDNN disabled too, so cuDNN is not the cause --")
         print("      check the NVIDIA driver, the CUDA runtime, or the torch build.")
