@@ -3,7 +3,12 @@ from __future__ import annotations
 import pytest
 import torch
 
-from iivs_cardio.common import DEVICE_KINDS, resolve_device
+from iivs_cardio.common import (
+    DEVICE_KINDS,
+    resolve_device,
+    resolve_devices,
+    visible_cuda_devices,
+)
 
 
 def test_resolve_cpu():
@@ -50,3 +55,59 @@ def test_resolve_cpu_drops_index():
 
 def test_device_kinds_matches_literal():
     assert frozenset({"cpu", "cuda"}) == DEVICE_KINDS
+
+
+# ------------------------------- resolve_devices -------------------------------- #
+
+
+def test_resolve_devices_keeps_order_and_duplicates():
+    # Duplicates are the point on the CPU: N entries is N workers on one device.
+    assert resolve_devices(["cpu", "cpu", "cpu"]) == (torch.device("cpu"),) * 3
+
+
+def test_resolve_devices_normalizes_each_spec():
+    assert (
+        resolve_devices(["CPU", torch.device("cpu", 0)]) == (torch.device("cpu"),) * 2
+    )
+
+
+def test_resolve_devices_of_nothing_is_nothing():
+    assert resolve_devices([]) == ()
+
+
+def test_resolve_devices_rejects_an_unsupported_kind():
+    with pytest.raises(ValueError, match=r"unsupported device 'cuda'"):
+        resolve_devices(["cpu", "cuda"], frozenset({"cpu"}))
+
+
+def test_resolve_devices_rejects_an_index_this_host_lacks():
+    # The check a single spec cannot usefully make: naming a set is planning work
+    # across it, so an absent index has to fail here rather than at the first
+    # tensor move. The message names every missing index, sorted, and once each.
+    beyond = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    specs = [f"cuda:{beyond + 1}", "cpu", f"cuda:{beyond}", f"cuda:{beyond + 1}"]
+
+    with pytest.raises(ValueError, match=rf"no CUDA device at index {beyond}, "):
+        resolve_devices(specs)
+
+
+def test_visible_cuda_devices_are_indexed_from_zero():
+    devices = visible_cuda_devices()
+
+    assert all(device.type == "cuda" for device in devices)
+    assert [device.index for device in devices] == list(range(len(devices)))
+
+
+def test_visible_cuda_devices_agree_with_the_driver():
+    expected = torch.cuda.device_count() if torch.cuda.is_available() else 0
+
+    assert len(visible_cuda_devices()) == expected
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="no CUDA-capable GPU detected"
+)
+def test_every_visible_cuda_device_resolves():
+    devices = visible_cuda_devices()
+
+    assert resolve_devices(devices) == devices
