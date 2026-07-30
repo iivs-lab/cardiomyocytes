@@ -3,15 +3,14 @@ from __future__ import annotations
 __all__ = ("FrameSequence",)
 
 import math
-from functools import cached_property, partial
-from typing import TYPE_CHECKING, Any, override
+from functools import cached_property
+from typing import TYPE_CHECKING, override
 
 import numpy as np
 import torch
-from kaparoo.data.sequences import DataSequence, TransformedSequence
+from kaparoo.data.sequences import DataSequence, SlicedSequence
 from torch import Tensor
 
-from iivs_cardio.common.device import resolve_device
 from iivs_cardio.data.transforms.filtering import FilteredSequence
 
 if TYPE_CHECKING:
@@ -26,11 +25,6 @@ type NumPyRealDType = np.floating | np.integer
 
 type IndexLike = int | slice | Iterable[int] | None
 """What a caller may write to select frames: one, a span, a set, or None for all."""
-
-
-def _as_tensor(frame: NDArray[Any], device: torch.device) -> Tensor:
-    """Read one frame as float32 on `device`, the form filtering also returns."""
-    return torch.from_numpy(frame).to(device, torch.float32)
 
 
 def _finite_range(frame: Tensor) -> tuple[float, float] | None:
@@ -48,66 +42,86 @@ def _finite_range(frame: Tensor) -> tuple[float, float] | None:
 
 
 class FrameSequence[M, T: NumPyRealDType = np.float32](DataSequence[Tensor, M]):
-    """Frame access over one source, raw or filtered, always as float32 tensors.
+    """Frame access over one source, always as float32 tensors on one device.
 
-    `kernel` chooses the view that stands in front of `source`: a `FilteredSequence`
-    when given, a plain conversion when not. Both are `DataSequence[Tensor, M]`, so
-    reads take one path and the consumer never sees which.
+    Every frame goes through a kernel, `IdentityKernel` included, so reading is
+    one path whether or not a run filters and no caller carries a "no filter"
+    case. `step` is applied *before* filtering: taking every Nth frame first is
+    what makes a strided run measure the frame rate it claims to, where filtering
+    first would fold the dropped frames into the kept ones.
+
+    Striding renumbers the sequence -- `len` and every index, `get_meta`
+    included, count kept frames -- so `self[1]` at `step=2` is the source's frame
+    2. A selection `step` cannot express is written by slicing `source` first;
+    the stride then applies to whatever is passed.
 
     Type Parameters:
-        M: the source's per-frame metadata, which neither view changes.
+        M: the source's per-frame metadata, which neither striding nor filtering
+            changes.
         T: the source's numpy dtype; frames are read as float32 whatever it is.
 
     Args:
         source: The frames to read, already open.
-        kernel: The neighbourhood to filter with, or None to pass frames through.
+        kernel: The neighbourhood to filter with; `IdentityKernel` to read the
+            frames as stored.
+        step: Keep every `step`-th frame, counting from the first.
         device: Where frames are placed, and where filtering runs.
 
     Raises:
-        ValueError: If `device` names an unsupported device kind.
+        ValueError: If `step` is below 1, or `device` names an unsupported kind.
     """
 
     def __init__(
         self,
         source: DataSequence[NDArray[T], M],
-        kernel: FilterKernel | None = None,
+        kernel: FilterKernel,
         *,
+        step: int = 1,
         device: str | torch.device = "cpu",
     ) -> None:
-        self.device = resolve_device(device)
-        self._source: DataSequence[Tensor, M]
+        if step < 1:
+            msg = f"invalid frame step {step}: expected 1 or more"
+            raise ValueError(msg)
 
-        if kernel is None:
-            transform = partial(_as_tensor, device=self.device)
-            self._source = TransformedSequence(source, transform)
-        else:
-            self._source = FilteredSequence(source, kernel, device=self.device)
+        kept = SlicedSequence(source, range(0, len(source), step))
+        self._source = FilteredSequence(kept, kernel, device=device)
 
     @classmethod
     def from_params(
         cls,
         source: DataSequence[NDArray[T], M],
-        params: KernelParams | None = None,
+        params: KernelParams,
         *,
+        step: int = 1,
         device: str | torch.device = "cpu",
     ) -> FrameSequence[M, T]:
-        """Read `source`, filtered by the kernel `params` describes when there is one.
-
-        `params` is optional where `FilteredSequence.from_params` requires it, since
-        a filter is a config group a run may leave out.
+        """Read `source` through the kernel `params` describes.
 
         Args:
             source: The frames to read, already open.
-            params: Which kernel to filter with, or None to pass frames through.
+            params: Which kernel to filter with.
+            step: Keep every `step`-th frame, counting from the first.
             device: Where frames are placed, and where filtering runs.
         """
-        kernel = None if params is None else params.build()
-        return cls(source, kernel, device=device)
+        return cls(source, params.build(), step=step, device=device)
 
     @property
-    def source(self) -> DataSequence[Tensor, M]:
-        """The view this reads from, filtering or converting the frames given."""
+    def source(self) -> FilteredSequence[M, T]:
+        """The filtered view this reads from, over the strided source."""
         return self._source
+
+    @property
+    def device(self) -> torch.device:
+        """Where frames are placed, owned by the view rather than duplicated here.
+
+        Reassignable, and takes effect from the next read; see
+        `FilteredSequence.device`.
+        """
+        return self._source.device
+
+    @device.setter
+    def device(self, value: str | torch.device) -> None:
+        self._source.device = value
 
     def __len__(self) -> int:
         return len(self._source)
