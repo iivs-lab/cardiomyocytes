@@ -7,6 +7,7 @@ defaults:
 
 source:
   root: ??? # the folder to search for phase .bin sequences
+  subpath: null # where each sequence sits in a time-lapse; null takes the standard
   unit: null # unit to read values in; null keeps the stored one
   include: null # a file of subpaths, or the subpaths as a list; null takes all
   exclude: null # same, for sequences to skip
