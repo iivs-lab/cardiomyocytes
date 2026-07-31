@@ -48,6 +48,95 @@ opens them as `FrameSequence`s, ranges every frame, and writes one JSON per run;
   on, so only the first config of each chunk reads from the disk. That trades a
   merge step and 121 output files for about three hours.
 
+- **What the 121-job sweep actually validated, and what it did not.** Its product
+  was the pipeline, not the numbers -- the range table it produced is recorded
+  under Analysis as a negative result. Ran 2026-07-31 08:27 to 20:48, 12 h 21 m
+  against an 8.8 h estimate, so the cache inversion paid less than predicted;
+  per-chunk timings would say whether the first job of each chunk is the only
+  slow one, and were not collected.
+
+  Validated on real load: hydra 1.4.0.dev6 composing and running 121 `--multirun`
+  jobs on Python 3.14, config groups and `_target_whitelist_` included; the
+  per-job output directory, verified by a 3-job smoke run leaving three files
+  where the old code left one; spawn + `SimpleQueue` device handoff across seven
+  GPUs, with `resolve_devices` / `visible_cuda_devices` against a real driver;
+  `select` splitting 440 sequences over eleven `.txt` listings with no overlap or
+  gap, confirmed by the merge finding zero duplicates and zero missing; and
+  `FrameSequence` / `FilteredSequence` / `MedianKernel` / `IdentityKernel` over
+  about 4.9 M frame-filter operations without a crash or a non-finite result.
+
+  Still unvalidated, and none of it needs a server: the `save_frames` write path,
+  which is unwritten; the CPU multi-worker path, since only `compute=cuda` ran --
+  note that nothing sets `torch.set_num_threads`, so N worker processes each
+  default to one thread per core and will oversubscribe; `frame_step != 1`;
+  failure handling, because all 121 jobs succeeded and nothing exercised a dead
+  job; and the `mpire` migration above.
+
+- **Performance: one candidate is worth writing, and the rest are dead ends.**
+  Ranked by what each was measured to return, not by how interesting it is.
+  *Inverting the sweep loop* is the one that paid, and it took no code at all —
+  the bullet above.
+
+  *Batching the range's device sync* is the only code change left with a number
+  behind it, and that number is an estimate. `_finite_range` reads
+  `low.isfinite()` per frame, which pulls the value to the host and stops the CPU
+  from reading the next frame while the GPU works. A `FrameSequence.frame_ranges()`
+  that launches every `aminmax` first and transfers once removes the stall: the
+  scalars are 8 B a frame, so a 1200-frame sequence holds 9.6 KB, and CUDA's
+  launch queue self-throttles rather than growing without bound. The non-finite
+  fallback cannot branch per frame without the sync it exists to remove, so it
+  becomes a second pass over only the frames whose bounds came back non-finite —
+  in practice none, and `numel()` is a shape query that syncs nothing. Estimated
+  5-8% overall, derived from the middle-weight kernels sitting at 65%
+  utilization, not measured end to end.
+
+  Add the plural rather than deleting the singular. `value_range` has exactly one
+  caller (`scan_phase_range.py:209`) and goes dead the moment it moves, but
+  batching inside the script would copy the non-finite and empty-frame rules out
+  of `sequence.py` and let the two drift. With `frame_ranges()` in place
+  `_global_value_range` folds it and `value_range(slice)` keeps a meaning of its
+  own, so nothing is left unused.
+
+  **It pulls against the shared traversal above.** Writing a frame moves it to
+  the host, which is the same sync the batching removes — so on a `save_frames`
+  run the stall returns regardless, and the batching pays only on a range-only
+  run. Whichever lands second has to say which path it optimizes.
+
+  *Prefetching source reads* belongs below `FilteredSequence`, whose window
+  buffer is not thread-safe; that buffer is also why a forward pass asks the
+  source for exactly one new frame per step, making the pattern trivial to
+  predict. It would have to serve `get_items` as well as `get_item`, since that
+  is what `_window` calls. It buys little here — a cached job already reads at
+  memory speed, and a cold one is capped by the drive rather than by when the
+  read is issued. Revisit if the data moves to NVMe.
+
+  *Dropping `indent=2`* is one character, takes the document from ~53 MiB to
+  ~31 MiB, and costs no time. It is disk, not throughput.
+
+- **Measured and rejected, recorded so they are not tried again.**
+
+  - *Samples-last in `MedianKernel.apply`.* `torch.stack(..., dim=-1)` makes a
+    pixel's samples contiguous and halves the sort in isolation, but the stack
+    then writes each slice strided across the sample axis, and over the whole
+    `apply` that costs more than the sort saves: 0.54x-0.92x on the ten configs.
+  - *Refitting `_CUDA_TOPK_SAMPLES`.* The 128-element step it looked like it
+    should follow appears only under that samples-last layout. Re-measured on the
+    whole `apply`, one kernel per process, at every offset count the median
+    configs produce (7 to 343): the committed `range(33, 64)` picks the faster
+    branch for all ten, where a tier rule mispredicts at 147.
+  - *Several processes per GPU.* Without MPS the device time-slices, so
+    throughput is unchanged — 0.93x-0.96x.
+  - *Threads instead of worker processes.* The per-frame Python loop holds the GIL.
+
+  Three of these failed the same way: measured on a part (the sort, the branch,
+  one kernel) and lost on the whole (`apply`, the sweep). Measure the whole, and
+  measure one kernel per process — eleven in one process fragments the CUDA
+  allocator badly enough to read `cuboid (3,3,3)` at 1878 ms against its true 139.
+
+- **The drive is the ceiling and no code change moves it.** NVMe at 3-7 GB/s
+  would release the eight configs now waiting on ~500 MB/s, which is a larger
+  factor than everything above together.
+
 - **Migrate the worker pool to `mpire`.** Prototyped against its real API, not
   guessed. `WorkerPool(pass_worker_id=True, use_worker_state=True,
   shared_objects=devices)` gives each worker its index and a private dict, so
@@ -148,6 +237,37 @@ hold, so they gate most of the implementation below.
   explained difference becomes a rule, an unexplained one stays a single global
   setting. Prefer parameterizing by covariate over switching estimators: one or
   two degrees of freedom instead of one per sequence, and no discontinuity.
+
+- **Value range does not discriminate between filters — settled on the full
+  dataset.** Eleven configurations over all 440 sequences and 448,800 frames,
+  every one complete. The whole spread is 10.6%: `identity` spans 9.1256 and the
+  most aggressive `cuboid (3,3,3)` spans 8.1592, for 49x the offsets and about
+  120x the time. In uint8 that is 0.0357 rad per level against 0.0319 — the same
+  picture. So the filter has to be chosen on the beating profile, which is the
+  deliverable; this rules the range out as the criterion rather than answering it.
+
+  **Temporal radius is nearly free of effect here.** Holding shape and spatial
+  radius, `rz` 1 -> 3 narrows the range by 0.14-0.44%, while `cuboid (3,3,1)` ->
+  `(3,3,3)` costs 1.8x the time for 0.32%. Spatial radius is what moves it,
+  monotonically, and `cuboid` beats `ellipsoid` at equal radius by sampling more
+  of the same box. That is a second argument for `rz = 1`, independent of the
+  ~30% of beating amplitude a 20 Hz radius costs at 10 Hz.
+
+  **Two sequences own the dataset's range**, which matters more than any filter
+  choice. `Isoprenaline/167nM/Treated/20260319/2` holds the minimum under all
+  eleven configurations. The maximum is `E-4031/1uM/Treated/20260624/1` under ten
+  — but under `identity` it is `E-4031/10uM/Treated/20260123/2`, whose peak the
+  weakest median `(1,1,1)` drops by 0.4978, or 8.6%. A value a 3x3x3
+  neighbourhood's median erases is one pixel: that sequence has a hot pixel, and
+  it was setting the range for the entire dataset. Filtering is also asymmetric —
+  that first median takes 0.4978 off the maximum and 0.0383 off the minimum, so
+  93% of its effect is on the positive side.
+
+  This is the outlier fragility the per-frame `(min, max)` note below warns about,
+  now observed rather than anticipated. Before setting a normalization policy,
+  look at the distribution of per-sequence ranges (every JSON carries them) and
+  decide between excluding such sequences, clipping, and moving to per-frame
+  histograms for exact percentiles.
 
 - **Cache the least-biased flow; smooth at the consumer.** Bias and variance are
   not symmetric. A noisy flow can be smoothed afterwards; motion that
