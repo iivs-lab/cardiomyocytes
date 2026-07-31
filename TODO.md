@@ -538,6 +538,48 @@ Roughly in dependency order: each one is easier once the previous has landed.
   boundary happens to sit. `FrameNormalizer` takes tensors, so the two folder
   shapes need that conversion made explicit rather than inherited by accident.
 
+- **One device per run, and watch the CUDA allocator once stages share a
+  process.** Neither bites today; both do once `filter -> flow -> kinematics`
+  runs as one chain.
+
+  **Choose the device per run, not per stage.** `FilteredSequence` yields a
+  `Tensor` and `tensor_to_gpumat` hands it to an OpenCV CUDA estimator without a
+  copy -- `tests/common/test_cuda_utils.py:28` asserts the pointer is the same --
+  so a filter and a flow on one device never move a frame. Splitting them costs
+  3.24 MB per frame and, worse, the sync that transfer forces, which is the same
+  stall `frame_ranges()` exists to remove. Worker count has no single answer
+  across devices either: seven for seven GPUs, sixty-four for sixty-four cores,
+  both measured. One pool cannot serve both. So when a stage cannot take the
+  chosen device -- DeepFlow is CPU-only -- split the *runs* at the cache boundary
+  instead of mixing devices inside one pool, and have the stage refuse the device
+  loudly rather than fall back, since a silent fallback reads as "why is this
+  slow" months later. Kinematics gets no say: differencing a `(2, H, W)` field
+  costs less than moving it.
+
+  **The allocator.** `MedianKernel.apply` holds `(S, H, W)` and `(S//2+1, H, W)`
+  at once -- 1.11 GB and 557 MB at 900x900 with 343 offsets. Torch's caching
+  allocator keeps freed blocks per segment, so a run of lighter kernels first
+  leaves the pool holding plenty of memory in pieces too small to serve the next
+  large request. It then calls `release_cached_blocks`, whose `cudaFree`
+  synchronizes the device, and retries -- once per frame. That is the 60x above.
+  `torch.cuda.memory_stats()["num_alloc_retries"]` is the tell; print it once
+  rather than mistake the reading for the kernel's true cost, which is what
+  happened here.
+
+  `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` is the cheap fix and torch
+  2.12 has it: segments grow in place, so no new contiguous `cudaMalloc` is
+  needed. `scan_phase_range` is already safe without it, because
+  `scan_sequences` builds and tears down its pool inside each job -- a
+  `--multirun` sharing one parent process therefore carries no fragmentation
+  between configurations. Keep that property.
+
+  **OpenCV allocates separately.** `cv2.cuda` knows nothing about torch's cache,
+  so torch can hold memory an estimator then fails to get; `tensor_to_gpumat`
+  avoids copying the frame but not the estimator's own workspace. An
+  `empty_cache()` at the *sequence* boundary -- never the frame boundary, which
+  would perform the expensive release by hand every frame -- is where to give it
+  back.
+
 - **Rewrite the benchmark as `scripts/optical_flow/run_estimator.py`.**
   Estimators, `common/warp.py`, `optical_flow/evaluation.py` and
   `data/transforms/` are done; `benchmark_opencv.py` runs on them but scores a
