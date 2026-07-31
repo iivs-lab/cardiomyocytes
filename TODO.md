@@ -178,7 +178,8 @@ opens them as `FrameSequence`s, ranges every frame, and writes one JSON per run;
   Three of these failed the same way: measured on a part (the sort, the branch,
   one kernel) and lost on the whole (`apply`, the sweep). Measure the whole, and
   measure one kernel per process — eleven in one process fragments the CUDA
-  allocator badly enough to read `cuboid (3,3,3)` at 1878 ms against its true 139.
+  allocator badly enough to read `cuboid (3,3,3)` at 8.46 s against its true
+  139 ms, a 60x inflation of the same code.
 
 - **The drive is the ceiling and no code change moves it.** NVMe at 3-7 GB/s
   would release the eight configs now waiting on ~500 MB/s, which is a larger
