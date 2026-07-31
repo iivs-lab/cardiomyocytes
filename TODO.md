@@ -66,11 +66,38 @@ opens them as `FrameSequence`s, ranges every frame, and writes one JSON per run;
   about 4.9 M frame-filter operations without a crash or a non-finite result.
 
   Still unvalidated, and none of it needs a server: the `save_frames` write path,
-  which is unwritten; the CPU multi-worker path, since only `compute=cuda` ran --
-  note that nothing sets `torch.set_num_threads`, so N worker processes each
-  default to one thread per core and will oversubscribe; `frame_step != 1`;
-  failure handling, because all 121 jobs succeeded and nothing exercised a dead
-  job; and the `mpire` migration above.
+  which is unwritten; failure handling, because all 121 jobs succeeded and
+  nothing exercised a dead job; and the `mpire` migration above.
+
+- **Pin the CPU workers' threads, or they lose to running no workers at all.**
+  Nothing calls `torch.set_num_threads`, so every process takes intra-op threads
+  by core count. `compute.workers=1` stays in this process and builds no pool,
+  yet already runs at 1748% CPU -- stacking processes on that only contends.
+  Measured after the sweep on the same server, 40 sequences at `frame_step=50`
+  with a median `(1, 1, 1)`, 64 cores:
+
+  ```
+  pinned workers=64   26.40 s   1361% cpu   <- best
+  workers=1           35.60 s   1748% cpu
+  pinned workers=8    38.17 s    469% cpu
+  workers=4           77.55 s   4835% cpu
+  workers=8           94.29 s   5055% cpu
+  workers=16          95.84 s   5154% cpu
+  ```
+
+  The default is therefore 2.7x *slower* at sixteen workers than at one, while
+  `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1` at sixty-four beats the sequential path
+  by 1.35x. The fix belongs beside where a CUDA worker claims its device, not in
+  an environment variable every caller has to remember. Even pinned it reaches
+  only 1361% of 64 cores, so it ends up waiting on the drive that also caps the
+  GPU path at 3.59x -- which is why the gain is 1.35x and not sixty-four.
+
+  The same run settled three things the sweep could not. Worker count does not
+  change the numbers: 1, 4, 8 and 16 returned identical dataset bounds.
+  `frame_step` is exact -- zero mismatches against the full-rate GPU document.
+  And **CPU and CUDA agree bit-for-bit**, 600 of 600 frames at worst delta
+  `0.000e+00`, which is what ordering and averaging the middle two should give
+  and had never been checked.
 
 - **Performance: one candidate is worth writing, and the rest are dead ends.**
   Ranked by what each was measured to return, not by how interesting it is.
@@ -240,7 +267,10 @@ hold, so they gate most of the implementation below.
 
 - **Value range does not discriminate between filters — settled on the full
   dataset.** Eleven configurations over all 440 sequences and 448,800 frames,
-  every one complete. The whole spread is 10.6%: `identity` spans 9.1256 and the
+  every one complete. Sequence length is bimodal rather than uniform -- 132 of
+  600 frames and 308 of 1200, which sums to the 448,800 -- so anything reasoning
+  from a 1020-frame average is reasoning about a length no sequence has. The
+  whole spread is 10.6%: `identity` spans 9.1256 and the
   most aggressive `cuboid (3,3,3)` spans 8.1592, for 49x the offsets and about
   120x the time. In uint8 that is 0.0357 rad per level against 0.0319 — the same
   picture. So the filter has to be chosen on the beating profile, which is the
