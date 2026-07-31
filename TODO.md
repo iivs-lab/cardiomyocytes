@@ -99,6 +99,26 @@ opens them as `FrameSequence`s, ranges every frame, and writes one JSON per run;
   `0.000e+00`, which is what ordering and averaging the middle two should give
   and had never been checked.
 
+- **Turn the device-parity result into a test, and cover the branch it missed.**
+  Nothing in `tests/` compares a kernel across devices today; copy the
+  `requires_cuda` skip marker from `tests/common/test_cuda_utils.py`, which is
+  there for OpenCV interop only.
+
+  The server check is stronger than it looks and narrower than it sounds. It
+  crossed the `sort` / `topk` boundary rather than merely running one kernel
+  twice: `ellipsoid (1, 1, 1)` takes 7 offsets, which is outside
+  `_CUDA_TOPK_SAMPLES`, so CUDA sorted while CPU -- which never tests `is_cuda`
+  -- used `topk`, and 600 of 600 frames still matched exactly. Border pixels
+  carry NaN padding and an even valid count, so the NaN ordering and the
+  average-the-middle-two path were both exercised.
+
+  What it did not cover: CUDA's `topk` branch, which of the eleven sweep configs
+  only `ellipsoid (2, 2, 2)` reaches at 33 offsets -- every other config lands
+  outside `range(33, 64)` and sorts. And it compared per-frame `(min, max)`, not
+  every pixel: 600 exact matches is strong evidence, not proof. A test should
+  compare whole tensors with `torch.equal` at offset counts on both sides of the
+  boundary.
+
 - **Performance: one candidate is worth writing, and the rest are dead ends.**
   Ranked by what each was measured to return, not by how interesting it is.
   *Inverting the sweep loop* is the one that paid, and it took no code at all —
@@ -212,6 +232,31 @@ opens them as `FrameSequence`s, ranges every frame, and writes one JSON per run;
   `iivs_cardio/data/transforms/normalization.py:142`), and a wrong argument to
   `process_sequence` at `:76`. `ruff` adds an unused loop variable at `:51` and
   two flows computed and dropped at `:53`-`:54`.
+
+- **Where the measurements live, and how to drive the script again.** None of it
+  is in this repository, and the numbers above cannot be re-derived without it.
+
+  On the 7-GPU server, under `/sdd/results/phase_range`:
+  `chunked/chunk-NN/<job>/phase_range_*.json` holds the sweep, eleven chunks of
+  eleven jobs; `chunk-NN.txt` beside them are the `source.include` listings that
+  split the 440 sequences; `smoke/` is the three-job run that verified the
+  per-job output directory; `cpu-smoke`, `cpu-scale/w*`, `cpu-pinned/w*` and
+  `cpu-check` are the CPU validation runs. The source root is
+  `/sdd/data/NEXEL/Off-axis_20Hz_Long-term`.
+
+  Merging needs no `.hydra` reading: each document carries its own resolved
+  `filter` block, so grouping on that and folding `dataset.sequences` across the
+  eleven chunks reconstructs a whole-dataset range per configuration. Sequence
+  `source` is unique, which is what makes a duplicate or a missing chunk
+  detectable. The script that did it was deliberately left out of the repository
+  -- rewrite it when the analysis resumes.
+
+  **Override syntax bites here.** `compute=cpu` works in the short form because
+  the config group and its package are both `compute`, but the filter group is
+  mounted at a different package and needs
+  `data/transforms/filtering@filter=<name>` -- plain `filter=<name>` does not
+  select it. Any job's exact invocation is recoverable from its own
+  `.hydra/overrides.yaml`, which is how this was found.
 
 ## Analysis — what to settle on the full dataset
 
