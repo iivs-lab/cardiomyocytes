@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Protocol
 
 import hydra
 from dotenv import load_dotenv
-from hydra.core.hydra_config import HydraConfig
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import resolve_phase_unit, search_phase_bin_folders
 from kaparoo.filesystem import StagedFile, stringify_path
@@ -23,7 +22,8 @@ from omegaconf import MISSING
 
 from iivs_cardio.common.device import Device
 from iivs_cardio.data.sequence import FrameSequence
-from scripts._config import apply_schema
+from scripts._compute import ComputeConfig, plan_devices
+from scripts._hydra import apply_schema, output_directory
 from scripts.data._filtering import build_filter_kernel, describe_filter_kernel
 
 if TYPE_CHECKING:
@@ -46,13 +46,6 @@ RANGE_VERSION = 1
 
 # Claimed once per worker by `_adopt_device`; the parent never leaves the default.
 _WORKER_DEVICE: Device = Device("cpu")
-
-
-@dataclass
-class ComputeConfig:
-    device: str = "cpu"
-    workers: int | None = 0
-    gpu_ids: list[int] | None = field(default_factory=lambda: [0])
 
 
 @dataclass
@@ -131,28 +124,6 @@ class DatasetRange(CompositeRange):
     @property
     def parts(self) -> tuple[SequenceRange, ...]:
         return self.sequences
-
-
-def plan_devices(compute: ComputeConfig) -> tuple[Device, ...]:
-    # One device per worker, and a single entry means this process does it all,
-    # so "sequential / many processes / many GPUs" is one length check downstream.
-    if not Device.resolve(compute.device).is_cuda:
-        workers = os.cpu_count() or 1 if compute.workers is None else compute.workers
-        if workers < 0:
-            msg = f"invalid worker count {workers}: expected 0 or more, or null"
-            raise ValueError(msg)
-
-        return Device.resolve_all(["cpu"] * max(workers, 1))
-
-    if not compute.gpu_ids:
-        devices = Device.visible_cuda()
-        if not devices:
-            msg = "no CUDA device is visible: set `compute=cpu`, or check the driver"
-            raise ValueError(msg)
-
-        return devices
-
-    return Device.resolve_all(f"cuda:{index}" for index in compute.gpu_ids)
 
 
 def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
@@ -285,14 +256,6 @@ def save_dataset_range(
         file.write(json.dumps(document, indent=2))
 
     return path
-
-
-def output_directory() -> str:
-    # Hydra's own per-job directory, not `target.root`: a sweep runs every job in
-    # one process, so `RANGE_FILE` is the same name for all of them and writing
-    # them to one place would leave only the last. This is `hydra.run.dir` for a
-    # single run and `hydra.sweep.dir/<subdir>` for each job of a `--multirun`.
-    return HydraConfig.get().runtime.output_dir
 
 
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name=CONFIG_NAME)
