@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-__all__ = ("apply_schema", "output_directory")
+__all__ = ("apply_schema", "is_multirun", "output_directory")
 
 from typing import TYPE_CHECKING, cast
 
 from hydra.core.hydra_config import HydraConfig
+from hydra.types import RunMode
 from omegaconf import OmegaConf
 
 if TYPE_CHECKING:
@@ -25,3 +26,13 @@ def output_directory() -> str:
     one configured directory would then leave only the last.
     """
     return HydraConfig.get().runtime.output_dir
+
+
+def is_multirun() -> bool:
+    """Whether this job is one of a `--multirun` sweep rather than a lone run.
+
+    What `output_directory` already accounts for, made answerable: a step that
+    writes somewhere every job shares cannot be repeated per job, and has to
+    refuse the sweep rather than let the jobs race for it.
+    """
+    return HydraConfig.get().mode is RunMode.MULTIRUN
