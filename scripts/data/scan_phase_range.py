@@ -3,10 +3,8 @@ from __future__ import annotations
 import json
 import os
 from abc import ABC, abstractmethod
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field
 from functools import partial
-from multiprocessing import get_context
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -17,31 +15,29 @@ from iivs.dhm.data.phase import resolve_phase_unit, search_phase_bin_folders
 from kaparoo.filesystem import StagedFile, ensure_file_extension, stringify_path
 from kaparoo.filesystem.search import select
 from kaparoo.utils.optional import unwrap_or_default
+from mpire import WorkerPool
 from omegaconf import MISSING
 
-from iivs_cardio.common.device import Device
 from iivs_cardio.data.phase import save_phase_bin_folder
 from iivs_cardio.data.sequence import FrameSequence, finite_range
-from scripts._compute import ComputeConfig, plan_devices
+from scripts._compute import ComputeConfig, plan_devices, report_insights
 from scripts._hydra import apply_schema, is_multirun, output_directory
 from scripts.data._filtering import build_filter_kernel, describe_filter_kernel
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
-    from multiprocessing import SimpleQueue
 
     from iivs.dhm.data.phase import PhaseFileFolder
     from omegaconf import DictConfig
     from torch import Tensor
+
+    from iivs_cardio.common.device import Device
 
 
 load_dotenv()
 
 CONFIG_PATH = os.environ["CONFIGS_ROOT"]
 CONFIG_NAME = "data/phase_range/config"
-
-# Claimed once per worker by `_adopt_device`; the parent never leaves the default.
-_WORKER_DEVICE: Device = Device("cpu")
 
 
 @dataclass
@@ -230,21 +226,16 @@ def scan_sequence(
     return SequenceRange(source, tuple(frames))
 
 
-def _adopt_device(devices: SimpleQueue[Device]) -> None:
-    # `initargs` reaches every worker with the same value, so the queue is what
-    # hands each a different device; it holds exactly one per worker.
-    global _WORKER_DEVICE
-    _WORKER_DEVICE = devices.get()
-
-    # A worker owns one GPU for its whole life, so bind it here rather than leave
-    # it to whichever stage first reaches for cv2 or CuPy.
-    _WORKER_DEVICE.activate()
-
-
 def _scan_on_worker(
-    opened: OpenedSequence, config: SourceConfig, target: TargetConfig
+    worker_id: int,
+    devices: tuple[Device, ...],
+    opened: OpenedSequence,
+    config: SourceConfig,
+    target: TargetConfig,
 ) -> SequenceRange:
-    opened.frames.device = _WORKER_DEVICE
+    device = devices[worker_id]
+    device.activate()
+    opened.frames.device = device
 
     return scan_sequence(opened, config, target)
 
@@ -256,27 +247,31 @@ def scan_sequences(
     compute_config: ComputeConfig,
 ) -> list[SequenceRange]:
     devices = plan_devices(compute_config)
-    if (max_workers := len(devices)) == 1:
+    if (workers := len(devices)) == 1:
         _scan_sync = partial(scan_sequence, config=source_config, target=target_config)
         return [_scan_sync(opened) for opened in sequences]
 
-    # Spawn, never fork: `plan_devices` has already asked the driver what it can
-    # see, so this process holds a CUDA context, and a forked child inherits one
-    # it is not allowed to re-initialize.
-    context = get_context("spawn")
-
-    queue: SimpleQueue[Device] = context.SimpleQueue()
-    for device in devices:
-        queue.put(device)
-
-    with ProcessPoolExecutor(
-        max_workers,
-        mp_context=context,
-        initializer=_adopt_device,
-        initargs=(queue,),
+    with WorkerPool(
+        n_jobs=workers,
+        shared_objects=devices,
+        pass_worker_id=True,
+        enable_insights=compute_config.insights,
     ) as pool:
         scan = partial(_scan_on_worker, config=source_config, target=target_config)
-        return list(pool.map(scan, sequences, chunksize=1))
+
+        scanned: list[SequenceRange] = pool.map(
+            scan,
+            sequences,
+            chunk_size=1,
+            worker_lifespan=compute_config.worker_lifespan,
+            progress_bar=compute_config.progress_bar,
+            progress_bar_options={"desc": "sequences", "unit": "seq"},
+        )
+
+        if compute_config.insights:
+            report_insights(pool.get_insights())
+
+    return scanned
 
 
 def save_dataset_range(
