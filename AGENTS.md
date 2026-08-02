@@ -63,6 +63,12 @@ push.
 - Not every source file needs a dedicated test file — types-only
   modules, re-export `__init__.py` markers, and details covered through
   a public-facing module are intentional exceptions.
+- `scripts/` mirrors nothing, but gets integration tests under
+  `tests/scripts/` wherever a break would otherwise be silent — config
+  composition, since hydra refuses an override for a key no YAML declares,
+  and the worker path, whose signature no type checker can see. Drive them
+  from a synthetic tree, and check the pooled result against the
+  sequential one rather than against a fixture.
 - Flat module-level `def test_*` functions by default; reach for a plain
   `class TestX:` (grouping only, no inheritance) to organize a large or
   multi-feature surface. Don't mix the two styles within one file.
