@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("FrameSequence",)
+__all__ = ("FrameSequence", "finite_range")
 
 import math
 from functools import cached_property
@@ -28,29 +28,27 @@ type IndexLike = int | slice | Iterable[int] | None
 """What a caller may write to select frames: one, a span, a set, or None for all."""
 
 
-def _finite_range(frame: Tensor) -> tuple[float, float] | None:
+def finite_range(frame: Tensor) -> tuple[float, float] | None:
     """The `(min, max)` of `frame`'s finite values, or None when it has none.
 
-    Non-finite values are dropped rather than propagated, so a masked frame's NaN
-    background does not swallow the range. `torch.isfinite` is used over numpy's:
-    a `Tensor`'s `size` is a method, so the emptiness test upstream libraries
-    write as `finite.size == 0` is never true here.
-
-    `aminmax` answers in one pass and betrays a non-finite value by returning
-    one: NaN propagates through both bounds, and an infinity lands on the bound
-    it belongs to. Only then is the mask worth building, which costs a second
-    full-size allocation and a compacting copy -- measured at 512x512, taking
-    that route for every frame is about six times the fused pass.
+    Non-finite values are ignored rather than propagated, so a masked frame's NaN
+    background does not swallow the range. An empty frame and an entirely
+    non-finite one both answer `None`: whether that is a frame to skip or a run
+    to refuse is the caller's to decide, which is why it is not an exception.
     """
     if frame.numel() == 0:
         return None
 
+    # One fused pass, which also betrays a non-finite value: NaN propagates
+    # through both bounds and an infinity lands on the one it belongs to. Only
+    # then is the mask worth its second allocation and compacting copy -- at
+    # 512x512, taking that route for every frame measured about six times this.
     low, high = torch.aminmax(frame)
     if low.isfinite() and high.isfinite():
         return float(low), float(high)
 
     finite = frame[torch.isfinite(frame)]
-    if finite.numel() == 0:
+    if finite.numel() == 0:  # `.numel()`: a Tensor's `size` is a method, never 0
         return None
     return float(finite.min()), float(finite.max())
 
@@ -199,7 +197,7 @@ class FrameSequence[M, T: NumPyRealDType = np.float32](DataSequence[Tensor, M]):
 
         minimum, maximum = math.inf, -math.inf
         for index in indices:
-            found = _finite_range(self.get_item(index))
+            found = finite_range(self.get_item(index))
             if found is not None:
                 minimum = min(minimum, found[0])
                 maximum = max(maximum, found[1])
