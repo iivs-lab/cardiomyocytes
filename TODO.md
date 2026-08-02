@@ -6,34 +6,12 @@ item to a CHANGELOG entry once it lands.
 ## In flight — `scan_phase_range`
 
 Immediate work, unlike the design questions below. The script finds sources,
-opens them as `FrameSequence`s, ranges every frame, and writes one JSON per run;
-`save_frames` is the piece still missing, and it decides the shape of the rest.
+opens them as `FrameSequence`s, ranges every frame, writes the filtered frames a
+run asks for, and writes one JSON per run.
 
-- **Write the frames in the same traversal that ranges them.** Two passes cost
-  +94% on a median `(2, 2, 2)` and +70% on `(1, 1, 1)`: the window buffer spares
-  the source reads on a second visit but re-runs the kernel, which is the
-  expensive half. So `scan_sequence` takes a frame consumer and hands each frame
-  to it as it goes, rather than `save_frames` walking the sequence again.
-
-  That needs `iivs_cardio.data.sequence._finite_range` made public: the caller
-  now holds the frame and must range it directly, and re-deriving the non-finite
-  and empty-frame rules in the script would let the two drift.
-
-- **Range unconditionally; write what each flag asks for.** Computing a range
-  nobody wants costs 1.2% of writing one frame, where a second traversal costs
-  ~94%, so the traversal always produces a `SequenceRange` and `save_ranges` only
-  decides whether the document is written. The guard in `main` is therefore
-  `save_ranges or save_frames`, not `save_ranges` alone — as written today a run
-  asking only for frames does nothing at all.
-
-- **Trim the range document's provenance block.** It repeats
-  `.hydra/config.yaml`, which hydra already writes beside it with the full
-  composed config and the CLI overrides. Keep only what reading the numbers
-  requires — `unit`, `frame_step`, and the filter — since `root` / `include` /
-  `exclude` are answered by `SequenceRange.source`, and a report that gets copied
-  away should still say what its numbers mean. No provenance sidecar beside the
-  written frames: that would be a second copy of the same config, and a copy can
-  desync.
+`save_frames`, the single traversal, the unconditional range, the trimmed
+provenance block and the `mpire` pool have all landed; see the CHANGELOG. What
+follows is what those left open.
 
 - **The worker path earns its keep, and a SATA SSD is what caps it.** Measured on
   the 440-sequence / 448,800-frame set (900x900, 7x Quadro RTX 6000): seven GPUs
@@ -43,10 +21,12 @@ opens them as `FrameSequence`s, ranges every frame, and writes one JSON per run;
   in memory and about 53 MiB of JSON at `indent=2` -- dropping the indent saves
   40%, and gzip would save far more.
 
-  The 251 GiB of RAM is what makes the sweep loop worth inverting: chunk the
-  sequences to roughly 150 GiB, and run every filter over a chunk before moving
-  on, so only the first config of each chunk reads from the disk. That trades a
-  merge step and 121 output files for about three hours.
+  Inverting the sweep loop is what the 251 GiB of RAM bought, and it has been
+  done once by hand: the sequences were split to roughly 150 GiB through
+  `source.include` listings and every filter run over a chunk before moving on,
+  so only the first config of each chunk read from the disk. It underdelivered --
+  see the next entry -- and it is not automated; the split and the merge of 121
+  output files are both manual.
 
 - **What the 121-job sweep actually validated, and what it did not.** Its product
   was the pipeline, not the numbers -- the range table it produced is recorded
@@ -65,16 +45,28 @@ opens them as `FrameSequence`s, ranges every frame, and writes one JSON per run;
   `FrameSequence` / `FilteredSequence` / `MedianKernel` / `IdentityKernel` over
   about 4.9 M frame-filter operations without a crash or a non-finite result.
 
-  Still unvalidated, and none of it needs a server: the `save_frames` write path,
-  which is unwritten; failure handling, because all 121 jobs succeeded and
-  nothing exercised a dead job; and the `mpire` migration above.
+  **That device handoff has since been rewritten**, so this run no longer
+  validates the code that ships: `mpire` replaced the queue and its initializer,
+  and `Device` replaced both resolvers. It stands as evidence about the
+  pipeline's shape, not about its current implementation.
 
-- **Pin the CPU workers' threads, or they lose to running no workers at all.**
-  Nothing calls `torch.set_num_threads`, so every process takes intra-op threads
-  by core count. `compute.workers=1` stays in this process and builds no pool,
-  yet already runs at 1748% CPU -- stacking processes on that only contends.
+  Still unvalidated on real load, and none of it needs a server: the
+  `save_frames` write path, exercised so far only over a synthetic tree; failure
+  handling, because all 121 jobs succeeded and nothing exercised a dead job; and
+  the `mpire` pool, likewise only over a synthetic tree.
+
+- **Settle the thread share between one worker and sixty-four.** `pin_threads`
+  has landed beside where a worker claims its device, giving each `torch`'s own
+  default divided by the worker count and leaving a lone worker alone. Only the
+  widest point of the table below is measured, though: the share between is a
+  policy, not a result, and the run that would settle it is a repeat of this one
+  at 2, 4, 8 and 16 workers. It also moves `torch` alone, so a stage that leaves
+  `torch` for numpy still takes threads by core count.
+
   Measured after the sweep on the same server, 40 sequences at `frame_step=50`
-  with a median `(1, 1, 1)`, 64 cores:
+  with a median `(1, 1, 1)`, 64 cores. `compute.workers=1` stays in this process
+  and builds no pool, yet already runs at 1748% CPU -- stacking processes on that
+  only contends:
 
   ```
   pinned workers=64   26.40 s   1361% cpu   <- best
@@ -85,12 +77,12 @@ opens them as `FrameSequence`s, ranges every frame, and writes one JSON per run;
   workers=16          95.84 s   5154% cpu
   ```
 
-  The default is therefore 2.7x *slower* at sixteen workers than at one, while
+  Unpinned is therefore 2.7x *slower* at sixteen workers than at one, while
   `OMP_NUM_THREADS=1 MKL_NUM_THREADS=1` at sixty-four beats the sequential path
-  by 1.35x. The fix belongs beside where a CUDA worker claims its device, not in
-  an environment variable every caller has to remember. Even pinned it reaches
-  only 1361% of 64 cores, so it ends up waiting on the drive that also caps the
-  GPU path at 3.59x -- which is why the gain is 1.35x and not sixty-four.
+  by 1.35x -- which is what `pin_threads` now does in code rather than in an
+  environment variable every caller has to remember. Even pinned it reaches only
+  1361% of 64 cores, so it ends up waiting on the drive that also caps the GPU
+  path at 3.59x, which is why the gain is 1.35x and not sixty-four.
 
   The same run settled three things the sweep could not. Worker count does not
   change the numbers: 1, 4, 8 and 16 returned identical dataset bounds.
@@ -125,7 +117,7 @@ opens them as `FrameSequence`s, ranges every frame, and writes one JSON per run;
   the bullet above.
 
   *Batching the range's device sync* is the only code change left with a number
-  behind it, and that number is an estimate. `_finite_range` reads
+  behind it, and that number is an estimate. `finite_range` reads
   `low.isfinite()` per frame, which pulls the value to the host and stops the CPU
   from reading the next frame while the GPU works. A `FrameSequence.frame_ranges()`
   that launches every `aminmax` first and transfers once removes the stall: the
@@ -137,12 +129,13 @@ opens them as `FrameSequence`s, ranges every frame, and writes one JSON per run;
   5-8% overall, derived from the middle-weight kernels sitting at 65%
   utilization, not measured end to end.
 
-  Add the plural rather than deleting the singular. `value_range` has exactly one
-  caller (`scan_phase_range.py:209`) and goes dead the moment it moves, but
-  batching inside the script would copy the non-finite and empty-frame rules out
-  of `sequence.py` and let the two drift. With `frame_ranges()` in place
-  `_global_value_range` folds it and `value_range(slice)` keeps a meaning of its
-  own, so nothing is left unused.
+  Settle `value_range` while doing it. **It already has no caller outside its own
+  tests** -- the single traversal took the last one, since `scan_sequence` holds
+  each frame and calls `finite_range` on it directly. So the question is not
+  whether `frame_ranges()` would displace it but whether it earns its place at
+  all: `_global_value_range` folds into the plural, and `value_range(slice)` keeps
+  a meaning of its own only if something wants a subset. Nothing does today, and
+  this is an application that ships no API.
 
   **It pulls against the shared traversal above.** Writing a frame moves it to
   the host, which is the same sync the batching removes — so on a `save_frames`
@@ -185,47 +178,30 @@ opens them as `FrameSequence`s, ranges every frame, and writes one JSON per run;
   would release the eight configs now waiting on ~500 MB/s, which is a larger
   factor than everything above together.
 
-- **Migrate the worker pool to `mpire`.** Prototyped against its real API, not
-  guessed. `WorkerPool(pass_worker_id=True, use_worker_state=True,
-  shared_objects=devices)` gives each worker its index and a private dict, so
-  `_WORKER_DEVICE`, the `SimpleQueue` that fills it, and `_adopt_device` all go
-  away -- the device becomes `state["device"] = devices[worker_id]`. Its default
-  start method is already spawn, which is what CUDA needs. `map` keeps input
-  order and takes `chunk_size`, so the dispatch behaviour is unchanged.
+- **A per-worker progress bar, on top of the pool's own.** The `mpire` pool has
+  landed with `progress_bar` / `enable_insights` / `worker_lifespan` behind
+  `compute.*`; this is the piece left of it. `worker_init` opens a
+  `tqdm(position=worker_id + 1, leave=False)` -- the pool's bar holds position 0
+  -- and each task resets it to the sequence length and renames it; `worker_exit`
+  closes it. Verified rendering seven independent lines under spawn.
 
-  What it adds beyond the tidying: `progress_bar=True` with
-  `progress_bar_options={"desc": ..., "unit": "seq"}` passed straight to tqdm,
-  which an eight-hour silent run wants and which no longer costs a separate
-  dependency decision; `enable_insights=True` for per-worker timings, the way to
-  see whether one GPU lags; and `worker_lifespan`, a guard against the CUDA
-  allocator fragmenting -- running eleven kernels in one process is what once
-  made `cuboid (3,3,3)` measure 60x its isolated cost.
-
-  A per-worker bar is possible on top of the pool's own, and is worth it only
-  for the two heaviest kernels. `worker_init` opens a `tqdm(position=worker_id +
-  1, leave=False)` -- the pool's bar holds position 0 -- and each task resets it
-  to the sequence length and renames it; `worker_exit` closes it. Verified
-  rendering seven independent lines under spawn. Below `cuboid (3,3,1)` it buys
+  Worth it only for the two heaviest kernels. Below `cuboid (3,3,1)` it buys
   nothing: seven workers finishing a sequence every 15 s already move the
   sequence-level bar every couple of seconds, where `cuboid (3,3,3)` leaves it
-  still for over two minutes and looks hung. `tqdm.auto` goes quiet off a tty, so
-  a redirected run keeps a clean log either way; make it a config flag rather
-  than always-on, since seven lines collide with anything else on the terminal.
+  still for over two minutes and looks hung. Keep it a config flag, since seven
+  lines collide with anything else on the terminal.
 
-  Costs: one dependency in the `scripts` group, and a worker signature whose
-  positional order shifts with the flags -- `(worker_id, shared, state, *args)`
-  with `shared_objects`, `(worker_id, state, *args)` without -- which `ty` cannot
-  check. The prototype tripped on it twice.
+  > Correct the note this entry used to carry: `tqdm` does **not** go quiet off a
+  > tty. Measured after the migration, a redirected pool bar writes a redraw line
+  > per update into the log, so `compute.progress_bar` defaulting to true costs
+  > every `--multirun` job that noise. Decide the default against a real sweep.
 
 - **Deferred by decision, recorded so they are not rediscovered.** Renaming the
   `Params` suffix to `Config` on `KernelParams` and the optical-flow params
   classes. Reading frames on multiple threads inside `FrameSequence.value_range`.
   Putting `FrameShapedMixin` / `ValueRangeMixin` on `FrameSequence` — the latter is
   unusable on tensors as written, since it tests emptiness with `finite.size == 0`
-  and a `Tensor`'s `size` is a method, so the comparison is never true. Removing
-  `_WORKER_DEVICE` by hand, which would mean one pool per device and a static
-  split, and so would bring back the `balance` decision the queue made
-  unnecessary -- `mpire` above removes it without that trade.
+  and a `Tensor`'s `size` is a method, so the comparison is never true.
 
 - **`run_estimator.py` still holds four real defects**, surfaced once `ty` began
   checking `scripts/`: a mismatched return type at `:39`, both arguments to

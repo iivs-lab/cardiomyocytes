@@ -10,11 +10,69 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `Device`, a compute device as every library in this stack must agree to see
+  it, with `DeviceLike = str | torch.device | Device` for what a caller may
+  write. `Device.activate` points `cv2.cuda` and CuPy at the same GPU as torch;
+  each of those keeps a process-global current device, and CuPy's was never set,
+  so it stayed on device 0 while `gpumat_to_cupy` wrapped pointers cv2 had
+  allocated elsewhere.
+- `save_phase_bin_folder`, writing filtered frames as a numbered `.bin` folder
+  `PhaseBinFolder` reads back. Frames are numbered from `0`, so a strided read
+  writes a dense sequence, and the folder is staged: a failure part-way leaves
+  any existing destination untouched.
+- `finite_range`, the frame-ranging rule `FrameSequence.value_range` already
+  used, made public so a caller holding a frame can range it without a second
+  read.
+- `scan_phase_range` writes the filtered frames when `target.save_frames` is
+  set, in the same traversal that ranges them. `target.overwrite` decides whether
+  an output already under `target.root` may be replaced, and `target.range_file`
+  names the range document -- `.json` is added when the name lacks it.
+- `scan_phase_range` refuses `target.save_frames` in a `--multirun`. Frames go to
+  `target.root`, which carries no job number, so every job of a sweep would write
+  the one tree: 1.45 TB apiece, in turn, and nothing in the tree would say which
+  config finally left it there. `is_multirun` is what answers the question.
+- `mpire` and `tqdm` in the `scripts` group, and `compute.progress_bar` /
+  `compute.insights` / `compute.worker_lifespan` to drive the pool.
+- `pin_threads`, holding each worker to `torch`'s default thread count divided
+  by the worker count. Every process otherwise sizes its pool to the whole
+  machine and they contend: measured on 64 cores, sixteen unpinned workers ran
+  2.7x slower than no pool at all. A lone worker keeps the machine to itself.
 - `iivs-lib[torch]>=0.2.0` as a dependency, for phase sequence IO. The `torch`
   extra additionally enables `iivs.dhm.analysis.pytorch` and
   `iivs.common.data.pytorch`.
 
 ### Changed
+
+- Every layer stores a `Device` where it stored a `torch.device`; torch calls
+  take `.as_torch`. A malformed spec now raises `ValueError` like every other
+  rejection there, where `torch.device` let a `RuntimeError` through, and
+  `Device.resolve_all` asks the driver only when a CUDA device is named.
+- `cuda_utils` rejects a rank it cannot mean rather than diagnosing it three
+  wrong ways -- a bare unpack error, a channel count the array never had, or a
+  broadcast failure at the assignment -- and `_cv_type` names the pairs it takes
+  from the table beside it.
+- `scan_phase_range` ranges every sequence unconditionally, so `save_ranges`
+  only decides whether the document is written; a run asking for frames alone
+  used to do nothing.
+- The range document keeps `phase_unit`, `frame_step` and the filter, dropping
+  what `.hydra/config.yaml` and each `SequenceRange.source` already answer. Its
+  `version` is gone -- unread, and not bumped when the shape above changed --
+  and so is the timestamp in its filename, which never separated the jobs of a
+  sweep (they share one process, and so one import) where the per-job directory
+  always did. Each record now leads with `source`, as `FrameRange` already did.
+- `scan_phase_range` runs its workers through `mpire`, which retires
+  `_WORKER_DEVICE`, the `SimpleQueue` that filled it and `_adopt_device`: a
+  worker picks its device out of `shared_objects` by worker id, and binds the
+  process to it per task rather than once, which `activate` is cheap enough for.
+- `source.unit` is `source.phase_unit`, beside `frame_step`: both say how to read
+  a sequence, where the fields above them say which sequences to read.
+- `search_sources` tells its two failures apart -- finding nothing under `root`,
+  and filtering everything out -- since they are fixed differently.
+- The script helpers split by what they know: `scripts/_hydra.py` holds the
+  hydra boundary (`apply_schema`, `output_directory`, `is_multirun`) and
+  `scripts/_compute.py` the machine's division (`ComputeConfig`, `plan_devices`,
+  `pin_threads`, `report_insights`). `scripts/_config.py` is gone into the
+  former.
 
 - `kaparoo-python` minimum raised to `0.11.1`, which adds
   `DataSequence._normalize_index`. `FilteredSequence` calls it instead of
