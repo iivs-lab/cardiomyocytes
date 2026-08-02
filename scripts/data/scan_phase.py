@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import json
 import os
-from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING
 
 import hydra
 from dotenv import load_dotenv
@@ -24,6 +23,7 @@ from iivs_cardio.data.phase import save_phase_bin_folder
 from iivs_cardio.data.transforms.filtering import FilteredSequence
 from scripts._compute import ComputeConfig, pin_threads, plan_devices, report_insights
 from scripts._hydra import apply_schema, is_multirun, output_directory
+from scripts._range import DatasetRange, FrameRange, SequenceRange, as_dict
 from scripts.data._filtering import build_filter_kernel, describe_filter_kernel
 
 if TYPE_CHECKING:
@@ -61,67 +61,6 @@ class TargetConfig:
     save_frames: bool = False
     save_ranges: bool = True
     range_file: str = "phase_range"
-
-
-class ValueRange(Protocol):
-    @property
-    def min_value(self) -> float: ...
-
-    @property
-    def max_value(self) -> float: ...
-
-
-@dataclass(frozen=True, slots=True)
-class CompositeRange(ValueRange, ABC):
-    min_value: float = field(init=False)
-    max_value: float = field(init=False)
-    min_index: int = field(init=False)
-    max_index: int = field(init=False)
-
-    @property
-    @abstractmethod
-    def parts(self) -> Sequence[ValueRange]: ...
-
-    def __post_init__(self) -> None:
-        parts = self.parts
-        if not parts:
-            msg = f"value range is undefined: {type(self).__name__} holds nothing"
-            raise ValueError(msg)
-
-        indices = range(len(parts))
-        min_index = min(indices, key=lambda i: parts[i].min_value)
-        max_index = max(indices, key=lambda i: parts[i].max_value)
-
-        object.__setattr__(self, "min_value", parts[min_index].min_value)
-        object.__setattr__(self, "max_value", parts[max_index].max_value)
-        object.__setattr__(self, "min_index", min_index)
-        object.__setattr__(self, "max_index", max_index)
-
-
-@dataclass(frozen=True, slots=True)
-class FrameRange:
-    source: str  # frame name relative to the sequence folder
-    min_value: float
-    max_value: float
-
-
-@dataclass(frozen=True, slots=True)
-class SequenceRange(CompositeRange):
-    source: str  # folder path relative to the dataset root
-    frames: tuple[FrameRange, ...]
-
-    @property
-    def parts(self) -> tuple[FrameRange, ...]:
-        return self.frames
-
-
-@dataclass(frozen=True, slots=True)
-class DatasetRange(CompositeRange):
-    sequences: tuple[SequenceRange, ...]
-
-    @property
-    def parts(self) -> tuple[SequenceRange, ...]:
-        return self.sequences
 
 
 def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
@@ -277,16 +216,13 @@ def save_dataset_range(
     target_config: TargetConfig,
     filter_config: DictConfig | None = None,
 ) -> Path:
-    def _source_first(items: list[tuple[str, Any]]) -> dict[str, Any]:
-        return dict(sorted(items, key=lambda item: item[0] != "source"))
-
     document = {
         "source": {
             "phase_unit": source_config.phase_unit,
             "frame_step": source_config.frame_step,
         },
         "filter": describe_filter_kernel(filter_config),
-        "dataset": asdict(dataset, dict_factory=_source_first),
+        "dataset": as_dict(dataset),
     }
 
     path = Path(output_directory(), target_config.range_file)
