@@ -167,6 +167,30 @@ class Device:
         """Whether this is a CUDA device."""
         return self.kind == "cuda"
 
+    def activate(self) -> None:
+        """Point this process's CUDA libraries at this device.
+
+        torch takes the device from each tensor it is given, but `cv2.cuda` and
+        CuPy each read a process-global current device instead. Both default to
+        device 0 and nothing else here moves them, so on any GPU but the first
+        they disagree with the tensors they are handed -- CuPy would label a
+        pointer from device 1 as device 0's. A `cpu` device has nothing to bind.
+
+        Cheap enough to repeat on a hot path: the three calls together measure
+        about 0.7 us, against about 3.4 ms for one 900x900 flow.
+        """
+        if self.index is None:  # cpu, since only a cuda device carries an index
+            return
+
+        # Imported here rather than at module scope: this module is on the pure
+        # torch filtering path, which would otherwise pay to import both stacks.
+        import cupy as cp
+        import cv2
+
+        torch.cuda.set_device(self.index)
+        cv2.cuda.setDevice(self.index)
+        cp.cuda.Device(self.index).use()
+
     def __str__(self) -> str:
         return self.kind if self.index is None else f"{self.kind}:{self.index}"
 

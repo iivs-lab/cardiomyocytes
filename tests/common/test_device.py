@@ -130,6 +130,69 @@ def test_devices_are_hashable():
     }
 
 
+# ------------------------------ Device.activate ------------------------------- #
+#
+# cupy is imported inside each test, matching `test_cuda_utils`: collection must
+# not import it on a machine without a CUDA runtime.
+
+
+def test_activate_binds_every_library_to_the_same_index(monkeypatch):
+    # The contract only shows itself on a second GPU, which this host may not
+    # have, so it is pinned with spies rather than by observing a real bind.
+    import cupy as cp
+    import cv2
+
+    bound: dict[str, int] = {}
+
+    class _CuPyDevice:
+        def __init__(self, index: int) -> None:
+            self._index = index
+
+        def use(self) -> None:
+            bound["cupy"] = self._index
+
+    monkeypatch.setattr(
+        torch.cuda, "set_device", lambda index: bound.update(torch=index)
+    )
+    monkeypatch.setattr(cv2.cuda, "setDevice", lambda index: bound.update(cv2=index))
+    monkeypatch.setattr(cp.cuda, "Device", _CuPyDevice)
+
+    Device("cuda", 3).activate()  # index 3 need not exist; nothing real is called
+
+    assert bound == {"torch": 3, "cv2": 3, "cupy": 3}
+
+
+def test_activate_on_the_cpu_binds_nothing(monkeypatch):
+    import cupy as cp
+    import cv2
+
+    def fail(*_: object) -> None:
+        pytest.fail("a cpu device reached for a CUDA library")
+
+    monkeypatch.setattr(torch.cuda, "set_device", fail)
+    monkeypatch.setattr(cv2.cuda, "setDevice", fail)
+    monkeypatch.setattr(cp.cuda, "Device", fail)
+
+    Device("cpu").activate()
+
+
+@pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="no CUDA-capable GPU detected"
+)
+def test_activate_leaves_the_libraries_agreeing():
+    # Trivially true on a single-GPU host -- every index is 0 either way. It is
+    # the multi-GPU host this is written for; the spy test above covers the rest.
+    import cupy as cp
+    import cv2
+
+    for device in Device.visible_cuda():
+        device.activate()
+
+        assert torch.cuda.current_device() == device.index
+        assert cv2.cuda.getDevice() == device.index
+        assert cp.cuda.Device().id == device.index
+
+
 # ------------------------------ Device.resolve_all ---------------------------- #
 
 

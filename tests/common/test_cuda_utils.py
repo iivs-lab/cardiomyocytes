@@ -137,3 +137,29 @@ def test_tensor_to_gpumat_rejects_cpu_tensor():
     # A CPU tensor would silently host->device copy via cp.asarray; reject it.
     with pytest.raises(ValueError, match="CUDA tensor"):
         tensor_to_gpumat(torch.zeros((4, 4), dtype=torch.uint8))
+
+
+@requires_cuda
+def test_gpumat_to_cupy_labels_the_memory_with_cv2s_device(monkeypatch):
+    # Left to default, CuPy attributes the pointer to whichever device CuPy is
+    # on -- device 0 unless something moved it -- which is wrong the moment cv2
+    # allocated on any other GPU. Checked with a spy: a single-GPU host cannot
+    # tell the right label from the default one.
+    import cupy as cp
+
+    from iivs_cardio.common.cuda_utils import gpumat_to_cupy
+
+    original = cp.cuda.UnownedMemory
+    seen: dict[str, object] = {}
+
+    def spy(*args: object, **kwargs: object) -> object:
+        seen.update(kwargs)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(cp.cuda, "UnownedMemory", spy)
+
+    gm = cv2.cuda.GpuMat()
+    gm.upload(np.zeros((4, 4), dtype=np.uint8))
+    gpumat_to_cupy(gm)
+
+    assert seen["device_id"] == cv2.cuda.getDevice()

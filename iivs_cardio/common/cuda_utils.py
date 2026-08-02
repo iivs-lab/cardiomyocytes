@@ -48,6 +48,11 @@ def gpumat_to_cupy(gm: cv2.cuda.GpuMat) -> cp.ndarray:
     The GpuMat's device memory is wrapped (not copied); its row padding (`step`)
     is honored through the CuPy strides. The view stays valid only while `gm`
     lives — `gm` is held as the memory's owner to keep it alive.
+
+    The memory is labelled with cv2's current device, since a GpuMat does not
+    report its own and CuPy would otherwise attribute the pointer to whichever
+    device CuPy happens to be on. That is only the right answer while one
+    process works on one GPU, which `Device.activate` is what establishes.
     """
     width, height = gm.size()
     channels = gm.channels()
@@ -55,7 +60,9 @@ def gpumat_to_cupy(gm: cv2.cuda.GpuMat) -> cp.ndarray:
     itemsize = cp.dtype(dtype).itemsize
     step = gm.step  # bytes per row, padded for alignment
 
-    memory = cp.cuda.UnownedMemory(gm.cudaPtr(), step * height, owner=gm)
+    memory = cp.cuda.UnownedMemory(
+        gm.cudaPtr(), step * height, owner=gm, device_id=cv2.cuda.getDevice()
+    )
     pointer = cast("MemoryPointer", cp.cuda.MemoryPointer(memory, 0))
     if channels == 1:
         return cp.ndarray(

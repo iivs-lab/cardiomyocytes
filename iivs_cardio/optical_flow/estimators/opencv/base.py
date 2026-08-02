@@ -55,7 +55,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
 
     def __init__(self, device: DeviceLike = "cpu") -> None:
         super().__init__(device)
-        self.select_device()
+        self.device.activate()  # `_create_algorithm` allocates on the current device
         self._algorithm: OpenCVAlgorithm = self._create_algorithm()
 
         if self.is_cuda:
@@ -68,11 +68,6 @@ class OpenCVEstimator(OpticalFlowEstimator):
     @abstractmethod
     def _create_algorithm(self) -> OpenCVAlgorithm:
         """Create the cv2 flow algorithm for `self.device`."""
-
-    def select_device(self) -> None:
-        """Pin cv2.cuda's process-global current device to this estimator's GPU."""
-        if self.is_cuda and self.device.index is not None:
-            cv2.cuda.setDevice(self.device.index)
 
     def validate_device(self, frame: Tensor) -> None:
         """Raise if `frame` is not on this estimator's device."""
@@ -148,7 +143,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
     # -------------------- cuda (GpuMat via cuda_utils) --------------------- #
 
     def _push_cuda(self, frame: Tensor) -> Tensor | None:
-        self.select_device()
+        self.device.activate()  # the GpuMat/CuPy calls below read the global device
         prev = self._frame_buffers[self._prev_slot]
         curr = self._frame_buffers[self._prev_slot ^ 1]
         tensor_to_gpumat(frame, out=curr)
@@ -158,7 +153,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
         return self._calc_cuda_core(prev, curr)
 
     def _calc_cuda(self, prev: Tensor, curr: Tensor) -> Tensor:
-        self.select_device()
+        self.device.activate()
         prev_cv = tensor_to_gpumat(prev)
         curr_cv = tensor_to_gpumat(curr)
         return self._calc_cuda_core(prev_cv, curr_cv)
