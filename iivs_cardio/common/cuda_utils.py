@@ -35,11 +35,30 @@ def _cv_type(dtype: type, channels: int) -> int:
     try:
         return _DTYPE_CH_TO_CVTYPE[dtype, channels]
     except KeyError:
-        msg = (
-            f"unsupported (dtype, channels) ({dtype.__name__}, {channels}): expected "
-            "(uint8, 1), (float32, 1), or (float32, 2)"
-        )
+        pair = f"({dtype.__name__}, {channels})"
+        listed = ", ".join(f"({d.__name__}, {c})" for d, c in _DTYPE_CH_TO_CVTYPE)
+        msg = f"unsupported dtype/channels {pair}: expected {listed}"
         raise ValueError(msg) from None
+
+
+def _hw_channels(shape: tuple[int, ...]) -> tuple[int, int, int]:
+    """Read `(height, width, channels)` off a `(H, W)` or `(H, W, C)` shape.
+
+    Rejecting any other rank here is what keeps a wrong one from being read as a
+    plausible frame: a 4-D shape otherwise reaches `_cv_type` as a channel count
+    it never had, or the assignment below as a broadcast that cannot work.
+
+    Raises:
+        ValueError: If `shape` is neither 2-D nor 3-D.
+    """
+    match shape:
+        case (height, width):
+            return height, width, 1
+        case (height, width, channels):
+            return height, width, channels
+
+    msg = f"unsupported shape {tuple(shape)}: expected (H, W) or (H, W, C)"
+    raise ValueError(msg)
 
 
 def gpumat_to_cupy(gm: cv2.cuda.GpuMat) -> cp.ndarray:
@@ -80,10 +99,10 @@ def cupy_to_gpumat(arr: cp.ndarray) -> cv2.cuda.GpuMat:
     """Copy a CuPy array into a fresh `cv2.cuda.GpuMat`, device-to-device.
 
     Allocates a GpuMat of matching shape/dtype and copies `arr` into it on the
-    device (no host round-trip). Accepts `(H, W)` or `(H, W, C)` arrays.
+    device (no host round-trip). Accepts `(H, W)` or `(H, W, C)` arrays, and
+    rejects any other rank.
     """
-    height, width = arr.shape[:2]
-    channels = 1 if arr.ndim == 2 else arr.shape[2]
+    height, width, channels = _hw_channels(arr.shape)
     gm = cv2.cuda.GpuMat(height, width, _cv_type(arr.dtype.type, channels))
     gpumat_to_cupy(gm)[...] = arr
     return gm
@@ -96,15 +115,18 @@ def tensor_to_gpumat(
 
     Copies into `out` in place when given — sizing it to `tensor` (a no-op when it
     already matches), so a reused buffer skips a per-call allocation — otherwise
-    allocates a fresh GpuMat. Accepts `(H, W)` or `(H, W, C)` tensors; `tensor`
-    must live on a CUDA device (else `cp.asarray` would silently host->device copy).
+    allocates a fresh GpuMat. Accepts `(H, W)` or `(H, W, C)` tensors and rejects
+    any other rank; `tensor` must live on a CUDA device (else `cp.asarray` would
+    silently host->device copy).
     """
     if not tensor.is_cuda:
         msg = f"tensor_to_gpumat expects a CUDA tensor, got one on {tensor.device}"
         raise ValueError(msg)
+
+    # Read off the tensor, so a bad rank fails before any device work is done.
+    height, width, channels = _hw_channels(tuple(tensor.shape))
+
     arr = cp.ascontiguousarray(cp.asarray(tensor))
-    height, width = arr.shape[:2]
-    channels = 1 if arr.ndim == 2 else arr.shape[2]
     if out is None:
         out = cv2.cuda.GpuMat()
     out.create(height, width, _cv_type(arr.dtype.type, channels))

@@ -129,6 +129,45 @@ def test_cv_type_rejects_unsupported_combo():
 
 
 @requires_cuda
+def test_cv_type_names_every_pair_it_supports():
+    # Derived from the table rather than written out, so adding a pair cannot
+    # leave the message claiming a set that is no longer the real one.
+    import cupy as cp
+
+    from iivs_cardio.common.cuda_utils import _DTYPE_CH_TO_CVTYPE, _cv_type
+
+    with pytest.raises(ValueError, match="unsupported") as raised:
+        _cv_type(cp.float64, 3)
+
+    for dtype, channels in _DTYPE_CH_TO_CVTYPE:
+        assert f"({dtype.__name__}, {channels})" in str(raised.value)
+
+
+@requires_cuda
+@pytest.mark.parametrize("shape", ((16,), (2, 16, 16, 3), (4, 4, 2, 3)))
+def test_cupy_to_gpumat_rejects_an_unsupported_rank(shape):
+    # Each of these used to fail somewhere else: a bare unpack error, a channel
+    # count the array never had, or a broadcast at the assignment.
+    import cupy as cp
+
+    from iivs_cardio.common.cuda_utils import cupy_to_gpumat
+
+    with pytest.raises(ValueError, match=r"expected \(H, W\)"):
+        cupy_to_gpumat(cp.zeros(shape, dtype=cp.float32))
+
+
+@requires_cuda
+@pytest.mark.parametrize("shape", ((16,), (2, 16, 16, 3), (4, 4, 2, 3)))
+def test_tensor_to_gpumat_rejects_an_unsupported_rank(shape):
+    import torch
+
+    from iivs_cardio.common.cuda_utils import tensor_to_gpumat
+
+    with pytest.raises(ValueError, match=r"expected \(H, W\)"):
+        tensor_to_gpumat(torch.zeros(shape, dtype=torch.float32, device="cuda"))
+
+
+@requires_cuda
 def test_tensor_to_gpumat_rejects_cpu_tensor():
     import torch
 
