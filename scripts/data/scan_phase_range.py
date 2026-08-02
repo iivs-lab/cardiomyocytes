@@ -20,7 +20,12 @@ from omegaconf import MISSING
 
 from iivs_cardio.data.phase import save_phase_bin_folder
 from iivs_cardio.data.sequence import FrameSequence, finite_range
-from scripts._compute import ComputeConfig, plan_devices, report_insights
+from scripts._compute import (
+    ComputeConfig,
+    pin_threads,
+    plan_devices,
+    report_insights,
+)
 from scripts._hydra import apply_schema, is_multirun, output_directory
 from scripts.data._filtering import build_filter_kernel, describe_filter_kernel
 
@@ -235,6 +240,7 @@ def _scan_on_worker(
 ) -> SequenceRange:
     device = devices[worker_id]
     device.activate()
+    pin_threads(len(devices))
     opened.frames.device = device
 
     return scan_sequence(opened, config, target)

@@ -1,16 +1,22 @@
 from __future__ import annotations
 
-__all__ = ("ComputeConfig", "plan_devices", "report_insights")
+__all__ = ("ComputeConfig", "pin_threads", "plan_devices", "report_insights")
 
 import os
 from dataclasses import dataclass, field
 from typing import Any
 
+import torch
 from kaparoo.utils.optional import unwrap_or_default
 
 from iivs_cardio.common.device import Device
 
 DEFAULT_WORKERS = os.cpu_count() or 1
+
+# Read before anything pins, so a share divides what torch would have taken on
+# its own. A spawned worker re-imports this module and so reads its own default,
+# which tracks physical cores rather than the logical count above.
+_UNPINNED_THREADS = torch.get_num_threads()
 
 
 @dataclass
@@ -50,6 +56,29 @@ def plan_devices(compute: ComputeConfig) -> tuple[Device, ...]:
         return devices
 
     return Device.resolve_all(f"cuda:{index}" for index in compute.gpu_ids)
+
+
+def pin_threads(workers: int) -> None:
+    """Hold this worker to its share of the machine's intra-op threads.
+
+    torch sizes its thread pool to the machine in every process, so workers each
+    claiming all of it contend rather than parallelise. Measured on 64 cores,
+    sixteen unpinned workers ran 2.7x slower than no pool at all, while
+    sixty-four pinned to one thread each beat the sequential path by 1.35x.
+
+    A lone worker is left alone: it has the machine to itself, and the same
+    measurement puts one unpinned process ahead of every pinned pool it tried
+    below sixty-four workers. Only that widest point is measured -- the share
+    between is this policy, not a result -- and it moves torch alone, so a stage
+    that leaves torch for numpy is not covered.
+
+    Args:
+        workers: How many processes are sharing this machine.
+    """
+    if workers <= 1:
+        return
+
+    torch.set_num_threads(max(1, _UNPINNED_THREADS // workers))
 
 
 def report_insights(insights: dict[str, Any]) -> None:
