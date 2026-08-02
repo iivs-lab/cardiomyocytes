@@ -17,6 +17,7 @@ from kaparoo.filesystem.search import select
 from kaparoo.utils.optional import unwrap_or_default
 from mpire import WorkerPool
 from omegaconf import MISSING
+from tqdm import tqdm
 
 from iivs_cardio.data.phase import save_phase_bin_folder
 from iivs_cardio.data.sequence import FrameSequence, finite_range
@@ -187,13 +188,13 @@ def list_sequences(
 
 def scan_sequence(
     opened: OpenedSequence,
-    config: SourceConfig,
-    target: TargetConfig | None = None,
+    source_config: SourceConfig,
+    target_config: TargetConfig | None = None,
 ) -> SequenceRange:
-    subpath = unwrap_or_default(config.subpath, PHASE_FLOAT_BIN)
+    subpath = unwrap_or_default(source_config.subpath, PHASE_FLOAT_BIN)
     sequence = opened.frames
     source = stringify_path(
-        sequence.get_meta(0).parent, after=config.root, before=subpath
+        sequence.get_meta(0).parent, after=source_config.root, before=subpath
     )
     frames: list[FrameRange] = []
 
@@ -213,16 +214,16 @@ def scan_sequence(
             frames.append(FrameRange(name, *found))
             yield frame
 
-    if target is not None and target.save_frames:
+    if target_config is not None and target_config.save_frames:
         header = opened.folder.header
         save_phase_bin_folder(
-            Path(target.root, source, subpath),
+            Path(target_config.root, source, subpath),
             (frame.cpu().numpy() for frame in walk()),
             pixel_size=header.pixel_size,
             height_scale=header.height_scale,
             # None means each file keeps its stored unit, which is the header's.
             unit=unwrap_or_default(opened.folder.target_unit, header.unit),
-            overwrite=target.overwrite,
+            overwrite=target_config.overwrite,
         )
     else:
         for _ in walk():
@@ -235,15 +236,15 @@ def _scan_on_worker(
     worker_id: int,
     devices: tuple[Device, ...],
     opened: OpenedSequence,
-    config: SourceConfig,
-    target: TargetConfig,
+    source_config: SourceConfig,
+    target_config: TargetConfig,
 ) -> SequenceRange:
     device = devices[worker_id]
     device.activate()
     pin_threads(len(devices))
     opened.frames.device = device
 
-    return scan_sequence(opened, config, target)
+    return scan_sequence(opened, source_config, target_config)
 
 
 def scan_sequences(
@@ -252,10 +253,13 @@ def scan_sequences(
     target_config: TargetConfig,
     compute_config: ComputeConfig,
 ) -> list[SequenceRange]:
+    pbar_enabled = compute_config.progress_bar
+    pbar_options = {"desc": "sequences", "unit": "seq"}
+
     devices = plan_devices(compute_config)
     if (workers := len(devices)) == 1:
-        _scan_sync = partial(scan_sequence, config=source_config, target=target_config)
-        return [_scan_sync(opened) for opened in sequences]
+        pbar = tqdm(sequences, disable=not pbar_enabled, **pbar_options)
+        return [scan_sequence(opened, source_config, target_config) for opened in pbar]
 
     with WorkerPool(
         n_jobs=workers,
@@ -263,15 +267,17 @@ def scan_sequences(
         pass_worker_id=True,
         enable_insights=compute_config.insights,
     ) as pool:
-        scan = partial(_scan_on_worker, config=source_config, target=target_config)
+        scan = partial(
+            _scan_on_worker, source_config=source_config, target_config=target_config
+        )
 
         scanned: list[SequenceRange] = pool.map(
             scan,
             sequences,
             chunk_size=1,
             worker_lifespan=compute_config.worker_lifespan,
-            progress_bar=compute_config.progress_bar,
-            progress_bar_options={"desc": "sequences", "unit": "seq"},
+            progress_bar=pbar_enabled,
+            progress_bar_options=pbar_options,
         )
 
         if compute_config.insights:
