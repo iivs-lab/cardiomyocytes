@@ -93,8 +93,8 @@ def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
 
 
 def build_sequences(
-    source_config: SourceConfig,
     compute_config: ComputeConfig,
+    source_config: SourceConfig,
     filter_config: DictConfig | None = None,
 ) -> list[PhaseFilteredSequence]:
     device = plan_devices(compute_config)[0]
@@ -170,9 +170,9 @@ def _scan_on_worker(
 
 def scan_sequences(
     sequences: Sequence[PhaseFilteredSequence],
+    compute_config: ComputeConfig,
     source_config: SourceConfig,
     target_config: TargetConfig,
-    compute_config: ComputeConfig,
 ) -> list[SequenceRange]:
     pbar_enabled = compute_config.progress_bar
     pbar_options = {"desc": "scanning", "unit": "seq"}
@@ -254,8 +254,8 @@ def main(cfg: DictConfig) -> None:
         msg = "cannot write frames in a sweep: run the winning config alone instead"
         raise ValueError(msg)
 
-    sequences = build_sequences(source_config, compute_config, filter_config)
-    scanned = scan_sequences(sequences, source_config, target_config, compute_config)
+    sequences = build_sequences(compute_config, source_config, filter_config)
+    scanned = scan_sequences(sequences, compute_config, source_config, target_config)
 
     if target_config.save_ranges:
         dataset_range = DatasetRange(tuple(scanned))

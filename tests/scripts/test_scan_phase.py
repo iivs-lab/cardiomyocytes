@@ -94,10 +94,10 @@ def test_the_pool_returns_what_the_lone_path_does(phase_tree, tmp_path):
     pooled = ComputeConfig(device="cpu", workers=2, progress_bar=False)
 
     expected = scan_sequences(
-        build_sequences(source_config, lone), source_config, target_config, lone
+        build_sequences(lone, source_config), lone, source_config, target_config
     )
     actual = scan_sequences(
-        build_sequences(source_config, pooled), source_config, target_config, pooled
+        build_sequences(pooled, source_config), pooled, source_config, target_config
     )
 
     assert [(s.source, s.min_value, s.max_value) for s in actual] == [
