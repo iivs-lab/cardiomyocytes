@@ -42,7 +42,7 @@ if TYPE_CHECKING:
 load_dotenv()
 
 CONFIG_PATH = os.environ["CONFIGS_ROOT"]
-CONFIG_NAME = "data/phase_range/config"
+CONFIG_NAME = "data/phase_scan/config"
 
 
 @dataclass

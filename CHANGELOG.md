@@ -23,11 +23,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `finite_range`, the frame-ranging rule `FrameSequence.value_range` already
   used, made public so a caller holding a frame can range it without a second
   read.
-- `scan_phase_range` writes the filtered frames when `target.save_frames` is
+- `scan_phase` writes the filtered frames when `target.save_frames` is
   set, in the same traversal that ranges them. `target.overwrite` decides whether
   an output already under `target.root` may be replaced, and `target.range_file`
   names the range document -- `.json` is added when the name lacks it.
-- `scan_phase_range` refuses `target.save_frames` in a `--multirun`. Frames go to
+- `scan_phase` refuses `target.save_frames` in a `--multirun`. Frames go to
   `target.root`, which carries no job number, so every job of a sweep would write
   the one tree: 1.45 TB apiece, in turn, and nothing in the tree would say which
   config finally left it there. `is_multirun` is what answers the question.
@@ -51,7 +51,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   wrong ways -- a bare unpack error, a channel count the array never had, or a
   broadcast failure at the assignment -- and `_cv_type` names the pairs it takes
   from the table beside it.
-- `scan_phase_range` ranges every sequence unconditionally, so `save_ranges`
+- `scan_phase` ranges every sequence unconditionally, so `save_ranges`
   only decides whether the document is written; a run asking for frames alone
   used to do nothing.
 - The range document keeps `phase_unit`, `frame_step` and the filter, dropping
@@ -60,7 +60,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and so is the timestamp in its filename, which never separated the jobs of a
   sweep (they share one process, and so one import) where the per-job directory
   always did. Each record now leads with `source`, as `FrameRange` already did.
-- `scan_phase_range` runs its workers through `mpire`, which retires
+- `scan_phase` runs its workers through `mpire`, which retires
   `_WORKER_DEVICE`, the `SimpleQueue` that filled it and `_adopt_device`: a
   worker picks its device out of `shared_objects` by worker id, and binds the
   process to it per task rather than once, which `activate` is cheap enough for.

@@ -3,7 +3,7 @@
 Tracked items that are not yet captured in code or tests. Promote an
 item to a CHANGELOG entry once it lands.
 
-## In flight — `scan_phase_range`
+## In flight — `scan_phase`
 
 Immediate work, unlike the design questions below. The script finds sources,
 opens them as `FrameSequence`s, ranges every frame, writes the filtered frames a
@@ -544,7 +544,7 @@ Roughly in dependency order: each one is easier once the previous has landed.
 
   `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` is the cheap fix and torch
   2.12 has it: segments grow in place, so no new contiguous `cudaMalloc` is
-  needed. `scan_phase_range` is already safe without it, because
+  needed. `scan_phase` is already safe without it, because
   `scan_sequences` builds and tears down its pool inside each job -- a
   `--multirun` sharing one parent process therefore carries no fragmentation
   between configurations. Keep that property.
