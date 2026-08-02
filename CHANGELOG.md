@@ -20,9 +20,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `PhaseBinFolder` reads back. Frames are numbered from `0`, so a strided read
   writes a dense sequence, and the folder is staged: a failure part-way leaves
   any existing destination untouched.
-- `finite_range`, the frame-ranging rule `FrameSequence.value_range` already
-  used, made public so a caller holding a frame can range it without a second
-  read.
+- `finite_range` in `iivs_cardio/common/range.py`, the `(min, max)` of a frame's
+  finite values or `None` when it has none, so a caller holding a frame can range
+  it without a second read. Non-finite values are ignored rather than propagated,
+  which keeps a masked frame's NaN background from swallowing the range.
 - `scan_phase` writes the filtered frames when `target.save_frames` is
   set, in the same traversal that ranges them. `target.overwrite` decides whether
   an output already under `target.root` may be replaced, and `target.range_file`
@@ -69,10 +70,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `search_sources` tells its two failures apart -- finding nothing under `root`,
   and filtering everything out -- since they are fixed differently.
 - The script helpers split by what they know: `scripts/_hydra.py` holds the
-  hydra boundary (`apply_schema`, `output_directory`, `is_multirun`) and
+  hydra boundary (`apply_schema`, `output_directory`, `is_multirun`),
   `scripts/_compute.py` the machine's division (`ComputeConfig`, `plan_devices`,
-  `pin_threads`, `report_insights`). `scripts/_config.py` is gone into the
-  former.
+  `pin_threads`, `report_insights`), and `scripts/_range.py` the shape a run
+  reports its value ranges in (`ValueRange`, `CompositeRange`, `FrameRange`,
+  `SequenceRange`, `DatasetRange`, `as_dict`). `scripts/_config.py` is gone into
+  the first. The range types are a document schema rather than library code --
+  each `source` is a path relative to something only the document fixes -- which
+  is why they sit beside the scripts that write them and not under
+  `iivs_cardio/`, whose own currency for a range is a `tuple[float, float]`.
+- `FilteredSequence` absorbs `FrameSequence`, taking its frame `step` and its
+  typed view of the source; `iivs_cardio/data/sequence.py` is gone with it.
+  `step` is applied before filtering, as it was, and `origin` returns the source
+  as the type it was given -- so a caller needing a phase folder's header reaches
+  it without carrying a second reference. The wrapper was generic in name only:
+  it composed a filter, so no flow or kinematics sequence could ever have used
+  it. `FrameSequence.value_range` goes too, left without a caller once the scan
+  took to ranging in its single traversal.
 
 - `kaparoo-python` minimum raised to `0.11.1`, which adds
   `DataSequence._normalize_index`. `FilteredSequence` calls it instead of

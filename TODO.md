@@ -6,8 +6,8 @@ item to a CHANGELOG entry once it lands.
 ## In flight — `scan_phase`
 
 Immediate work, unlike the design questions below. The script finds sources,
-opens them as `FrameSequence`s, ranges every frame, writes the filtered frames a
-run asks for, and writes one JSON per run.
+builds a `FilteredSequence` over each, ranges every frame, writes the filtered
+frames a run asks for, and writes one JSON per run.
 
 **The 2026-07-31 sweep and everything measured on it have been dropped.**
 `Device`, the single traversal, the `mpire` pool and `pin_threads` all landed
@@ -27,26 +27,19 @@ still to build or decide.
   ordering and the average-the-middle-two path. Compare whole tensors with
   `torch.equal` at offset counts either side of the boundary.
 
-- **Batch the range's device sync, and settle `value_range` while doing it.**
-  `finite_range` reads `low.isfinite()` per frame, which pulls a value to the host
-  and stops the CPU reading the next frame while the GPU works. A
-  `FrameSequence.frame_ranges()` that launches every `aminmax` first and transfers
-  once removes the stall: the scalars are 8 B a frame, so a 1200-frame sequence
-  holds 9.6 KB, and CUDA's launch queue self-throttles rather than growing without
-  bound. The non-finite fallback cannot branch per frame without the sync it
-  exists to remove, so it becomes a second pass over only the frames whose bounds
-  came back non-finite -- in practice none, and `numel()` syncs nothing.
+- **Batch the range's device sync.** `finite_range` reads `low.isfinite()` per
+  frame, which pulls a value to the host and stops the CPU reading the next frame
+  while the GPU works. A `FilteredSequence.frame_ranges()` that launches every
+  `aminmax` first and transfers once removes the stall: the scalars are 8 B a
+  frame, so a 1200-frame sequence holds 9.6 KB, and CUDA's launch queue
+  self-throttles rather than growing without bound. The non-finite fallback cannot
+  branch per frame without the sync it exists to remove, so it becomes a second
+  pass over only the frames whose bounds came back non-finite -- in practice none,
+  and `numel()` syncs nothing.
 
   **It pulls against the shared traversal.** Writing a frame moves it to the host,
   which is the same sync the batching removes, so on a `save_frames` run the stall
   returns regardless and the batching pays only on a range-only run.
-
-  `value_range` **already has no caller outside its own tests** -- the single
-  traversal took the last one. So the question is not whether `frame_ranges()`
-  would displace it but whether it earns its place at all: `_global_value_range`
-  folds into the plural, and `value_range(slice)` keeps a meaning of its own only
-  if something wants a subset. Nothing does, and this is an application that ships
-  no API.
 
 - **Drop `indent=2` from the range document.** One character, a large fraction
   of the file, and no time cost. It is disk, not throughput, so it only matters
@@ -68,6 +61,47 @@ still to build or decide.
   per update into the log, so `compute.progress_bar` defaulting to true costs
   every `--multirun` job that noise. Decide the default against a real sweep.
 
+- **Nothing logs.** `hydra` opens a `scan_phase.log` in every job directory and it
+  is 0 bytes on every run: the script writes nothing, and `report_insights`
+  `print`s, which hydra does not capture. So a sweep leaves no record of which
+  sequences a job read, how long each took, or why one failed -- only the range
+  document, which a run that dies never reaches. `benchmark_opencv.py` already
+  takes a `logging.getLogger(__name__)` and hydra configures the root handler, so
+  a module logger is all a script needs. What to settle is the level split: per
+  sequence at `INFO`, per frame at `DEBUG` where 1200 frames a sequence would
+  otherwise swamp the file, and `report_insights` routed there instead of stdout.
+  A worker logs from its own process, so the handler has to be one a spawned
+  process inherits or rebuilds.
+
+- **One bad sequence must not cost the run.** `scan_sequence` raises on a frame
+  holding no finite value, and `save_phase_bin_folder` raises when the destination
+  exists and `target.overwrite` is false. Either ends everything: `mpire` re-raises
+  a task's exception in the parent and tears the pool down, so every sequence
+  already finished is lost to the one that failed -- after hours, on the full
+  dataset. The scan should carry a failure as a result rather than an exception,
+  finish what can be finished, and report at the end which sequences were skipped
+  and why.
+
+  **A partial run must say so.** A range folded over a subset is not the dataset's
+  range, and a consumer setting a normalization policy from it would be reading a
+  hole as data. Whatever the document gains -- a skipped list, a count against the
+  number found -- has to be something a reader cannot miss.
+
+- **The source search is moving to `iivs-lib`.** Decided, not yet scheduled.
+  `search_phase_bin_folders` already lives there (`iivs.dhm.data.phase.layout`);
+  what would follow it is the layer `search_sources` wraps around it -- the
+  `include` / `exclude` selection, the unit override, and the two failures it
+  tells apart. Move it before a second script grows its own copy.
+
+- **`save_phase_bin_folder` is moving to `iivs-lib` too.** It is the odd half of
+  a pair: `PhaseBinFolder` reads a numbered `.bin` folder from there, and the
+  `{index:05d}_<stem>.<ext>` numbering it writes is `save_koala_frames`'s
+  convention, not this project's. What it adds on top -- renumbering from `0`,
+  staging the folder, and creating `dest`'s parent because `save_koala_frames`
+  stages into a sibling -- belongs beside the reader that has to agree with it.
+  `save_flow_folder`, which it mirrors, stays: a flow folder is this project's
+  own format.
+
 - **Not every config group takes the short override form.** `compute=cpu` works
   because the group and its package are both `compute`, but the filter group is
   mounted at another package and needs
@@ -77,10 +111,11 @@ still to build or decide.
 
 - **Deferred by decision, recorded so they are not rediscovered.** Renaming the
   `Params` suffix to `Config` on `KernelParams` and the optical-flow params
-  classes. Reading frames on multiple threads inside `FrameSequence.value_range`.
-  Putting `FrameShapedMixin` / `ValueRangeMixin` on `FrameSequence` — the latter is
+  classes. Reading frames on multiple threads while ranging them. Putting
+  `FrameShapedMixin` / `ValueRangeMixin` on `FilteredSequence` — the latter is
   unusable on tensors as written, since it tests emptiness with `finite.size == 0`
-  and a `Tensor`'s `size` is a method, so the comparison is never true.
+  and a `Tensor`'s `size` is a method, so the comparison is never true, which is
+  why `finite_range` asks `numel()`.
 
 ## Analysis — what to settle on the full dataset
 
@@ -234,6 +269,48 @@ Roughly in dependency order: each one is easier once the previous has landed.
   computed and dropped. They are the whole of what `ruff check` and `ty check`
   report today, so the two commands only read as clean by comparison until this
   file is replaced.
+
+- **Settle how one sequence's stages compose, before writing a second driver.**
+  This gates the rewrite below and outranks the work distribution beside it. That
+  distribution is settled -- one sequence per task, `mpire`, one device per worker
+  -- and it is the same shape whatever a task runs. What a task *runs* is not
+  settled at all, and `scan_phase` currently answers it by hard-coding one
+  pipeline: read, filter, range, and write if asked.
+
+  **The inputs diversify, and a list of sequences cannot say so.** `run_estimator`
+  wants read -> filter -> flow -> evaluate; kinematics wants flow -> difference ->
+  summarize; and the flow it starts from is sometimes computed on the spot and
+  sometimes read from a cache. `scan_sequences(sequences, ...)` types the first
+  stage into the signature, so each new driver would rebuild the traversal, the
+  by-product collection and the failure handling around a different first stage.
+
+  **The seed is already written.** `scan_sequence`'s `walk()` is one stage by
+  hand: a generator that yields frames downstream while accumulating a
+  `FrameRange` per frame as a by-product. It also shows the flaw -- the by-product
+  escapes through a closure over a list, which is exactly what does not compose.
+
+  What has to be decided:
+
+  - *The stage signature.* `Iterable[T] -> Iterable[U]` composes, but a filter
+    needs a window and `FilteredSequence` is deliberately a `DataSequence` rather
+    than an iterator, so that an out-of-order read is well defined. Either the
+    first stage is privileged (a sequence, then iterators after it) or windowing
+    stages carry their own buffer, as this one already does.
+  - *Stateful stages.* No estimator survives a process boundary, and a normalizer
+    holds mutable state, so a stage crosses to a worker as a recipe it builds
+    rather than as an object -- the constraint already recorded below.
+  - *Where by-products leave.* Ranges, evaluation metrics, insights. A second
+    return value, an accumulator threaded through, or a tee stage; whichever it
+    is, one answer for all of them.
+  - *What a cache is.* A cached flow replacing the flow stage is explicit and
+    greppable; one transparently backing it hides which run produced the numbers,
+    and this project has already been bitten by provenance it could not read back.
+  - *The chunk contract in [`docs/foundations.md`](docs/foundations.md) §5.* A
+    kinematic difference needs a temporal window too, so windowing is not the
+    filter's private problem.
+
+  Whatever it becomes must keep the single traversal: ranging in a second pass
+  over a filtered read measured +94%.
 
 - **Rewrite the benchmark as `scripts/optical_flow/run_estimator.py`.**
   Estimators, `common/warp.py`, `optical_flow/evaluation.py` and
