@@ -19,6 +19,8 @@ if TYPE_CHECKING:
     import numpy as np
     from numpy.typing import NDArray
 
+    from iivs_cardio.common.device import DeviceLike
+
 OpenCVAlgorithm = cv2.DenseOpticalFlow | cv2.cuda.DenseOpticalFlow
 
 FrameType = UInt8[Tensor, "H W"]
@@ -51,7 +53,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
     backend can extend the neutral base directly.
     """
 
-    def __init__(self, device: str | torch.device = "cpu") -> None:
+    def __init__(self, device: DeviceLike = "cpu") -> None:
         super().__init__(device)
         self.select_device()
         self._algorithm: OpenCVAlgorithm = self._create_algorithm()
@@ -74,7 +76,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
 
     def validate_device(self, frame: Tensor) -> None:
         """Raise if `frame` is not on this estimator's device."""
-        if frame.device != self.device:
+        if frame.device != self.device.as_torch:
             name = type(self).__name__
             msg = f"{name} expects a {self.device} tensor, got one on {frame.device}"
             raise ValueError(msg)

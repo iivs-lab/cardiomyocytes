@@ -12,8 +12,7 @@ from iivs_cardio.optical_flow.estimators.base import EstimatorParams
 from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVEstimator
 
 if TYPE_CHECKING:
-    import torch
-
+    from iivs_cardio.common.device import DeviceLike
     from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVAlgorithm
 
 
@@ -29,7 +28,7 @@ class FarnebackParams(EstimatorParams):
     flags: int = 0
 
     @override
-    def build(self, device: str | torch.device = "cpu") -> Farneback:
+    def build(self, device: DeviceLike = "cpu") -> Farneback:
         return Farneback(self, device=device)
 
 
@@ -38,7 +37,7 @@ class Farneback(OpenCVEstimator):
         self,
         params: FarnebackParams | None = None,
         *,
-        device: str | torch.device = "cpu",
+        device: DeviceLike = "cpu",
     ) -> None:
         self.params = unwrap_or_factory(params, FarnebackParams)
         super().__init__(device)

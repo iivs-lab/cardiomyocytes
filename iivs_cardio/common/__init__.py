@@ -1,15 +1,13 @@
 from iivs_cardio.common.device import (
     DEVICE_KINDS,
+    Device,
     DeviceKind,
-    resolve_device,
-    resolve_devices,
-    visible_cuda_devices,
+    DeviceLike,
 )
 
 __all__ = (
     "DEVICE_KINDS",
+    "Device",
     "DeviceKind",
-    "resolve_device",
-    "resolve_devices",
-    "visible_cuda_devices",
+    "DeviceLike",
 )

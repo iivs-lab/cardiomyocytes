@@ -5,13 +5,12 @@ __all__ = ("EstimatorParams", "OpticalFlowEstimator")
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, ClassVar
 
-from iivs_cardio.common.device import DEVICE_KINDS, resolve_device
+from iivs_cardio.common.device import DEVICE_KINDS, Device
 
 if TYPE_CHECKING:
-    import torch
     from torch import Tensor
 
-    from iivs_cardio.common.device import DeviceKind
+    from iivs_cardio.common.device import DeviceKind, DeviceLike
 
 
 class OpticalFlowEstimator(ABC):
@@ -35,13 +34,13 @@ class OpticalFlowEstimator(ABC):
 
     SUPPORTED_DEVICES: ClassVar[frozenset[DeviceKind]] = DEVICE_KINDS
 
-    def __init__(self, device: str | torch.device = "cpu") -> None:
-        self.device = resolve_device(device, self.SUPPORTED_DEVICES)
+    def __init__(self, device: DeviceLike = "cpu") -> None:
+        self.device = Device.resolve(device, self.SUPPORTED_DEVICES)
 
     @property
     def is_cuda(self) -> bool:
         """Whether this estimator runs on a CUDA device."""
-        return self.device.type == "cuda"
+        return self.device.is_cuda
 
     @abstractmethod
     def reset(self) -> None:
@@ -84,5 +83,5 @@ class EstimatorParams(ABC):
     """
 
     @abstractmethod
-    def build(self, device: str | torch.device = "cpu") -> OpticalFlowEstimator:
+    def build(self, device: DeviceLike = "cpu") -> OpticalFlowEstimator:
         """Construct the estimator these describe, on `device`."""

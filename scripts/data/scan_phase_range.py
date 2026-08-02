@@ -21,11 +21,7 @@ from kaparoo.filesystem.search import select
 from kaparoo.utils.optional import unwrap_or_default
 from omegaconf import MISSING
 
-from iivs_cardio.common.device import (
-    resolve_device,
-    resolve_devices,
-    visible_cuda_devices,
-)
+from iivs_cardio.common.device import Device
 from iivs_cardio.data.sequence import FrameSequence
 from scripts._config import apply_schema
 from scripts.data._filtering import build_filter_kernel, describe_filter_kernel
@@ -34,7 +30,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
     from multiprocessing import SimpleQueue
 
-    import torch
     from iivs.dhm.data.phase import PhaseFileFolder
     from kaparoo.filesystem.types import StrPath
     from omegaconf import DictConfig
@@ -50,7 +45,7 @@ RANGE_FILE = f"phase_range_{TIMESTAMP}.json"
 RANGE_VERSION = 1
 
 # Claimed once per worker by `_adopt_device`; the parent never leaves the default.
-_WORKER_DEVICE: str | torch.device = "cpu"
+_WORKER_DEVICE: Device = Device("cpu")
 
 
 @dataclass
@@ -138,26 +133,26 @@ class DatasetRange(CompositeRange):
         return self.sequences
 
 
-def plan_devices(compute: ComputeConfig) -> tuple[torch.device, ...]:
+def plan_devices(compute: ComputeConfig) -> tuple[Device, ...]:
     # One device per worker, and a single entry means this process does it all,
     # so "sequential / many processes / many GPUs" is one length check downstream.
-    if resolve_device(compute.device).type != "cuda":
+    if not Device.resolve(compute.device).is_cuda:
         workers = os.cpu_count() or 1 if compute.workers is None else compute.workers
         if workers < 0:
             msg = f"invalid worker count {workers}: expected 0 or more, or null"
             raise ValueError(msg)
 
-        return resolve_devices(["cpu"] * max(workers, 1))
+        return Device.resolve_all(["cpu"] * max(workers, 1))
 
     if not compute.gpu_ids:
-        devices = visible_cuda_devices()
+        devices = Device.visible_cuda()
         if not devices:
             msg = "no CUDA device is visible: set `compute=cpu`, or check the driver"
             raise ValueError(msg)
 
         return devices
 
-    return resolve_devices(f"cuda:{index}" for index in compute.gpu_ids)
+    return Device.resolve_all(f"cuda:{index}" for index in compute.gpu_ids)
 
 
 def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
@@ -215,7 +210,7 @@ def scan_sequence(sequence: FrameSequence[Path], config: SourceConfig) -> Sequen
     return SequenceRange(source, tuple(frames))
 
 
-def _adopt_device(devices: SimpleQueue[torch.device]) -> None:
+def _adopt_device(devices: SimpleQueue[Device]) -> None:
     # `initargs` reaches every worker with the same value, so the queue is what
     # hands each a different device; it holds exactly one per worker.
     global _WORKER_DEVICE
@@ -249,7 +244,7 @@ def scan_sequences(
     # would hand them all the same one. Taken from the pool's own context rather
     # than a `Manager`, which would run a server process to proxy a queue that is
     # written once and read `max_workers` times.
-    queue: SimpleQueue[torch.device] = context.SimpleQueue()
+    queue: SimpleQueue[Device] = context.SimpleQueue()
     for device in devices:
         queue.put(device)
 

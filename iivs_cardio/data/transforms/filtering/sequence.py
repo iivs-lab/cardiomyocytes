@@ -8,12 +8,13 @@ import numpy as np
 import torch
 from kaparoo.data.sequences import DataSequence
 
-from iivs_cardio.common.device import resolve_device
+from iivs_cardio.common.device import Device
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
     from torch import Tensor
 
+    from iivs_cardio.common.device import DeviceLike
     from iivs_cardio.data.transforms.filtering.kernel import FilterKernel, KernelParams
 
 type NumPyRealDType = np.floating | np.integer
@@ -58,15 +59,15 @@ class FilteredSequence[M, T: NumPyRealDType = np.float32](DataSequence["Tensor",
         source: DataSequence[NDArray[T], M],
         kernel: FilterKernel,
         *,
-        device: str | torch.device = "cpu",
+        device: DeviceLike = "cpu",
     ) -> None:
         self._source = source
         self._buffer: dict[int, Tensor] = {}
         self.kernel = kernel
-        self._device = resolve_device(device)
+        self._device = Device.resolve(device)
 
     @property
-    def device(self) -> torch.device:
+    def device(self) -> Device:
         """Where filtering runs and the returned tensors live.
 
         Reassignable: frames are placed as they are read, so a later device
@@ -76,8 +77,8 @@ class FilteredSequence[M, T: NumPyRealDType = np.float32](DataSequence["Tensor",
         return self._device
 
     @device.setter
-    def device(self, value: str | torch.device) -> None:
-        device = resolve_device(value)
+    def device(self, value: DeviceLike) -> None:
+        device = Device.resolve(value)
         if device != self._device:
             self._buffer.clear()
         self._device = device
@@ -88,7 +89,7 @@ class FilteredSequence[M, T: NumPyRealDType = np.float32](DataSequence["Tensor",
         source: DataSequence[NDArray[T], M],
         params: KernelParams,
         *,
-        device: str | torch.device = "cpu",
+        device: DeviceLike = "cpu",
     ) -> FilteredSequence[M, T]:
         """Build the kernel `params` describes, and filter `source` with it.
 
@@ -138,7 +139,9 @@ class FilteredSequence[M, T: NumPyRealDType = np.float32](DataSequence["Tensor",
 
         missing = [i for i in indices if i not in self._buffer]
         for i, frame in zip(missing, self._source.get_items(missing), strict=True):
-            self._buffer[i] = torch.from_numpy(frame).to(self.device, torch.float32)
+            self._buffer[i] = torch.from_numpy(frame).to(
+                self.device.as_torch, torch.float32
+            )
 
         if len(indices) == 1:
             return self._buffer[indices[0]].unsqueeze(0)

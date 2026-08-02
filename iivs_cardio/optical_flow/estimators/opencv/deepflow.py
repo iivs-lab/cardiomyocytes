@@ -11,7 +11,7 @@ from iivs_cardio.optical_flow.estimators.base import EstimatorParams
 from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVEstimator
 
 if TYPE_CHECKING:
-    import torch
+    from iivs_cardio.common.device import DeviceLike
 
 
 class DeepFlow(OpenCVEstimator):
@@ -31,5 +31,5 @@ class DeepFlowParams(EstimatorParams):
     """
 
     @override
-    def build(self, device: str | torch.device = "cpu") -> DeepFlow:
+    def build(self, device: DeviceLike = "cpu") -> DeepFlow:
         return DeepFlow(device=device)

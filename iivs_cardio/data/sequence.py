@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
+    from iivs_cardio.common.device import Device, DeviceLike
     from iivs_cardio.data.transforms.filtering import FilterKernel, KernelParams
 
 type NumPyRealDType = np.floating | np.integer
@@ -90,7 +91,7 @@ class FrameSequence[M, T: NumPyRealDType = np.float32](DataSequence[Tensor, M]):
         kernel: FilterKernel,
         *,
         step: int = 1,
-        device: str | torch.device = "cpu",
+        device: DeviceLike = "cpu",
     ) -> None:
         if step < 1:
             msg = f"invalid frame step {step}: expected 1 or more"
@@ -106,7 +107,7 @@ class FrameSequence[M, T: NumPyRealDType = np.float32](DataSequence[Tensor, M]):
         params: KernelParams,
         *,
         step: int = 1,
-        device: str | torch.device = "cpu",
+        device: DeviceLike = "cpu",
     ) -> FrameSequence[M, T]:
         """Read `source` through the kernel `params` describes.
 
@@ -124,7 +125,7 @@ class FrameSequence[M, T: NumPyRealDType = np.float32](DataSequence[Tensor, M]):
         return self._source
 
     @property
-    def device(self) -> torch.device:
+    def device(self) -> Device:
         """Where frames are placed, owned by the view rather than duplicated here.
 
         Reassignable, and takes effect from the next read; see
@@ -133,7 +134,7 @@ class FrameSequence[M, T: NumPyRealDType = np.float32](DataSequence[Tensor, M]):
         return self._source.device
 
     @device.setter
-    def device(self, value: str | torch.device) -> None:
+    def device(self, value: DeviceLike) -> None:
         self._source.device = value
 
     def __len__(self) -> int:

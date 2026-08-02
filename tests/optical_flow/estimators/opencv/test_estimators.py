@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 import torch
 
+from iivs_cardio.common import Device
 from iivs_cardio.optical_flow.estimators import (
     DeepFlow,
     DeepFlowParams,
@@ -185,7 +186,7 @@ def test_params_build_their_estimator_on_the_given_device(params, expected):
 
     estimator = params.build("cpu")
     assert isinstance(estimator, expected)
-    assert estimator.device.type == "cpu"
+    assert estimator.device == Device("cpu")
 
 
 def test_build_forwards_the_held_params():

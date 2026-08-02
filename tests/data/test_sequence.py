@@ -8,6 +8,7 @@ from iivs.dhm.data.phase import PhaseBinFolder, PhaseBinList, save_phase_bin
 from kaparoo.data.sequences import DataSequence
 from numpy.typing import NDArray
 
+from iivs_cardio.common import Device
 from iivs_cardio.data.sequence import FrameSequence
 from iivs_cardio.data.transforms.filtering import (
     FilteredSequence,
@@ -218,7 +219,7 @@ def test_the_view_reads_the_frames_it_was_given(tmp_path, kernel):
 def test_device_defaults_to_cpu(tmp_path):
     root = _bin_folder(tmp_path / "Bin", _frames())
     sequence = FrameSequence(PhaseBinFolder(root), IdentityKernel())
-    assert sequence.device == torch.device("cpu")
+    assert sequence.device == Device("cpu")
     assert sequence[0].device.type == "cpu"
 
 
@@ -342,7 +343,7 @@ def test_from_params_forwards_the_device(tmp_path):
     sequence = FrameSequence.from_params(
         PhaseBinFolder(root), MedianParams(RADIUS), device="cpu"
     )
-    assert sequence.device == torch.device("cpu")
+    assert sequence.device == Device("cpu")
     assert sequence[1].device.type == "cpu"
 
 

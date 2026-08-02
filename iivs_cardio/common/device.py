@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-__all__ = (
-    "DEVICE_KINDS",
-    "DeviceKind",
-    "resolve_device",
-    "resolve_devices",
-    "visible_cuda_devices",
-)
+__all__ = ("DEVICE_KINDS", "Device", "DeviceKind", "DeviceLike")
 
+from dataclasses import dataclass
+from functools import cached_property
 from typing import TYPE_CHECKING, Literal, get_args
 
 import torch
@@ -19,84 +15,173 @@ DeviceKind = Literal["cpu", "cuda"]
 
 DEVICE_KINDS: frozenset[DeviceKind] = frozenset(get_args(DeviceKind))
 
-
-def resolve_device(
-    spec: str | torch.device,
-    supported: frozenset[DeviceKind] = DEVICE_KINDS,
-) -> torch.device:
-    """Parse a device spec, validate its kind, and normalize it.
-
-    Strings are matched case-insensitively (`"cpu"`, `"cuda"`, `"cuda:N"`); a
-    `torch.device` is validated as-is. `cpu` is returned unnumbered; `cuda` is
-    given a concrete index (defaulting to `0`) so it compares equal to a
-    tensor's `.device`, which always carries one.
-
-    Args:
-        spec: A device string or a `torch.device`.
-        supported: The device kinds to accept.
-
-    Returns:
-        A normalized `torch.device` whose `type` is in `supported`.
-
-    Raises:
-        ValueError: If the device kind is not in `supported`.
-    """
-    device = spec if isinstance(spec, torch.device) else torch.device(spec.lower())
-
-    if device.type not in supported:
-        allowed = ", ".join(sorted(supported))
-        msg = f"unsupported device {device.type!r}: expected one of {allowed}"
-        raise ValueError(msg)
-
-    if device.type == "cpu":
-        return torch.device("cpu")  # cpu is unnumbered; drop any index
-    return torch.device("cuda", device.index or 0)  # cuda always carries an index
-
-
-def visible_cuda_devices() -> tuple[torch.device, ...]:
-    """Every CUDA device this process can see, in index order.
-
-    Empty when the driver reports none, which a caller asking to spread work
-    across GPUs should treat as a configuration error rather than as zero work.
-    """
-    return tuple(torch.device("cuda", index) for index in range(_cuda_count()))
-
-
-def resolve_devices(
-    specs: Iterable[str | torch.device],
-    supported: frozenset[DeviceKind] = DEVICE_KINDS,
-) -> tuple[torch.device, ...]:
-    """Resolve each spec, and check that every CUDA index is one this host has.
-
-    The plural of `resolve_device`, plus the bound check a single spec cannot
-    usefully make: a caller naming devices one at a time is describing what it
-    already holds, while a caller naming a set is planning work across them, and
-    an index that is not there has to fail now rather than when a tensor first
-    moves. Duplicates are kept, so `["cpu", "cpu"]` is two workers on the CPU.
-
-    Args:
-        specs: Device strings or `torch.device`s, in the order they are wanted.
-        supported: The device kinds to accept.
-
-    Returns:
-        The normalized devices, in the order given.
-
-    Raises:
-        ValueError: If a kind is not in `supported`, or a CUDA index is beyond
-            what this host reports.
-    """
-    devices = tuple(resolve_device(spec, supported) for spec in specs)
-
-    count = _cuda_count()
-    beyond = sorted({d.index for d in devices if d.type == "cuda" and d.index >= count})
-    if beyond:
-        listed = ", ".join(str(index) for index in beyond)
-        msg = f"no CUDA device at index {listed}: this host reports {count}"
-        raise ValueError(msg)
-
-    return devices
+type DeviceLike = str | torch.device | Device
+"""What a caller may write for a device; `Device` is the form it is stored as."""
 
 
 def _cuda_count() -> int:
     """How many CUDA devices the driver reports, 0 when there is no driver."""
     return torch.cuda.device_count() if torch.cuda.is_available() else 0
+
+
+# `slots=True` is deliberately absent: it removes the instance `__dict__` that
+# `cached_property` writes `torch` into. The frames of a run go through `torch`
+# one at a time, so rebuilding it per read is what the cache is there to avoid.
+@dataclass(frozen=True)
+class Device:
+    """One compute device, in the form every library in this stack must agree on.
+
+    torch carries a device on each tensor, but `cv2.cuda` and CuPy each keep a
+    process-global current device instead. Naming a device is therefore not the
+    same as working on it, and this type separates the two: the value says which
+    device, and pointing the libraries at it is a distinct step.
+
+    A `cuda` device always carries a concrete index, so it compares equal to what
+    a tensor reports; `cpu` is unnumbered. Construct through `resolve` to accept
+    what a caller writes; the constructor is for a kind and index already known.
+
+    Args:
+        kind: Which family of device.
+        index: Which CUDA device, defaulting to `0`. Ignored for `cpu`, which
+            takes no index.
+
+    Raises:
+        ValueError: If `kind` is not a known kind, or `index` is negative.
+    """
+
+    kind: DeviceKind
+    index: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.kind not in DEVICE_KINDS:
+            allowed = ", ".join(sorted(DEVICE_KINDS))
+            msg = f"unsupported device {self.kind!r}: expected one of {allowed}"
+            raise ValueError(msg)
+
+        if self.index is not None and self.index < 0:
+            msg = f"negative device index {self.index}: expected 0 or more, or None"
+            raise ValueError(msg)
+
+        index = None if self.kind == "cpu" else 0 if self.index is None else self.index
+        if index != self.index:
+            object.__setattr__(self, "index", index)  # frozen: normalize in place
+
+    @classmethod
+    def resolve(
+        cls,
+        spec: DeviceLike,
+        supported: frozenset[DeviceKind] = DEVICE_KINDS,
+    ) -> Device:
+        """Parse a device spec, validate its kind, and normalize it.
+
+        Strings are matched case-insensitively (`"cpu"`, `"cuda"`, `"cuda:N"`); a
+        `torch.device` is read as-is, and a `Device` passes through, so a layer may
+        re-resolve what it was handed without knowing which form it arrived in.
+
+        A CUDA index is not checked against the host here — a caller naming one
+        device is describing what it already holds. `resolve_all` makes that check,
+        since naming a set is planning work across it.
+
+        Args:
+            spec: What to resolve, in any form a caller may write.
+            supported: The device kinds to accept.
+
+        Returns:
+            The normalized device, whose `kind` is in `supported`.
+
+        Raises:
+            ValueError: If `spec` is malformed, or its kind is not in `supported`.
+        """
+        kind, index = (
+            (spec.kind, spec.index) if isinstance(spec, Device) else _parse(spec)
+        )
+
+        if kind not in supported:
+            allowed = ", ".join(sorted(supported))
+            msg = f"unsupported device {kind!r}: expected one of {allowed}"
+            raise ValueError(msg)
+
+        return cls(kind, index)
+
+    @classmethod
+    def resolve_all(
+        cls,
+        specs: Iterable[DeviceLike],
+        supported: frozenset[DeviceKind] = DEVICE_KINDS,
+    ) -> tuple[Device, ...]:
+        """Resolve each spec, and check that every CUDA index is one this host has.
+
+        The plural of `resolve`, plus the bound check a single spec cannot usefully
+        make: an index that is not there has to fail now rather than when a tensor
+        first moves. Duplicates are kept, so `["cpu", "cpu"]` is two workers on the
+        CPU. The driver is asked only when a CUDA device is actually named.
+
+        Args:
+            specs: What to resolve, in the order the devices are wanted.
+            supported: The device kinds to accept.
+
+        Returns:
+            The normalized devices, in the order given.
+
+        Raises:
+            ValueError: If a spec is malformed, a kind is not in `supported`, or a
+                CUDA index is beyond what this host reports.
+        """
+        devices = tuple(cls.resolve(spec, supported) for spec in specs)
+
+        wanted = {device.index for device in devices if device.is_cuda}
+        if wanted:
+            count = _cuda_count()
+            beyond = sorted(
+                index for index in wanted if index is not None and index >= count
+            )
+            if beyond:
+                listed = ", ".join(str(index) for index in beyond)
+                msg = f"no CUDA device at index {listed}: this host reports {count}"
+                raise ValueError(msg)
+
+        return devices
+
+    @classmethod
+    def visible_cuda(cls) -> tuple[Device, ...]:
+        """Every CUDA device this process can see, in index order.
+
+        Empty when the driver reports none, which a caller asking to spread work
+        across GPUs should treat as a configuration error rather than as zero work.
+        """
+        return tuple(cls("cuda", index) for index in range(_cuda_count()))
+
+    @cached_property
+    def as_torch(self) -> torch.device:
+        """This device as torch names it, for the calls that take one.
+
+        Named apart from the module rather than `torch`: a member of that name
+        shadows it for every annotation in this class body.
+        """
+        if self.index is None:
+            return torch.device(self.kind)
+        return torch.device(self.kind, self.index)
+
+    @property
+    def is_cuda(self) -> bool:
+        """Whether this is a CUDA device."""
+        return self.kind == "cuda"
+
+    def __str__(self) -> str:
+        return self.kind if self.index is None else f"{self.kind}:{self.index}"
+
+
+def _parse(spec: str | torch.device) -> tuple[str, int | None]:
+    """Read a device spec as a `(kind, index)` pair, without judging the kind.
+
+    Raises:
+        ValueError: If `spec` is not a device string torch can read.
+    """
+    try:
+        device = spec if isinstance(spec, torch.device) else torch.device(spec.lower())
+    except RuntimeError:
+        allowed = ", ".join(sorted(DEVICE_KINDS))
+        msg = f"invalid device spec {spec!r}: expected {allowed}, or `<kind>:N`"
+        raise ValueError(msg) from None
+
+    return device.type, device.index

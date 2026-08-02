@@ -12,8 +12,7 @@ from iivs_cardio.optical_flow.estimators.base import EstimatorParams
 from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVEstimator
 
 if TYPE_CHECKING:
-    import torch
-
+    from iivs_cardio.common.device import DeviceLike
     from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVAlgorithm
 
 
@@ -35,7 +34,7 @@ class DualTVL1Params(EstimatorParams):
     iterations: int = 300
 
     @override
-    def build(self, device: str | torch.device = "cpu") -> DualTVL1:
+    def build(self, device: DeviceLike = "cpu") -> DualTVL1:
         return DualTVL1(self, device=device)
 
 
@@ -44,7 +43,7 @@ class DualTVL1(OpenCVEstimator):
         self,
         params: DualTVL1Params | None = None,
         *,
-        device: str | torch.device = "cpu",
+        device: DeviceLike = "cpu",
     ) -> None:
         self.params = unwrap_or_factory(params, DualTVL1Params)
         super().__init__(device)

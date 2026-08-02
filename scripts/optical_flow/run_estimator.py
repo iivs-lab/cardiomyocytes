@@ -13,7 +13,7 @@ from iivs.dhm.data.phase import search_phase_bin_folders
 from kaparoo.data.sequences import TransformedSequence
 from kaparoo.filesystem import ensure_dir_exists
 
-from iivs_cardio.common.device import resolve_device
+from iivs_cardio.common.device import Device
 from iivs_cardio.data.transforms.filtering import FilteredSequence
 
 if TYPE_CHECKING:
@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
     from omegaconf import DictConfig
 
+    from iivs_cardio.common.device import DeviceLike
     from iivs_cardio.data.transforms.filtering.kernel import FilterKernel
     from iivs_cardio.data.transforms.normalization import FrameNormalizer
     from iivs_cardio.optical_flow.estimators import (
@@ -59,9 +60,9 @@ def process_sequences(
     kernel: FilterKernel | None,
     normalizer: FrameNormalizer,
     estimator_params: EstimatorParams,
-    device: torch.device | str = "cpu",
+    device: DeviceLike = "cpu",
 ) -> None:
-    device = resolve_device(device)
+    device = Device.resolve(device)
     estimator = estimator_params.build(device=device)
 
     normalizer.reset()
