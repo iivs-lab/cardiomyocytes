@@ -19,14 +19,10 @@ from mpire import WorkerPool
 from omegaconf import MISSING
 from tqdm import tqdm
 
+from iivs_cardio.common.range import finite_range
 from iivs_cardio.data.phase import save_phase_bin_folder
-from iivs_cardio.data.sequence import FrameSequence, finite_range
-from scripts._compute import (
-    ComputeConfig,
-    pin_threads,
-    plan_devices,
-    report_insights,
-)
+from iivs_cardio.data.transforms.filtering import FilteredSequence
+from scripts._compute import ComputeConfig, pin_threads, plan_devices, report_insights
 from scripts._hydra import apply_schema, is_multirun, output_directory
 from scripts.data._filtering import build_filter_kernel, describe_filter_kernel
 
@@ -44,6 +40,8 @@ load_dotenv()
 
 CONFIG_PATH = os.environ["CONFIGS_ROOT"]
 CONFIG_NAME = "data/phase_scan/config"
+
+type PhaseFilteredSequence = FilteredSequence[PhaseFileFolder, Path]
 
 
 @dataclass
@@ -155,44 +153,28 @@ def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
     return sources
 
 
-@dataclass(frozen=True, slots=True)
-class OpenedSequence:
-    """A phase source and the frame view opened over it.
-
-    Paired because written frames take their header scale from the source, and
-    `FrameSequence` cannot carry it: it is generic over any `DataSequence` and so
-    promises no header. Reaching back through its composition would work today
-    and break silently the day that composition changes.
-    """
-
-    folder: PhaseFileFolder
-    frames: FrameSequence[Path]
-
-
-def list_sequences(
+def build_sequences(
     source_config: SourceConfig,
     compute_config: ComputeConfig,
     filter_config: DictConfig | None = None,
-) -> list[OpenedSequence]:
+) -> list[PhaseFilteredSequence]:
     device = plan_devices(compute_config)[0]
     kernel = build_filter_kernel(filter_config)
     sources = search_sources(source_config)
     frame_step = source_config.frame_step
 
-    def open_sequence(source: PhaseFileFolder) -> OpenedSequence:
-        frames = FrameSequence(source, kernel=kernel, step=frame_step, device=device)
-        return OpenedSequence(source, frames)
+    def build_sequence(source: PhaseFileFolder) -> PhaseFilteredSequence:
+        return FilteredSequence(source, kernel, step=frame_step, device=device)
 
-    return [open_sequence(source) for source in sources]
+    return [build_sequence(source) for source in sources]
 
 
 def scan_sequence(
-    opened: OpenedSequence,
+    sequence: PhaseFilteredSequence,
     source_config: SourceConfig,
     target_config: TargetConfig | None = None,
 ) -> SequenceRange:
     subpath = unwrap_or_default(source_config.subpath, PHASE_FLOAT_BIN)
-    sequence = opened.frames
     source = stringify_path(
         sequence.get_meta(0).parent, after=source_config.root, before=subpath
     )
@@ -215,14 +197,14 @@ def scan_sequence(
             yield frame
 
     if target_config is not None and target_config.save_frames:
-        header = opened.folder.header
+        header = sequence.origin.header
         save_phase_bin_folder(
             Path(target_config.root, source, subpath),
             (frame.cpu().numpy() for frame in walk()),
             pixel_size=header.pixel_size,
             height_scale=header.height_scale,
             # None means each file keeps its stored unit, which is the header's.
-            unit=unwrap_or_default(opened.folder.target_unit, header.unit),
+            unit=unwrap_or_default(sequence.origin.target_unit, header.unit),
             overwrite=target_config.overwrite,
         )
     else:
@@ -235,31 +217,32 @@ def scan_sequence(
 def _scan_on_worker(
     worker_id: int,
     devices: tuple[Device, ...],
-    opened: OpenedSequence,
+    sequence: PhaseFilteredSequence,
     source_config: SourceConfig,
     target_config: TargetConfig,
 ) -> SequenceRange:
     device = devices[worker_id]
     device.activate()
     pin_threads(len(devices))
-    opened.frames.device = device
+    sequence.device = device
 
-    return scan_sequence(opened, source_config, target_config)
+    return scan_sequence(sequence, source_config, target_config)
 
 
 def scan_sequences(
-    sequences: Sequence[OpenedSequence],
+    sequences: Sequence[PhaseFilteredSequence],
     source_config: SourceConfig,
     target_config: TargetConfig,
     compute_config: ComputeConfig,
 ) -> list[SequenceRange]:
     pbar_enabled = compute_config.progress_bar
-    pbar_options = {"desc": "sequences", "unit": "seq"}
+    pbar_options = {"desc": "scanning", "unit": "seq"}
 
-    devices = plan_devices(compute_config)
+    devices = plan_devices(compute_config)[: len(sequences)]
+
     if (workers := len(devices)) == 1:
         pbar = tqdm(sequences, disable=not pbar_enabled, **pbar_options)
-        return [scan_sequence(opened, source_config, target_config) for opened in pbar]
+        return [scan_sequence(item, source_config, target_config) for item in pbar]
 
     with WorkerPool(
         n_jobs=workers,
@@ -271,9 +254,11 @@ def scan_sequences(
             _scan_on_worker, source_config=source_config, target_config=target_config
         )
 
+        # Each task takes one sequence, wrapped: `mpire` spreads any iterable
+        # task argument across the parameters, and a sequence is one.
         scanned: list[SequenceRange] = pool.map(
             scan,
-            sequences,
+            [(sequence,) for sequence in sequences],
             chunk_size=1,
             worker_lifespan=compute_config.worker_lifespan,
             progress_bar=pbar_enabled,
@@ -333,7 +318,7 @@ def main(cfg: DictConfig) -> None:
         msg = "cannot write frames in a sweep: run the winning config alone instead"
         raise ValueError(msg)
 
-    sequences = list_sequences(source_config, compute_config, filter_config)
+    sequences = build_sequences(source_config, compute_config, filter_config)
     scanned = scan_sequences(sequences, source_config, target_config, compute_config)
 
     if target_config.save_ranges:

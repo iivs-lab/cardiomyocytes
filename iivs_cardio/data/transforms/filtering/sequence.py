@@ -2,11 +2,11 @@ from __future__ import annotations
 
 __all__ = ("FilteredSequence",)
 
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Any, cast, override
 
 import numpy as np
 import torch
-from kaparoo.data.sequences import DataSequence
+from kaparoo.data.sequences import DataSequence, SlicedSequence
 
 from iivs_cardio.common.device import Device
 
@@ -21,7 +21,9 @@ type NumPyRealDType = np.floating | np.integer
 """Any real numpy dtype. Complex is excluded: casting one drops its phase."""
 
 
-class FilteredSequence[M, T: NumPyRealDType = np.float32](DataSequence["Tensor", M]):
+class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.float32](
+    DataSequence["Tensor", M]
+):
     """A filtered view over a source sequence, itself a sequence.
 
     Wraps `source` rather than consuming it, so `filtered[i]` is the kernel
@@ -30,8 +32,15 @@ class FilteredSequence[M, T: NumPyRealDType = np.float32](DataSequence["Tensor",
     offer: owning the source is what makes indexed access well defined, since
     the window can always be re-read.
 
-    Every source frame yields one output. The ends are filtered on a truncated
-    window rather than a padded one, so `len` matches the source exactly.
+    Every kept frame yields one output. The ends are filtered on a truncated
+    window rather than a padded one, so `len` matches what `step` kept.
+
+    `step` is applied *before* filtering: taking every Nth frame first is what
+    makes a strided read measure the frame rate it claims to, where filtering
+    first would fold the dropped frames into the kept ones. Striding renumbers
+    the view -- `len` and every index, `get_meta` included, count kept frames --
+    so `self[1]` at `step=2` is the source's frame 2. A selection `step` cannot
+    express is written by slicing the source first.
 
     A small buffer holds the frames of the current window, so walking the
     sequence in order costs one source read per frame instead of `2 * rz + 1`.
@@ -40,6 +49,9 @@ class FilteredSequence[M, T: NumPyRealDType = np.float32](DataSequence["Tensor",
     for a shuffled `DataLoader`, which should read the finished cache instead.
 
     Type Parameters:
+        S: the source's own type, which `source` gives back unchanged, so a
+            caller that needs what only that type offers does not have to carry
+            a second reference to the same object.
         M: the source's per-frame metadata, which filtering passes through.
         T: the source's numpy dtype, any real (integer or floating) kind; each
             frame is read as float32, since that is what a kernel reduces and
@@ -48,23 +60,35 @@ class FilteredSequence[M, T: NumPyRealDType = np.float32](DataSequence["Tensor",
     Args:
         source: the frames to filter, all the same shape.
         kernel: the neighbourhood to reduce, and the reduction.
+        step: keep every `step`-th frame, counting from the first.
         device: where filtering runs and the returned tensors live.
 
     Raises:
-        ValueError: If `device` names an unsupported device kind.
+        ValueError: If `step` is below 1, or `device` names an unsupported kind.
     """
 
     def __init__(
         self,
-        source: DataSequence[NDArray[T], M],
+        source: S,
         kernel: FilterKernel,
         *,
+        step: int = 1,
         device: DeviceLike = "cpu",
     ) -> None:
-        self._source = source
+        if step < 1:
+            msg = f"invalid frame step {step}: expected 1 or more"
+            raise ValueError(msg)
+
+        self._origin = cast("DataSequence[NDArray[T], M]", source)
+
+        self._source = self._origin
+        if step > 1:
+            indices = range(0, len(self._origin), step)
+            self._source = SlicedSequence(self._origin, indices)
+
         self._buffer: dict[int, Tensor] = {}
-        self.kernel = kernel
         self._device = Device.resolve(device)
+        self.kernel = kernel
 
     @property
     def device(self) -> Device:
@@ -86,24 +110,30 @@ class FilteredSequence[M, T: NumPyRealDType = np.float32](DataSequence["Tensor",
     @classmethod
     def from_params(
         cls,
-        source: DataSequence[NDArray[T], M],
+        source: S,
         params: KernelParams,
         *,
+        step: int = 1,
         device: DeviceLike = "cpu",
-    ) -> FilteredSequence[M, T]:
+    ) -> FilteredSequence[S, M, T]:
         """Build the kernel `params` describes, and filter `source` with it.
 
         Args:
             source: the frames to filter.
             params: which kernel to build, and with what.
+            step: keep every `step`-th frame, counting from the first.
             device: where filtering runs and the returned tensors live.
         """
-        return cls(source, params.build(), device=device)
+        return cls(source, params.build(), step=step, device=device)
 
     @property
-    def source(self) -> DataSequence[NDArray[T], M]:
-        """The unfiltered sequence this reads from."""
-        return self._source
+    def origin(self) -> S:
+        """The unfiltered sequence this was opened over, as the type it was given.
+
+        The stride between it and here is this class's own, so it hands the
+        source back rather than making a caller reach through it.
+        """
+        return cast("S", self._origin)
 
     @override
     def __len__(self) -> int:

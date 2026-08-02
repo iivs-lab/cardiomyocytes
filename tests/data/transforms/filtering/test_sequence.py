@@ -8,10 +8,18 @@ import torch
 from kaparoo.data.sequences import DataSequence
 from numpy.typing import NDArray
 
+from iivs_cardio.common import Device
 from iivs_cardio.data.transforms.filtering import (
     FilteredSequence,
+    IdentityKernel,
+    IdentityParams,
     MedianKernel,
     MedianParams,
+)
+
+requires_cuda = pytest.mark.skipif(
+    not torch.cuda.is_available(),
+    reason="no CUDA-capable GPU detected",
 )
 
 
@@ -50,7 +58,7 @@ def test_the_filtered_view_is_as_long_as_its_source():
     filtered = FilteredSequence(source, MedianKernel((1, 1, 2)))
 
     assert len(filtered) == len(source) == 7
-    assert filtered.source is source  # reachable, for provenance in the cache
+    assert filtered.origin is source  # reachable, for provenance in the cache
 
 
 def test_indexed_access_matches_a_window_over_the_whole_sequence():
@@ -147,13 +155,13 @@ class _Uint8Frames(DataSequence[NDArray[np.uint8], None]):
 
 
 def test_the_source_dtype_is_carried_on_the_type_parameter():
-    # `source` reflects the declared dtype rather than a hard-coded float32, so a
+    # `origin` reflects the declared dtype rather than a hard-coded float32, so a
     # uint8 source is describable without a lie in the signature.
-    filtered: FilteredSequence[None, np.uint8] = FilteredSequence(
+    filtered: FilteredSequence[_Uint8Frames, None, np.uint8] = FilteredSequence(
         _Uint8Frames(), MedianKernel(0)
     )
 
-    assert filtered.source.get_item(2).dtype == np.uint8
+    assert filtered.origin.get_item(2).dtype == np.uint8
     assert filtered[2].dtype == torch.float32
 
 
@@ -180,3 +188,114 @@ def test_from_params_passes_a_short_radius_through_to_the_kernel():
 
     assert built.kernel.radius == (1, 1, 0)
     assert built.kernel.temporal_radius == 0
+
+
+# ------------------------------- the stride ------------------------------- #
+
+
+@pytest.mark.parametrize(("step", "kept"), ((1, 6), (2, 3), (3, 2), (7, 1)))
+def test_step_keeps_every_nth_frame_from_the_first(step, kept):
+    source = _Frames(_frames(6))
+
+    sequence = FilteredSequence(source, IdentityKernel(), step=step)
+
+    assert len(sequence) == kept
+    for index in range(kept):
+        assert torch.equal(sequence[index], torch.from_numpy(source[index * step]))
+
+
+def test_step_renumbers_the_metadata_too():
+    # Indices count kept frames, so `get_meta` has to follow them rather than the
+    # source's own numbering.
+    sequence = FilteredSequence(_Frames(_frames(6)), IdentityKernel(), step=2)
+
+    assert [sequence.get_meta(i) for i in range(len(sequence))] == [0, 20, 40]
+
+
+def test_step_is_applied_before_filtering():
+    # Filtering first would fold the dropped frames into the kept ones, so a
+    # strided read would not measure the frame rate it claims to.
+    source = _frames(6)
+    kernel = MedianKernel((0, 0, 1))  # temporal only, so the order is visible
+
+    strided = FilteredSequence(_Frames(source), kernel, step=2)
+    presliced = FilteredSequence(_Frames(source[::2]), kernel)
+
+    assert torch.equal(strided[1], presliced[1])
+
+
+@pytest.mark.parametrize("step", (0, -1))
+def test_step_below_one_is_rejected(step):
+    with pytest.raises(ValueError, match=r"invalid frame step"):
+        FilteredSequence(_Frames(_frames(3)), IdentityKernel(), step=step)
+
+
+def test_from_params_forwards_the_step():
+    sequence = FilteredSequence.from_params(
+        _Frames(_frames(6)), IdentityParams(), step=3
+    )
+
+    assert len(sequence) == 2
+
+
+# ------------------------------- the origin ------------------------------- #
+
+
+def test_origin_is_the_sequence_it_was_opened_over():
+    source = _Frames(_frames(6))
+
+    sequence = FilteredSequence(source, IdentityKernel(), step=2)
+
+    assert sequence.origin is source
+
+
+# -------------------------------- the device ------------------------------ #
+
+
+def test_device_defaults_to_cpu():
+    sequence = FilteredSequence(_Frames(_frames(3)), IdentityKernel())
+
+    assert sequence.device == Device("cpu")
+    assert sequence[0].device.type == "cpu"
+
+
+def test_an_unsupported_device_is_rejected():
+    # `meta` is a real torch device, so this reaches the project's own kind check
+    # rather than tripping the spec parser first.
+    with pytest.raises(ValueError, match=r"unsupported device 'meta'"):
+        FilteredSequence(_Frames(_frames(3)), IdentityKernel(), device="meta")
+
+
+@requires_cuda
+@pytest.mark.parametrize("kernel", (IdentityKernel(), MedianKernel((1, 1, 1))))
+def test_frames_land_on_the_requested_device(kernel):
+    sequence = FilteredSequence(_Frames(_frames(4)), kernel, device="cuda")
+
+    assert sequence[2].device.type == "cuda"
+
+
+def test_reassigning_the_same_device_keeps_the_buffered_window():
+    source = _Frames(_frames(4))
+    sequence = FilteredSequence(source, MedianKernel((0, 0, 1)))
+    _ = sequence[1]
+    reads = source.reads
+
+    sequence.device = "cpu"
+    _ = sequence[1]
+
+    assert source.reads == reads
+
+
+def test_changing_the_device_drops_the_buffered_window():
+    # Buffered frames sit on the old device, so they cannot be reused. Routed back
+    # to the cpu so the re-read runs here; `Device.resolve` never touches a driver.
+    source = _Frames(_frames(4))
+    sequence = FilteredSequence(source, MedianKernel((0, 0, 1)))
+    _ = sequence[1]
+    reads = source.reads
+
+    sequence.device = "cuda:0"
+    sequence.device = "cpu"
+    _ = sequence[1]
+
+    assert source.reads > reads
