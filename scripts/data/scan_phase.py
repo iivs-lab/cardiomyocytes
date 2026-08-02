@@ -323,6 +323,7 @@ def main(cfg: DictConfig) -> None:
     compute_config = apply_schema(ComputeConfig, cfg.compute)
     source_config = apply_schema(SourceConfig, cfg.source)
     target_config = apply_schema(TargetConfig, cfg.target)
+    filter_config: DictConfig | None = cfg.filter
 
     if not (target_config.save_ranges or target_config.save_frames):
         msg = "nothing to do: set `target.save_ranges` or `target.save_frames`"
@@ -332,12 +333,12 @@ def main(cfg: DictConfig) -> None:
         msg = "cannot write frames in a sweep: run the winning config alone instead"
         raise ValueError(msg)
 
-    sequences = list_sequences(source_config, compute_config, cfg.filter)
+    sequences = list_sequences(source_config, compute_config, filter_config)
     scanned = scan_sequences(sequences, source_config, target_config, compute_config)
 
     if target_config.save_ranges:
         dataset_range = DatasetRange(tuple(scanned))
-        save_dataset_range(dataset_range, source_config, target_config, cfg.filter)
+        save_dataset_range(dataset_range, source_config, target_config, filter_config)
 
 
 if __name__ == "__main__":
