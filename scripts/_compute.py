@@ -29,7 +29,7 @@ class ComputeConfig:
     worker_lifespan: int | None = None
 
 
-def plan_devices(compute: ComputeConfig) -> tuple[Device, ...]:
+def plan_devices(config: ComputeConfig) -> tuple[Device, ...]:
     """One device per worker, in the order the workers will claim them.
 
     A single entry means this process does the work itself, so "sequential / many
@@ -39,23 +39,24 @@ def plan_devices(compute: ComputeConfig) -> tuple[Device, ...]:
         ValueError: If the worker count is negative, or CUDA is asked for and the
             driver reports no device.
     """
-    if not Device.resolve(compute.device).is_cuda:
-        workers = unwrap_or_default(compute.workers, DEFAULT_WORKERS)
+    if not Device.resolve(config.device).is_cuda:
+        workers = unwrap_or_default(config.workers, DEFAULT_WORKERS)
         if workers < 0:
             msg = f"invalid worker count {workers}: expected 0 or more, or null"
             raise ValueError(msg)
 
         return Device.resolve_all(["cpu"] * max(workers, 1))
 
-    if not compute.gpu_ids:
+    if not config.gpu_ids:
         devices = Device.visible_cuda()
         if not devices:
+            # `compute=cpu` names the hydra config group, not this parameter.
             msg = "no CUDA device is visible: set `compute=cpu`, or check the driver"
             raise ValueError(msg)
 
         return devices
 
-    return Device.resolve_all(f"cuda:{index}" for index in compute.gpu_ids)
+    return Device.resolve_all(f"cuda:{index}" for index in config.gpu_ids)
 
 
 def pin_threads(workers: int) -> None:
