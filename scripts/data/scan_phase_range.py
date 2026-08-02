@@ -216,6 +216,10 @@ def _adopt_device(devices: SimpleQueue[Device]) -> None:
     global _WORKER_DEVICE
     _WORKER_DEVICE = devices.get()
 
+    # A worker owns one GPU for its whole life, so bind it here rather than leave
+    # it to whichever stage first reaches for cv2 or CuPy.
+    _WORKER_DEVICE.activate()
+
 
 def _scan_on_worker(
     sequence: FrameSequence[Path], config: SourceConfig
