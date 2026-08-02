@@ -20,10 +20,30 @@ Requires **Python 3.13 or newer** and an **NVIDIA GPU** with a CUDA
 git clone https://github.com/iivs-lab/cardiomyocytes.git
 cd cardiomyocytes
 uv sync --group dev
+uv run python scripts/env/generate_dotenv.py
 ```
 
 The first `uv sync` pulls the CUDA build of `torch` (~1.8 GB). On Windows,
 OpenCV additionally needs the one-time cuDNN step below.
+
+### 📁 Project paths
+
+`generate_dotenv.py` writes the `.env` that every script under `scripts/`
+loads before reading its configuration:
+
+```dotenv
+PROJECT_ROOT=/absolute/path/to/cardiomyocytes
+CONFIGS_ROOT=${PROJECT_ROOT}/configs
+```
+
+`CONFIGS_ROOT` is what points hydra at [`configs/`](./configs), so a run
+started from any working directory composes the same configuration. Skip this
+step and those scripts stop at `KeyError: 'CONFIGS_ROOT'` before doing any
+work.
+
+The paths are absolute and machine-specific, so `.env` is generated per clone
+rather than committed. It is written once and left alone; re-run with
+`--force` after moving the checkout.
 
 ### 🖥️ Compute environment
 
@@ -44,7 +64,7 @@ it in its own folder, and Python 3.8+ no longer searches `PATH`). Run once, in
 an **Administrator** PowerShell, to symlink cuDNN where the wheel looks:
 
 ```powershell
-./scripts/compute_env/setup-opencv-cuda.ps1
+./scripts/env/setup-opencv-cuda.ps1
 ```
 
 A bare `import cv2` then loads the CUDA build in any environment (venv, uv,

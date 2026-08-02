@@ -79,8 +79,8 @@ def _report_conv_fault() -> None:
     print("      Works with cuDNN disabled, so cuDNN itself is the cause. Usually a")
     print("      foreign cuDNN shadowing the one torch bundles in torch/lib. On")
     print("      Windows the OpenCV setup is the usual source -- preview and repair:")
-    print("        scripts/compute_env/setup-opencv-cuda.ps1 -DryRun")
-    print("        scripts/compute_env/setup-opencv-cuda.ps1     (as Administrator)")
+    print("        scripts/env/setup-opencv-cuda.ps1 -DryRun")
+    print("        scripts/env/setup-opencv-cuda.ps1     (as Administrator)")
 
 
 def check_pytorch() -> bool:
@@ -175,7 +175,7 @@ def check_opencv() -> bool:
     except (ImportError, OSError) as exc:
         print(f"[!] OpenCV import failed: {exc}")
         print(
-            "    On Windows, run scripts/compute_env/setup-opencv-cuda.ps1 as Administrator first."
+            "    On Windows, run scripts/env/setup-opencv-cuda.ps1 as Administrator first."
         )
         return False
 
