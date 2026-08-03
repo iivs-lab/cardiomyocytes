@@ -93,14 +93,33 @@ still to build or decide.
   `include` / `exclude` selection, the unit override, and the two failures it
   tells apart. Move it before a second script grows its own copy.
 
-- **`save_phase_bin_folder` is moving to `iivs-lib` too.** It is the odd half of
-  a pair: `PhaseBinFolder` reads a numbered `.bin` folder from there, and the
-  `{index:05d}_<stem>.<ext>` numbering it writes is `save_koala_frames`'s
-  convention, not this project's. What it adds on top -- renumbering from `0`,
-  staging the folder, and creating `dest`'s parent because `save_koala_frames`
-  stages into a sibling -- belongs beside the reader that has to agree with it.
-  `save_flow_folder`, which it mirrors, stays: a flow folder is this project's
-  own format.
+- **Both folder writers go, replaced by a push-shaped `FieldWriter`.** A hook is
+  handed one step at a time, where `save_phase_bin_folder` and `save_flow_folder`
+  each take an `Iterable` and drain it -- workable only while writing is the sole
+  consumer, which is what `scan_sequence` exploits today by passing `walk()`
+  straight in. Several hooks cannot each be given the same generator.
+
+  The inversion is small because both functions are already the same two pieces:
+  a per-file `save` callable with its metadata bound (`save_phase_bin` from
+  `iivs-lib`, an `.npy` write for flow) and the folder mechanics around it.
+  `kaparoo`'s `StagedDirectory` is that machinery in push form -- `workdir`,
+  `commit`, `abort`, a context manager -- so `FieldWriter` opens it, numbers each
+  `write` densely from `0`, and commits on a clean exit. Its `make_parents` also
+  retires the parent-directory line `save_koala_frames` forces today.
+
+  Name it for the field, not the frame: a step is `(H, W)` or `(2, H, W)` -- §2's
+  scalar and vector fields -- and phase, flow, speed and force are all one. The
+  same writer takes the kinematic outputs with nothing but a different `save`.
+  `OPD variance` is *not* one of them: it accumulates `(n, mean, M2)` rather than
+  emitting a field per step, so it is a different hook and `FieldWriter` should
+  not be stretched to cover it.
+
+  **Test the round trip, because the file naming becomes ours by copying.**
+  `{index:05d}_<stem>.<ext>` is `save_koala_frames`'s convention and
+  `PhaseBinFolder` / `OpticalFlowFolder` read it back; dropping that function
+  leaves us restating a convention we do not own. A test that writes a folder and
+  reads it with the matching reader is what catches a divergence, and neither
+  function has one today.
 
 - **Not every config group takes the short override form.** `compute=cpu` works
   because the group and its package are both `compute`, but the filter group is
