@@ -114,12 +114,23 @@ still to build or decide.
   emitting a field per step, so it is a different hook and `FieldWriter` should
   not be stretched to cover it.
 
-  **Test the round trip, because the file naming becomes ours by copying.**
-  `{index:05d}_<stem>.<ext>` is `save_koala_frames`'s convention and
-  `PhaseBinFolder` / `OpticalFlowFolder` read it back; dropping that function
-  leaves us restating a convention we do not own. A test that writes a folder and
-  reads it with the matching reader is what catches a divergence, and neither
-  function has one today.
+  Dropping `save_koala_frames` does not mean restating its file naming:
+  `koala_frame_name(index, stem=, ext=)` is exported beside it and documents
+  itself as the single source of truth the folder readers also validate against,
+  rejecting an index past the 5-digit field rather than writing one discovery
+  would silently miss. Call it. A round-trip test -- write a folder, read it with
+  the matching reader -- is still worth having, since neither function has one
+  today and it is what would catch the writer and the reader drifting apart.
+
+  **Open: number by arrival or by the slot's index.** They agree until they do
+  not. `save_phase_bin_folder` numbers densely by arrival on purpose, so that a
+  strided read writes a dense folder rather than carrying the source's gaps, and
+  `koala_frame_name` calls the result contiguous because discovery expects it.
+  A slot's index is instead the step it describes -- which is what the range
+  document reports against. They diverge exactly when a step is missing mid-run,
+  where arrival numbering silently closes the gap and shifts every later frame
+  against its own record. That is the failure-handling item above, and whichever
+  is chosen, a hole must be refused rather than compacted.
 
 - **Not every config group takes the short override form.** `compute=cpu` works
   because the group and its package are both `compute`, but the filter group is
