@@ -37,11 +37,12 @@ class FieldWriter[T]:
     An absent slot writes nothing. Under the forward convention those fall at the
     tail, so the folder simply ends earlier than the sequence it came from.
 
-    Use it as a context manager -- it stages into a temporary directory that is
-    moved into place on a clean exit, so a reader never sees a half-written
-    folder and a failure leaves any existing `dest` untouched. Construction
-    already creates that staging directory, following `StagedDirectory`'s own
-    shape.
+    It stages into a temporary directory moved into place on a clean exit, so a
+    reader never sees a half-written folder and a failure leaves any existing
+    `dest` untouched. Attaching it to a node is enough -- `Node.run` opens and
+    closes every managed hook in the chain, together -- and it is a plain context
+    manager outside one. Construction already creates the staging directory,
+    following `StagedDirectory`'s own shape.
 
     Args:
         dest: The folder to create and fill.
@@ -56,8 +57,8 @@ class FieldWriter[T]:
 
     Example:
         ```python
-        with FieldWriter(dest, save_flow_npy, stem="flow", ext="npy") as writer:
-            drain(flows, writer.write)
+        node.attach(FieldWriter(dest, save_flow_npy, stem="flow", ext="npy"))
+        node.run()
         ```
     """
 
@@ -94,6 +95,14 @@ class FieldWriter[T]:
         name = koala_frame_name(slot.index, stem=self._stem, ext=self._ext)
         self._save(self._staged.workdir / name, slot.value)
         self._written = slot.index
+
+    def __call__(self, slot: Slot[T]) -> None:
+        """`write`, so a writer attaches to a node as the hook it is.
+
+        Attaching the writer rather than its bound method is what lets the node
+        recognise something it must open and close around the traversal.
+        """
+        self.write(slot)
 
     def __enter__(self) -> Self:
         return self

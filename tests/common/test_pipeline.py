@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 import pytest
 
@@ -187,3 +187,65 @@ def test_run_pulls_a_node_to_its_flush() -> None:
         (1, "b"),
         (2, None),
     ]
+
+
+class _Passthrough(Node[str]):
+    """A stage that just forwards, so a chain has something to walk."""
+
+    def __init__(self, source: Node[str]) -> None:
+        super().__init__(source)
+        self._upstream = source
+
+    def produce(self) -> Iterator[Slot[str]]:
+        yield from self._upstream
+
+
+class _Managed:
+    """A hook that also wants opening and closing, the way a writer does."""
+
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    def __call__(self, slot: Slot[str]) -> None:
+        self.events.append(f"see{slot.index}")
+
+    def __enter__(self) -> Self:
+        self.events.append("open")
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        self.events.append("abort" if exc_type is not None else "close")
+
+
+def test_run_opens_and_closes_a_managed_hook() -> None:
+    managed = _Managed()
+    _Fixed(Slot(0, "a"), Slot(1, "b")).attach(managed).run()
+
+    assert managed.events == ["open", "see0", "see1", "close"]
+
+
+def test_run_opens_a_managed_hook_attached_upstream() -> None:
+    # A writer hangs off the stage whose output it saves, which is rarely the
+    # last one; running the end has to reach it anyway.
+    managed = _Managed()
+    source = _Fixed(Slot(0, "a")).attach(managed)
+
+    _Passthrough(source).run()
+
+    assert managed.events == ["open", "see0", "close"]
+
+
+def test_a_failure_aborts_every_managed_hook_together() -> None:
+    def explode(slot: Slot[str]) -> None:
+        msg = "the hook gave up"
+        raise RuntimeError(msg)
+
+    first, second = _Managed(), _Managed()
+    source = _Fixed(Slot(0, "a")).attach(first)
+    node = _Passthrough(source).attach(second, explode)
+
+    with pytest.raises(RuntimeError, match="the hook gave up"):
+        node.run()
+
+    assert first.events == ["open", "see0", "abort"]
+    assert second.events == ["open", "see0", "abort"]

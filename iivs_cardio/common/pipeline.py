@@ -3,8 +3,9 @@ from __future__ import annotations
 __all__ = ("Hook", "Node", "Slot", "Steps")
 
 from abc import ABC, abstractmethod
+from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Any, Self
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -83,8 +84,16 @@ class Node[T](ABC):
         T: What this stage yields at a step it can fill.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, source: Node[Any] | None = None) -> None:
+        self._source = source
         self._hooks: list[Hook[T]] = []
+
+    def _chain(self) -> Iterator[Node[Any]]:
+        """This node and everything it draws from, nearest first."""
+        node: Node[Any] | None = self
+        while node is not None:
+            yield node
+            node = node._source  # noqa: SLF001
 
     def attach(self, *hooks: Hook[T]) -> Self:
         """Register `hooks` to be called with every slot this node yields.
@@ -107,19 +116,32 @@ class Node[T](ABC):
         """
 
     def run(self) -> None:
-        """Pull every slot, for the sake of what happens on the way.
+        """Pull every slot, holding open whatever the chain's hooks need held.
 
         The end of a chain is often wanted for nothing but its hooks -- a scan
         writing a range document reads every frame and keeps no frame. Saying so
         beats a loop over a discarded name, which reads like an oversight.
+
+        A hook that is a context manager is entered here and left on the way
+        out, across the whole chain rather than this node alone: writers hang off
+        the stages whose output they save, which is rarely the last one. That
+        makes their commits all-or-nothing together -- a run that dies part-way
+        leaves no folder behind rather than some of them -- and it keeps the
+        caller from stacking a `with` per writer as the chain grows.
 
         Exhausting the chain is also what flushes it: every stage owes the steps
         it buffered once its input ends, and they arrive only while something
         keeps pulling. Call this on the *last* stage; running a middle one leaves
         everything below it unfed.
         """
-        for _ in self:
-            pass
+        with ExitStack() as stack:
+            for node in self._chain():
+                for hook in node._hooks:  # noqa: SLF001
+                    if isinstance(hook, AbstractContextManager):
+                        stack.enter_context(hook)
+
+            for _ in self:
+                pass
 
     def __iter__(self) -> Iterator[Slot[T]]:
         for slot in self.produce():

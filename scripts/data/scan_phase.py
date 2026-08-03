@@ -145,10 +145,9 @@ def scan_sequence(
 
     if target_config is not None and target_config.save_frames:
         dest = Path(target_config.root, source, subpath)
-        with _open_writer(sequence, dest, target_config) as writer:
-            node.attach(writer.write).run()
-    else:
-        node.run()
+        node.attach(_open_writer(sequence, dest, target_config))
+
+    node.run()
 
     return collector.collected()
 

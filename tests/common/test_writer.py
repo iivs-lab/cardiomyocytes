@@ -147,3 +147,12 @@ def test_overwrite_replaces_the_folder_wholesale(tmp_path: Path) -> None:
 
     assert _names(dest) == ["00000_field.txt"]
     assert (dest / "00000_field.txt").read_text(encoding="utf-8") == "fresh"
+
+
+def test_a_writer_is_callable_so_a_node_can_attach_it(tmp_path):
+    dest = tmp_path / "fields"
+
+    with FieldWriter(dest, _save_text, stem="field", ext="txt") as writer:
+        writer(Slot(0, "a"))
+
+    assert (dest / "00000_field.txt").read_text(encoding="utf-8") == "a"
