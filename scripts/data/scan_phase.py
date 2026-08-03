@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-from contextlib import ExitStack
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -156,12 +155,11 @@ def scan_sequence(
     collector = RangeCollector(source)
     node = Steps(sequence).attach(collector.observe)
 
-    with ExitStack() as stack:
-        if target_config is not None and target_config.save_frames:
-            dest = Path(target_config.root, source, subpath)
-            writer = stack.enter_context(_open_writer(sequence, dest, target_config))
-            node.attach(_write_field(writer))
-
+    if target_config is not None and target_config.save_frames:
+        dest = Path(target_config.root, source, subpath)
+        with _open_writer(sequence, dest, target_config) as writer:
+            drain(node.attach(_write_field(writer)))
+    else:
         drain(node)
 
     return collector.collected()
