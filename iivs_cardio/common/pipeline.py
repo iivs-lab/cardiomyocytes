@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-__all__ = ("Hook", "Slot", "drain", "steps")
+__all__ = ("Hook", "Node", "Slot", "Steps", "drain")
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Iterator
@@ -61,51 +62,95 @@ class Slot[T]:
 type Hook[T] = Callable[[Slot[T]], None]
 
 
-def steps[T, M](sequence: DataSequence[T, M]) -> Iterator[Slot[tuple[T, M]]]:
-    """Read `sequence` in order, one slot per step.
+class Node[T](ABC):
+    """One stage of a pipeline: slots in order, with hooks watching them pass.
 
-    The source node every chain starts from. Each slot carries the pair the
-    sequence itself yields -- the item and whatever it records about where the
-    item came from -- because a downstream node cannot reach back into the
-    sequence for the second half without re-coupling to it, and a frame's own
-    name is what a range or a report is written against.
+    Hooks belong to the node rather than to whoever drains the chain, because a
+    chain is drained only at its end -- hanging them off the drain would leave
+    every stage but the last unobservable. Saving filtered frames watches the
+    filter, scoring a flow watches the estimator, and both run in one traversal
+    of a chain whose end is something else entirely.
 
-    Indices here are positions in `sequence`, which is what makes them positions
-    in every node downstream. A sequence that is already a strided view of
-    another therefore numbers from `0` over what it exposes, not over what it
-    reads.
+    A hook observes; it never consumes. Its slot is passed downstream either way,
+    and its return value is ignored, so whatever accumulates a per-step result --
+    and owns whatever lifetime that takes -- is the object that supplied the
+    hook, not this one. A writer therefore opens and commits around the
+    traversal.
 
-    Yields:
-        Every step, in order, each holding its `(item, metadata)` pair. Never
-        absent: a read either produces an item or raises.
+    Subclasses implement `produce`, which is where the stage's own work lives.
+
+    Type Parameters:
+        T: What this stage yields at a step it can fill.
     """
-    for index in range(len(sequence)):
-        yield Slot(index, sequence.get_pair(index))
+
+    def __init__(self) -> None:
+        self._hooks: list[Hook[T]] = []
+
+    def attach(self, *hooks: Hook[T]) -> Self:
+        """Register `hooks` to be called with every slot this node yields.
+
+        Returns this node, so a stage can be built and watched in one expression.
+        Hooks are called in the order attached, before the slot goes downstream.
+        """
+        self._hooks.extend(hooks)
+
+        return self
+
+    @abstractmethod
+    def produce(self) -> Iterator[Slot[T]]:
+        """Yield this stage's slots, in index order and one per step.
+
+        A stage holding a temporal window owes a flush once its own input ends --
+        the steps it buffered are still its to give. Returning when the input
+        does drops the tail of everything downstream, silently and in proportion
+        to how deep the chain is.
+        """
+
+    def __iter__(self) -> Iterator[Slot[T]]:
+        for slot in self.produce():
+            for hook in self._hooks:
+                hook(slot)
+
+            yield slot
 
 
-def drain[T](items: Iterable[Slot[T]], *hooks: Hook[T]) -> None:
-    """Pull `items` to exhaustion, handing each slot to every hook in order.
+class Steps[T, M](Node[tuple[T, M]]):
+    """The source node: a `DataSequence` read in order, one slot per step.
 
-    Hooks observe; they are not the consumer, and the chain runs whether or not
-    any are given. Nothing here reads a hook's return value: a per-step result
-    belongs to whatever provided the hook, and accumulating it -- along with
-    whatever lifetime that takes -- is that object's job rather than the
-    pipeline's. A writer therefore opens and commits itself *around* this call,
-    not through it.
+    Each slot carries the pair the sequence itself yields -- the item, and
+    whatever it records about where the item came from. The second half travels
+    because a downstream node cannot reach back into the sequence for it without
+    re-coupling to it, and a frame's own name is what a range or a report is
+    written against.
 
-    Absent slots are passed on unfiltered. Which steps went unfilled is a fact
-    some hooks record and others ignore, and only the hook can say which.
+    Indices are positions in `sequence`, which is what makes them positions in
+    every node downstream. A sequence that is already a strided view of another
+    therefore numbers from `0` over what it exposes, not over what it reads.
+    """
 
-    Exhausting `items` is what drains the pipeline, but only because a node owes
-    a flush once its own input ends -- a node holding a window still has the
-    steps it buffered to give. One that simply returns when its input does drops
-    the tail of everything downstream, silently and in proportion to how deep the
-    chain is.
+    def __init__(self, sequence: DataSequence[T, M]) -> None:
+        super().__init__()
+        self._sequence = sequence
+
+    def produce(self) -> Iterator[Slot[tuple[T, M]]]:
+        """Yield every step in order. Never absent -- a read gives an item or raises."""
+        for index in range(len(self._sequence)):
+            yield Slot(index, self._sequence.get_pair(index))
+
+
+def drain[T](items: Iterable[Slot[T]]) -> None:
+    """Pull `items` to exhaustion for the sake of what happens on the way.
+
+    The end of a chain is often wanted for nothing but its hooks -- a scan that
+    writes a range document reads every frame and keeps no frame. Draining says
+    that, where a bare `for` loop over a discarded name reads like an oversight.
+
+    Exhausting the chain is also what flushes it: every stage owes the steps it
+    buffered once its input ends, and they arrive only if something keeps
+    pulling.
 
     Args:
         items: The end of the chain. Pulled once, so a generator is spent after.
-        hooks: Called with every slot, in the order given.
     """
-    for item in items:
-        for hook in hooks:
-            hook(item)
+    for _ in items:
+        pass

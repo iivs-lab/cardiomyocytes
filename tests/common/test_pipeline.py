@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import dataclasses
+from typing import TYPE_CHECKING
 
 import pytest
 
-from iivs_cardio.common.pipeline import Slot, drain, steps
+from iivs_cardio.common.pipeline import Node, Slot, Steps, drain
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 class _Sequence:
-    """The slice of `DataSequence` `steps` uses, recording what it was asked."""
+    """The slice of `DataSequence` that `Steps` uses, recording what it was asked."""
 
     def __init__(self, items: list[str]) -> None:
         self._items = items
@@ -20,6 +24,20 @@ class _Sequence:
     def get_pair(self, index: int) -> tuple[str, str]:
         self.reads.append(index)
         return self._items[index], self._items[index].upper()
+
+
+class _Fixed(Node[str]):
+    """A node yielding what it was given, recording when it was pulled."""
+
+    def __init__(self, *slots: Slot[str]) -> None:
+        super().__init__()
+        self._slots = slots
+        self.produced: list[int] = []
+
+    def produce(self) -> Iterator[Slot[str]]:
+        for slot in self._slots:
+            self.produced.append(slot.index)
+            yield slot
 
 
 def test_slot_keeps_index_and_value() -> None:
@@ -50,70 +68,6 @@ def test_slot_rejects_an_attribute_it_does_not_declare() -> None:
         slot.source = "somewhere"  # ty: ignore[unresolved-attribute]
 
 
-def test_drain_hands_every_slot_to_every_hook() -> None:
-    slots = [Slot(index, index * 10) for index in range(3)]
-    first: list[Slot[int]] = []
-    second: list[Slot[int]] = []
-
-    drain(slots, first.append, second.append)
-
-    assert first == slots
-    assert second == slots
-
-
-def test_drain_calls_hooks_in_the_order_given() -> None:
-    calls: list[tuple[str, int]] = []
-
-    def record(name: str) -> object:
-        return lambda slot: calls.append((name, slot.index))
-
-    drain([Slot(0, "a"), Slot(1, "b")], record("first"), record("second"))
-
-    assert calls == [("first", 0), ("second", 0), ("first", 1), ("second", 1)]
-
-
-def test_drain_passes_absent_slots_through() -> None:
-    slots: list[Slot[str]] = [Slot(0, "a"), Slot(1, None), Slot(2, "c")]
-    seen: list[Slot[str]] = []
-
-    drain(slots, seen.append)
-
-    assert seen == slots
-    assert [slot.index for slot in seen if slot.value is None] == [1]
-
-
-def test_drain_exhausts_the_iterable_without_hooks() -> None:
-    pulled: list[int] = []
-
-    def source() -> object:
-        for index in range(3):
-            pulled.append(index)
-            yield Slot(index, index)
-
-    drain(source())
-
-    assert pulled == [0, 1, 2]
-
-
-def test_drain_pulls_a_generator_to_its_flush() -> None:
-    # A node owes its buffered tail once its input ends; `drain` gets that only
-    # because it exhausts the iterable rather than stopping with the source.
-    def node() -> object:
-        yield Slot(0, "a")
-        yield Slot(1, "b")
-        yield Slot(2, None)  # the flush a windowing node still owes
-
-    seen: list[Slot[str]] = []
-
-    drain(node(), seen.append)
-
-    assert [(slot.index, slot.value) for slot in seen] == [
-        (0, "a"),
-        (1, "b"),
-        (2, None),
-    ]
-
-
 def test_require_returns_a_present_value() -> None:
     assert Slot(4, "frame").require() == "frame"
 
@@ -125,10 +79,76 @@ def test_require_refuses_an_absent_one() -> None:
         slot.require()
 
 
-def test_steps_reads_a_sequence_in_order() -> None:
-    sequence = _Sequence(["a", "b", "c"])
+def test_a_node_yields_what_it_produces() -> None:
+    node = _Fixed(Slot(0, "a"), Slot(1, "b"))
 
-    slots = list(steps(sequence))
+    assert [slot.value for slot in node] == ["a", "b"]
+
+
+def test_a_node_without_hooks_still_yields() -> None:
+    node = _Fixed(Slot(0, "a"))
+
+    assert [slot.index for slot in node] == [0]
+
+
+def test_attach_returns_the_node_it_was_called_on() -> None:
+    node = _Fixed(Slot(0, "a"))
+
+    assert node.attach(lambda _: None) is node
+
+
+def test_attached_hooks_see_every_slot() -> None:
+    slots = [Slot(0, "a"), Slot(1, "b")]
+    first: list[Slot[str]] = []
+    second: list[Slot[str]] = []
+    node = _Fixed(*slots).attach(first.append, second.append)
+
+    drain(node)
+
+    assert first == slots
+    assert second == slots
+
+
+def test_hooks_fire_in_the_order_attached() -> None:
+    calls: list[tuple[str, int]] = []
+
+    def record(name: str) -> object:
+        return lambda slot: calls.append((name, slot.index))
+
+    node = _Fixed(Slot(0, "a"), Slot(1, "b"))
+    node.attach(record("first")).attach(record("second"))
+
+    drain(node)
+
+    assert calls == [("first", 0), ("second", 0), ("first", 1), ("second", 1)]
+
+
+def test_a_hook_sees_each_slot_before_the_consumer_does() -> None:
+    # A hook watches the stage it is attached to, so it runs where that stage
+    # produced -- not after whatever is downstream has had the slot.
+    order: list[str] = []
+    node = _Fixed(Slot(0, "a"), Slot(1, "b"))
+    node.attach(lambda slot: order.append(f"hook{slot.index}"))
+
+    slots = iter(node)
+    order.append(f"consumer{next(slots).index}")
+    order.append(f"consumer{next(slots).index}")
+
+    assert order == ["hook0", "consumer0", "hook1", "consumer1"]
+
+
+def test_hooks_see_absent_slots_too() -> None:
+    # Which steps went unfilled is a fact only the hook can decide to record.
+    seen: list[Slot[str]] = []
+    node = _Fixed(Slot(0, "a"), Slot[str](1, None)).attach(seen.append)
+
+    drain(node)
+
+    assert [(slot.index, slot.value) for slot in seen] == [(0, "a"), (1, None)]
+
+
+def test_steps_reads_a_sequence_in_order() -> None:
+    slots = list(Steps(_Sequence(["a", "b", "c"])))
 
     assert [slot.index for slot in slots] == [0, 1, 2]
     assert [slot.require() for slot in slots] == [("a", "A"), ("b", "B"), ("c", "C")]
@@ -136,15 +156,46 @@ def test_steps_reads_a_sequence_in_order() -> None:
 
 def test_steps_reads_each_index_once_and_only_when_pulled() -> None:
     sequence = _Sequence(["a", "b", "c"])
-    walked = steps(sequence)
+    walked = iter(Steps(sequence))
 
     assert sequence.reads == []
     next(walked)
     assert sequence.reads == [0]
 
-    list(walked)
+    drain(walked)
     assert sequence.reads == [0, 1, 2]
 
 
 def test_steps_over_an_empty_sequence_yields_nothing() -> None:
-    assert list(steps(_Sequence([]))) == []
+    assert list(Steps(_Sequence([]))) == []
+
+
+def test_drain_exhausts_what_it_is_given() -> None:
+    pulled: list[int] = []
+
+    def source() -> Iterator[Slot[int]]:
+        for index in range(3):
+            pulled.append(index)
+            yield Slot(index, index)
+
+    drain(source())
+
+    assert pulled == [0, 1, 2]
+
+
+def test_drain_pulls_a_node_to_its_flush() -> None:
+    # A stage owes its buffered tail once its input ends; draining gets that
+    # only because it keeps pulling rather than stopping with the source.
+    seen: list[Slot[str]] = []
+    node = _Fixed(
+        Slot(0, "a"), Slot(1, "b"), Slot[str](2, None)
+    )  # the flush a windowing stage still owes
+    node.attach(seen.append)
+
+    drain(node)
+
+    assert [(slot.index, slot.value) for slot in seen] == [
+        (0, "a"),
+        (1, "b"),
+        (2, None),
+    ]

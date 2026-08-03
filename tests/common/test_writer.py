@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from iivs_cardio.common.pipeline import Slot, drain
+from iivs_cardio.common.pipeline import Slot
 from iivs_cardio.common.writer import FieldWriter
 from iivs_cardio.optical_flow.data.folder import OpticalFlowFolder, save_flow_npy
 
@@ -34,7 +34,8 @@ def _write_all(
 ) -> None:
     """Drive a whole folder in one call, so `pytest.raises` wraps one statement."""
     with FieldWriter(dest, save, stem="field", ext="txt", overwrite=overwrite) as w:
-        drain(slots, w.write)
+        for slot in slots:
+            w.write(slot)
 
 
 def _names(folder: Path) -> list[str]:
@@ -50,7 +51,8 @@ def test_written_folder_reads_back_through_its_own_reader(tmp_path: Path) -> Non
     ]
 
     with FieldWriter(dest, save_flow_npy, stem="flow", ext="npy") as writer:
-        drain([Slot(i, flow) for i, flow in enumerate(flows)], writer.write)
+        for index, flow in enumerate(flows):
+            writer.write(Slot(index, flow))
 
     folder = OpticalFlowFolder(dest)
 

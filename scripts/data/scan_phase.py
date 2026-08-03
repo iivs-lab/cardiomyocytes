@@ -19,13 +19,12 @@ from mpire import WorkerPool
 from omegaconf import MISSING
 from tqdm import tqdm
 
-from iivs_cardio.common.pipeline import Slot, steps
-from iivs_cardio.common.range import finite_range
+from iivs_cardio.common.pipeline import Slot, Steps, drain
 from iivs_cardio.data.phase import phase_field_writer
 from iivs_cardio.data.transforms.filtering import FilteredSequence
 from scripts._compute import ComputeConfig, pin_threads, plan_devices, report_insights
 from scripts._hydra import apply_schema, is_multirun, output_directory
-from scripts._range import DatasetRange, FrameRange, SequenceRange, as_dict
+from scripts._range import DatasetRange, RangeCollector, SequenceRange, as_dict
 from scripts.data._filtering import build_filter_kernel, describe_filter_kernel
 
 if TYPE_CHECKING:
@@ -37,6 +36,7 @@ if TYPE_CHECKING:
     from torch import Tensor
 
     from iivs_cardio.common.device import Device
+    from iivs_cardio.common.pipeline import Hook
     from iivs_cardio.common.writer import FieldWriter
 
 
@@ -129,6 +129,17 @@ def _open_writer(
     )
 
 
+def _write_field(writer: FieldWriter[Tensor]) -> Hook[tuple[Tensor, Path]]:
+    # A step carries where it came from as well as the field, where a folder
+    # holds only fields and numbers them itself. Adapting here rather than in
+    # the writer keeps a shape this driver chose out of the library.
+    def hook(slot: Slot[tuple[Tensor, Path]]) -> None:
+        field, _ = slot.require()
+        writer.write(Slot(slot.index, field))
+
+    return hook
+
+
 def scan_sequence(
     sequence: PhaseFilteredSequence,
     source_config: SourceConfig,
@@ -138,35 +149,22 @@ def scan_sequence(
     source = stringify_path(
         sequence.get_meta(0).parent, after=source_config.root, before=subpath
     )
-    frames: list[FrameRange] = []
+
+    # Both jobs watch one traversal. Reading a frame again to range it would
+    # re-run the kernel, the expensive half of a filtered read -- a second
+    # traversal measured +94% on a median (2, 2, 2).
+    collector = RangeCollector(source)
+    node = Steps(sequence).attach(collector.observe)
 
     with ExitStack() as stack:
-        writer = (
-            stack.enter_context(
-                _open_writer(
-                    sequence, Path(target_config.root, source, subpath), target_config
-                )
-            )
-            if target_config is not None and target_config.save_frames
-            else None
-        )
+        if target_config is not None and target_config.save_frames:
+            dest = Path(target_config.root, source, subpath)
+            writer = stack.enter_context(_open_writer(sequence, dest, target_config))
+            node.attach(_write_field(writer))
 
-        # One read per step, ranged in hand: reading the frame again to range it
-        # would re-run the kernel, which is the expensive half of a filtered read
-        # -- a second traversal measured +94% on a median (2, 2, 2).
-        for slot in steps(sequence):
-            frame, path = slot.require()
+        drain(node)
 
-            found = finite_range(frame)
-            if found is None:
-                msg = f"no finite value in {source}/{path.name}"
-                raise ValueError(msg)
-
-            frames.append(FrameRange(path.name, *found))
-            if writer is not None:
-                writer.write(Slot(slot.index, frame))
-
-    return SequenceRange(source, tuple(frames))
+    return collector.collected()
 
 
 def _scan_on_worker(

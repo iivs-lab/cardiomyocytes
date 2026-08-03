@@ -4,6 +4,7 @@ __all__ = (
     "CompositeRange",
     "DatasetRange",
     "FrameRange",
+    "RangeCollector",
     "SequenceRange",
     "ValueRange",
     "as_dict",
@@ -13,8 +14,15 @@ from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
+from iivs_cardio.common.range import finite_range
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from pathlib import Path
+
+    from torch import Tensor
+
+    from iivs_cardio.common.pipeline import Slot
 
 
 class ValueRange(Protocol):
@@ -90,3 +98,44 @@ def as_dict(dataset: DatasetRange) -> dict[str, Any]:
         return dict(sorted(items, key=lambda item: item[0] != "source"))
 
     return asdict(dataset, dict_factory=source_first)
+
+
+class RangeCollector:
+    """Folds the steps of one scanned sequence into a `SequenceRange`.
+
+    A hook, so ranging costs the traversal nothing extra: the field is already
+    in hand where reading it again would re-run the filter kernel, which is the
+    expensive half of a filtered read.
+
+    Args:
+        source: The sequence's path relative to the dataset root, which every
+            `FrameRange` is reported under and which names a frame in the error.
+    """
+
+    def __init__(self, source: str) -> None:
+        self._source = source
+        self._frames: list[FrameRange] = []
+
+    def observe(self, slot: Slot[tuple[Tensor, Path]]) -> None:
+        """Range this step's field, recording it under the file it came from.
+
+        Raises:
+            ValueError: If the field holds no finite value, naming the file.
+        """
+        field, path = slot.require()
+
+        found = finite_range(field)
+        if found is None:
+            msg = f"no finite value in {self._source}/{path.name}"
+            raise ValueError(msg)
+
+        self._frames.append(FrameRange(path.name, *found))
+
+    def collected(self) -> SequenceRange:
+        """Everything observed so far, folded.
+
+        Raises:
+            ValueError: If nothing was observed, since a range over no frame is
+                undefined rather than empty.
+        """
+        return SequenceRange(self._source, tuple(self._frames))
