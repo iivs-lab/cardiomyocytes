@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-__all__ = ("Hook", "Slot", "drain")
+__all__ = ("Hook", "Slot", "drain", "steps")
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Callable, Iterable, Iterator
+
+    from kaparoo.data import DataSequence
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,8 +39,48 @@ class Slot[T]:
     index: int
     value: T | None
 
+    def require(self) -> T:
+        """The value, where absence would be a defect rather than a tail.
+
+        A node reading a source fills every step it yields, so a consumer of one
+        has nothing to branch on -- asking here says that and narrows the type in
+        the same move, instead of a check no test can reach. Read `value`
+        directly wherever absence is expected: below a node holding a window it
+        is the ordinary end of the stream.
+
+        Raises:
+            ValueError: If this slot holds no value.
+        """
+        if self.value is None:
+            msg = f"step {self.index} holds no value"
+            raise ValueError(msg)
+
+        return self.value
+
 
 type Hook[T] = Callable[[Slot[T]], None]
+
+
+def steps[T, M](sequence: DataSequence[T, M]) -> Iterator[Slot[tuple[T, M]]]:
+    """Read `sequence` in order, one slot per step.
+
+    The source node every chain starts from. Each slot carries the pair the
+    sequence itself yields -- the item and whatever it records about where the
+    item came from -- because a downstream node cannot reach back into the
+    sequence for the second half without re-coupling to it, and a frame's own
+    name is what a range or a report is written against.
+
+    Indices here are positions in `sequence`, which is what makes them positions
+    in every node downstream. A sequence that is already a strided view of
+    another therefore numbers from `0` over what it exposes, not over what it
+    reads.
+
+    Yields:
+        Every step, in order, each holding its `(item, metadata)` pair. Never
+        absent: a read either produces an item or raises.
+    """
+    for index in range(len(sequence)):
+        yield Slot(index, sequence.get_pair(index))
 
 
 def drain[T](items: Iterable[Slot[T]], *hooks: Hook[T]) -> None:

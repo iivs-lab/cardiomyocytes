@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import ExitStack
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
@@ -18,8 +19,9 @@ from mpire import WorkerPool
 from omegaconf import MISSING
 from tqdm import tqdm
 
+from iivs_cardio.common.pipeline import Slot, steps
 from iivs_cardio.common.range import finite_range
-from iivs_cardio.data.phase import save_phase_bin_folder
+from iivs_cardio.data.phase import phase_field_writer
 from iivs_cardio.data.transforms.filtering import FilteredSequence
 from scripts._compute import ComputeConfig, pin_threads, plan_devices, report_insights
 from scripts._hydra import apply_schema, is_multirun, output_directory
@@ -27,13 +29,15 @@ from scripts._range import DatasetRange, FrameRange, SequenceRange, as_dict
 from scripts.data._filtering import build_filter_kernel, describe_filter_kernel
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Sequence
+    from collections.abc import Sequence
 
     from iivs.dhm.data.phase import PhaseFileFolder
+    from kaparoo.filesystem.types import StrPath
     from omegaconf import DictConfig
     from torch import Tensor
 
     from iivs_cardio.common.device import Device
+    from iivs_cardio.common.writer import FieldWriter
 
 
 load_dotenv()
@@ -108,6 +112,23 @@ def build_sequences(
     return [build_sequence(source) for source in sources]
 
 
+def _open_writer(
+    sequence: PhaseFilteredSequence,
+    dest: StrPath,
+    target_config: TargetConfig,
+) -> FieldWriter[Tensor]:
+    header = sequence.origin.header
+
+    return phase_field_writer(
+        dest,
+        pixel_size=header.pixel_size,
+        height_scale=header.height_scale,
+        # None means each field keeps its stored unit, which is the header's.
+        unit=unwrap_or_default(sequence.origin.target_unit, header.unit),
+        overwrite=target_config.overwrite,
+    )
+
+
 def scan_sequence(
     sequence: PhaseFilteredSequence,
     source_config: SourceConfig,
@@ -119,36 +140,31 @@ def scan_sequence(
     )
     frames: list[FrameRange] = []
 
-    def walk() -> Iterator[Tensor]:
-        # One read per frame, ranged in hand: `value_range` would read it again and
-        # so re-run the kernel, which is the expensive half of a filtered read --
-        # a second traversal measured +94% on a median (2, 2, 2).
-        for index in range(len(sequence)):
-            frame = sequence.get_item(index)
-            name = sequence.get_meta(index).name
+    with ExitStack() as stack:
+        writer = (
+            stack.enter_context(
+                _open_writer(
+                    sequence, Path(target_config.root, source, subpath), target_config
+                )
+            )
+            if target_config is not None and target_config.save_frames
+            else None
+        )
+
+        # One read per step, ranged in hand: reading the frame again to range it
+        # would re-run the kernel, which is the expensive half of a filtered read
+        # -- a second traversal measured +94% on a median (2, 2, 2).
+        for slot in steps(sequence):
+            frame, path = slot.require()
 
             found = finite_range(frame)
             if found is None:
-                msg = f"no finite value in {source}/{name}"
+                msg = f"no finite value in {source}/{path.name}"
                 raise ValueError(msg)
 
-            frames.append(FrameRange(name, *found))
-            yield frame
-
-    if target_config is not None and target_config.save_frames:
-        header = sequence.origin.header
-        save_phase_bin_folder(
-            Path(target_config.root, source, subpath),
-            (frame.cpu().numpy() for frame in walk()),
-            pixel_size=header.pixel_size,
-            height_scale=header.height_scale,
-            # None means each file keeps its stored unit, which is the header's.
-            unit=unwrap_or_default(sequence.origin.target_unit, header.unit),
-            overwrite=target_config.overwrite,
-        )
-    else:
-        for _ in walk():
-            pass
+            frames.append(FrameRange(path.name, *found))
+            if writer is not None:
+                writer.write(Slot(slot.index, frame))
 
     return SequenceRange(source, tuple(frames))
 

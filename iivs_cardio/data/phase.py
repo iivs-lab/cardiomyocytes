@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("save_phase_bin_folder",)
+__all__ = ("phase_field_writer", "save_phase_bin_folder")
 
 from functools import partial
 from pathlib import Path
@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 from iivs.dhm.data.koala import save_koala_frames
 from iivs.dhm.data.phase import PhaseBinFolder, PhaseUnit, save_phase_bin
 
+from iivs_cardio.common.writer import FieldWriter
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
@@ -16,6 +18,51 @@ if TYPE_CHECKING:
     from iivs.common.data import OnNonFinite
     from kaparoo.filesystem.types import StrPath
     from numpy.typing import NDArray
+    from torch import Tensor
+
+
+def phase_field_writer(
+    dest: StrPath,
+    *,
+    pixel_size: float,
+    height_scale: float,
+    unit: PhaseUnit = PhaseUnit.RADIANS,
+    overwrite: bool = False,
+    on_nonfinite: OnNonFinite = "ignore",
+) -> FieldWriter[Tensor]:
+    """A `FieldWriter` writing phase fields as the `.bin` folder `PhaseBinFolder` reads.
+
+    The push-shaped counterpart of `save_phase_bin_folder`, for a traversal that
+    hands one step at a time rather than an iterable to drain. The transfer to
+    host memory happens here, so a caller passes the tensor it already holds.
+
+    Args:
+        dest: The folder to create and fill.
+        pixel_size: Sample spacing in metres, for the header of every field.
+        height_scale: Metres per radian, which every `.bin` header carries.
+        unit: The unit the fields hold their values in.
+        overwrite: Whether to replace `dest` if it already exists.
+        on_nonfinite: What to do about NaN / inf. Defaults to `"ignore"` for the
+            reason `save_phase_bin_folder` gives.
+    """
+
+    def save(path: Path, field: Tensor) -> None:
+        save_phase_bin(
+            path,
+            field.cpu().numpy(),
+            pixel_size=pixel_size,
+            height_scale=height_scale,
+            unit=unit,
+            on_nonfinite=on_nonfinite,
+        )
+
+    return FieldWriter(
+        dest,
+        save,
+        stem=PhaseBinFolder.FILE_STEM,
+        ext=PhaseBinFolder.FILE_EXT,
+        overwrite=overwrite,
+    )
 
 
 def save_phase_bin_folder(

@@ -4,7 +4,22 @@ import dataclasses
 
 import pytest
 
-from iivs_cardio.common.pipeline import Slot, drain
+from iivs_cardio.common.pipeline import Slot, drain, steps
+
+
+class _Sequence:
+    """The slice of `DataSequence` `steps` uses, recording what it was asked."""
+
+    def __init__(self, items: list[str]) -> None:
+        self._items = items
+        self.reads: list[int] = []
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def get_pair(self, index: int) -> tuple[str, str]:
+        self.reads.append(index)
+        return self._items[index], self._items[index].upper()
 
 
 def test_slot_keeps_index_and_value() -> None:
@@ -97,3 +112,39 @@ def test_drain_pulls_a_generator_to_its_flush() -> None:
         (1, "b"),
         (2, None),
     ]
+
+
+def test_require_returns_a_present_value() -> None:
+    assert Slot(4, "frame").require() == "frame"
+
+
+def test_require_refuses_an_absent_one() -> None:
+    slot: Slot[str] = Slot(4, None)
+
+    with pytest.raises(ValueError, match=r"step 4 holds no value"):
+        slot.require()
+
+
+def test_steps_reads_a_sequence_in_order() -> None:
+    sequence = _Sequence(["a", "b", "c"])
+
+    slots = list(steps(sequence))
+
+    assert [slot.index for slot in slots] == [0, 1, 2]
+    assert [slot.require() for slot in slots] == [("a", "A"), ("b", "B"), ("c", "C")]
+
+
+def test_steps_reads_each_index_once_and_only_when_pulled() -> None:
+    sequence = _Sequence(["a", "b", "c"])
+    walked = steps(sequence)
+
+    assert sequence.reads == []
+    next(walked)
+    assert sequence.reads == [0]
+
+    list(walked)
+    assert sequence.reads == [0, 1, 2]
+
+
+def test_steps_over_an_empty_sequence_yields_nothing() -> None:
+    assert list(steps(_Sequence([]))) == []

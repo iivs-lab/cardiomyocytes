@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import torch
 from iivs.dhm.data.phase import PhaseBinFolder, PhaseUnit, read_phase_bin_header
 
-from iivs_cardio.data.phase import save_phase_bin_folder
+from iivs_cardio.common.pipeline import Slot
+from iivs_cardio.data.phase import phase_field_writer, save_phase_bin_folder
 
 PIXEL_SIZE = 1.5e-7
 HEIGHT_SCALE = 2.0e-7
@@ -133,3 +135,43 @@ def test_a_nonfinite_frame_is_written_without_complaint(tmp_path, recwarn):
     _save(tmp_path / "Bin", [frame])
 
     assert not recwarn.list
+
+
+def test_the_push_writer_matches_what_the_pull_one_writes(tmp_path):
+    # `phase_field_writer` is the same folder for a traversal that hands one step
+    # at a time; the two shapes must not disagree on the bytes.
+    frames = _frames(3)
+    pulled = tmp_path / "pulled"
+    pushed = tmp_path / "pushed"
+
+    _save(pulled, frames)
+    with phase_field_writer(
+        pushed, pixel_size=PIXEL_SIZE, height_scale=HEIGHT_SCALE
+    ) as writer:
+        for index, frame in enumerate(frames):
+            writer.write(Slot(index, torch.from_numpy(frame)))
+
+    assert sorted(p.name for p in pushed.iterdir()) == sorted(
+        p.name for p in pulled.iterdir()
+    )
+    for index in range(len(frames)):
+        assert np.array_equal(
+            PhaseBinFolder(pushed)[index], PhaseBinFolder(pulled)[index]
+        )
+
+
+def test_the_push_writer_records_the_scale_and_unit_it_was_given(tmp_path):
+    dest = tmp_path / "Bin"
+
+    with phase_field_writer(
+        dest,
+        pixel_size=PIXEL_SIZE,
+        height_scale=HEIGHT_SCALE,
+        unit=PhaseUnit.NANOMETERS,
+    ) as writer:
+        writer.write(Slot(0, torch.from_numpy(_frames(1)[0])))
+
+    header = read_phase_bin_header(dest / "00000_phase.bin")
+    assert header.pixel_size == pytest.approx(PIXEL_SIZE)
+    assert header.height_scale == pytest.approx(HEIGHT_SCALE)
+    assert header.unit is PhaseUnit.METERS  # nanometres cannot live in a header
