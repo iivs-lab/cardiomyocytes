@@ -305,9 +305,12 @@ Roughly in dependency order: each one is easier once the previous has landed.
   - *What a cache is.* A cached flow replacing the flow stage is explicit and
     greppable; one transparently backing it hides which run produced the numbers,
     and this project has already been bitten by provenance it could not read back.
-  - *The chunk contract in [`docs/foundations.md`](docs/foundations.md) §5.* A
-    kinematic difference needs a temporal window too, so windowing is not the
-    filter's private problem.
+  Settled since this was written, in [`docs/foundations.md`](docs/foundations.md)
+  §5: the stream is per frame and 1:1, a stage buffers whatever temporal window
+  it needs and yields an item whose index survives even when its value cannot
+  exist yet, and batching is a stage's own choice rather than a global chunk
+  size. So windowing is not the filter's private problem, but it is each stage's
+  private problem rather than the pipeline's.
 
   Whatever it becomes must keep the single traversal: ranging in a second pass
   over a filtered read measured +94%.
