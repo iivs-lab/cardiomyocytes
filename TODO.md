@@ -270,50 +270,38 @@ Roughly in dependency order: each one is easier once the previous has landed.
   report today, so the two commands only read as clean by comparison until this
   file is replaced.
 
-- **Settle how one sequence's stages compose, before writing a second driver.**
-  This gates the rewrite below and outranks the work distribution beside it. That
-  distribution is settled -- one sequence per task, `mpire`, one device per worker
-  -- and it is the same shape whatever a task runs. What a task *runs* is not
-  settled at all, and `scan_phase` currently answers it by hard-coding one
-  pipeline: read, filter, range, and write if asked.
+- **Restructure `scan_phase` onto the pipeline in
+  [`docs/foundations.md`](docs/foundations.md) §6.** The shape is settled there --
+  a linear `phase -> flow -> metrics` chain whose item accumulates rather than
+  replaces, `Slot[T]` carrying an index that different nodes reach at different
+  moments, hooks at the three boundaries that observe rather than consume, and a
+  DAG confined to the metrics stage. What remains is applying it, and
+  `scan_phase` is where it lands first: it hard-codes one pipeline today -- read,
+  filter, range, and write if asked -- and `scan_sequence`'s `walk()` leaks its
+  by-product through a closure over a list, which is exactly what does not
+  compose.
 
-  **The inputs diversify, and a list of sequences cannot say so.** `run_estimator`
-  wants read -> filter -> flow -> evaluate; kinematics wants flow -> difference ->
-  summarize; and the flow it starts from is sometimes computed on the spot and
-  sometimes read from a cache. `scan_sequences(sequences, ...)` types the first
-  stage into the signature, so each new driver would rebuild the traversal, the
-  by-product collection and the failure handling around a different first stage.
+  The driver keeps what it already has. Work distribution is settled and
+  unaffected: one sequence per task, `mpire`, one device per worker, the same
+  shape whatever a task runs.
 
-  **The seed is already written.** `scan_sequence`'s `walk()` is one stage by
-  hand: a generator that yields frames downstream while accumulating a
-  `FrameRange` per frame as a by-product. It also shows the flaw -- the by-product
-  escapes through a closure over a list, which is exactly what does not compose.
+  Three things the restructure must not lose:
 
-  What has to be decided:
+  - *The single traversal.* Ranging in a second pass over a filtered read
+    measured +94%.
+  - *Assembly inside the worker.* No estimator crosses a process boundary, so
+    the parent sends `*Params` recipes and the worker builds. `KernelParams` and
+    `EstimatorParams` already draw that line.
+  - *The drain.* Deeper nodes still hold buffered work when the source is
+    exhausted; stopping with the source silently drops the tail of every metric.
 
-  - *The stage signature.* `Iterable[T] -> Iterable[U]` composes, but a filter
-    needs a window and `FilteredSequence` is deliberately a `DataSequence` rather
-    than an iterator, so that an out-of-order read is well defined. Either the
-    first stage is privileged (a sequence, then iterators after it) or windowing
-    stages carry their own buffer, as this one already does.
-  - *Stateful stages.* No estimator survives a process boundary, and a normalizer
-    holds mutable state, so a stage crosses to a worker as a recipe it builds
-    rather than as an object -- the constraint already recorded below.
-  - *Where by-products leave.* Ranges, evaluation metrics, insights. A second
-    return value, an accumulator threaded through, or a tee stage; whichever it
-    is, one answer for all of them.
-  - *What a cache is.* A cached flow replacing the flow stage is explicit and
-    greppable; one transparently backing it hides which run produced the numbers,
-    and this project has already been bitten by provenance it could not read back.
-  Settled since this was written, in [`docs/foundations.md`](docs/foundations.md)
-  §5: the stream is per frame and 1:1, a stage buffers whatever temporal window
-  it needs and yields an item whose index survives even when its value cannot
-  exist yet, and batching is a stage's own choice rather than a global chunk
-  size. So windowing is not the filter's private problem, but it is each stage's
-  private problem rather than the pipeline's.
-
-  Whatever it becomes must keep the single traversal: ranging in a second pass
-  over a filtered read measured +94%.
+  Still open, and it blocks the metrics stage rather than `scan_phase`: **what
+  the metrics mapping holds.** Its keys are whatever the config requested, so a
+  fixed dataclass cannot express it, and the values are not one type -- `force`
+  and `speed` are tensors where `OPD variance` is a Welford `(n, mean, M2)`.
+  `dict[str, object]` narrowed per consumer, a shared union that grows with every
+  metric, or forcing every metric into a tensor: none is free, and `ty` runs with
+  `error-on-warning`.
 
 - **Rewrite the benchmark as `scripts/optical_flow/run_estimator.py`.**
   Estimators, `common/warp.py`, `optical_flow/evaluation.py` and
