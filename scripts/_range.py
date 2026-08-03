@@ -3,6 +3,7 @@ from __future__ import annotations
 __all__ = (
     "CompositeRange",
     "DatasetRange",
+    "DatasetRangeCollector",
     "FrameRange",
     "RangeCollector",
     "SequenceRange",
@@ -184,3 +185,49 @@ def save_range_document(
         file.write(json.dumps(document, indent=2))
 
     return path
+
+
+class DatasetRangeCollector:
+    """Gathers every sequence's range for one run, and writes the document at the end.
+
+    Lives as long as the run, where a `RangeCollector` lives as long as one
+    sequence. That split is forced: a worker sees one sequence, so the folding
+    across them can only happen where their results come back. Owning both the
+    fold and the write here is what keeps a driver from restating either.
+
+    It cannot hand collectors out. A worker builds its own -- a copy sent across
+    would be mutated in that process and never seen again -- so what crosses back
+    is each sequence's finished range, and `absorb` is the way in.
+
+    This is also the only object that sees how many arrived against how many were
+    dispatched, which is what a partial run will have to report against once a
+    failed sequence stops taking the pool down with it.
+    """
+
+    def __init__(self) -> None:
+        self._sequences: list[SequenceRange] = []
+
+    def absorb(self, *collected: SequenceRange) -> None:
+        """Take the ranges workers finished, in the order given."""
+        self._sequences.extend(collected)
+
+    def collected(self) -> DatasetRange:
+        """The fold across everything absorbed.
+
+        Raises:
+            ValueError: If nothing was absorbed, since a range over no sequence
+                is undefined rather than empty.
+        """
+        return DatasetRange(tuple(self._sequences))
+
+    def save(
+        self,
+        path: StrPath,
+        *,
+        provenance: Mapping[str, object] | None = None,
+        overwrite: bool = False,
+    ) -> Path:
+        """Write what was absorbed as one document. See `save_range_document`."""
+        return save_range_document(
+            self.collected(), path, provenance=provenance, overwrite=overwrite
+        )

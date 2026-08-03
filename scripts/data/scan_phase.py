@@ -22,12 +22,7 @@ from iivs_cardio.data.phase import phase_field_writer
 from iivs_cardio.data.transforms.filtering import FilteredSequence
 from scripts._compute import ComputeConfig, pin_threads, plan_devices, report_insights
 from scripts._hydra import apply_schema, is_multirun, output_directory
-from scripts._range import (
-    DatasetRange,
-    RangeCollector,
-    SequenceRange,
-    save_range_document,
-)
+from scripts._range import DatasetRangeCollector, RangeCollector, SequenceRange
 from scripts.data._filtering import build_filter_kernel, describe_filter_kernel
 
 if TYPE_CHECKING:
@@ -195,26 +190,18 @@ def scan_sequences(
     return scanned
 
 
-def save_dataset_range(
-    dataset: DatasetRange,
-    source_config: SourceConfig,
-    target_config: TargetConfig,
-    filter_config: DictConfig | None = None,
-) -> Path:
-    provenance = {
+def range_provenance(
+    source_config: SourceConfig, filter_config: DictConfig | None = None
+) -> dict[str, object]:
+    # What a reader of the numbers cannot get from the numbers. The rest of the
+    # run is in `.hydra/` beside the document.
+    return {
         "source": {
             "phase_unit": source_config.phase_unit,
             "frame_step": source_config.frame_step,
         },
         "filter": describe_filter_kernel(filter_config),
     }
-
-    return save_range_document(
-        dataset,
-        Path(output_directory(), target_config.range_file),
-        provenance=provenance,
-        overwrite=target_config.overwrite,
-    )
 
 
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name=CONFIG_NAME)
@@ -232,12 +219,18 @@ def main(cfg: DictConfig) -> None:
         msg = "cannot write frames in a sweep: run the winning config alone instead"
         raise ValueError(msg)
 
+    ranges = DatasetRangeCollector()
     sequences = build_sequences(compute_config, source_config, filter_config)
-    scanned = scan_sequences(sequences, compute_config, source_config, target_config)
+    ranges.absorb(
+        *scan_sequences(sequences, compute_config, source_config, target_config)
+    )
 
     if target_config.save_ranges:
-        dataset_range = DatasetRange(tuple(scanned))
-        save_dataset_range(dataset_range, source_config, target_config, filter_config)
+        ranges.save(
+            Path(output_directory(), target_config.range_file),
+            provenance=range_provenance(source_config, filter_config),
+            overwrite=target_config.overwrite,
+        )
 
 
 if __name__ == "__main__":

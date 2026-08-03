@@ -4,7 +4,13 @@ import json
 
 import pytest
 
-from scripts._range import DatasetRange, FrameRange, SequenceRange, as_dict
+from scripts._range import (
+    DatasetRange,
+    DatasetRangeCollector,
+    FrameRange,
+    SequenceRange,
+    as_dict,
+)
 
 
 def _sequence(source: str, *bounds: tuple[float, float]) -> SequenceRange:
@@ -119,3 +125,43 @@ def test_the_document_survives_the_serializer_it_is_written_with():
     encoded = json.loads(json.dumps(as_dict(dataset)))
 
     assert encoded["sequences"][0]["frames"][0]["source"] == "00000_phase.bin"
+
+
+def test_a_collector_folds_what_it_absorbed():
+    ranges = DatasetRangeCollector()
+
+    ranges.absorb(_sequence("a", (-1.0, 2.0)), _sequence("b", (-3.0, 1.0)))
+
+    dataset = ranges.collected()
+    assert dataset.min_value == -3.0
+    assert dataset.max_value == 2.0
+    assert dataset.min_index == 1  # the second sequence held the low
+    assert dataset.max_index == 0
+
+
+def test_a_collector_absorbs_across_calls():
+    # Results come back per worker, so absorbing is not a single handover.
+    ranges = DatasetRangeCollector()
+
+    ranges.absorb(_sequence("a", (0.0, 1.0)))
+    ranges.absorb(_sequence("b", (0.0, 5.0)))
+
+    assert ranges.collected().max_value == 5.0
+
+
+def test_a_collector_that_absorbed_nothing_refuses_to_fold():
+    with pytest.raises(ValueError, match="holds nothing"):
+        DatasetRangeCollector().collected()
+
+
+def test_a_collector_writes_the_document_it_gathered(tmp_path):
+    ranges = DatasetRangeCollector()
+    ranges.absorb(_sequence("a", (-1.0, 2.0)))
+
+    path = ranges.save(tmp_path / "range", provenance={"filter": "identity"})
+
+    assert path == tmp_path / "range.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    assert document["filter"] == "identity"
+    assert document["dataset"]["max_value"] == 2.0
+    assert document["dataset"]["sequences"][0]["source"] == "a"
