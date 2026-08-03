@@ -148,9 +148,7 @@ def test_the_push_writer_matches_what_the_pull_one_writes(tmp_path):
     pushed = tmp_path / "pushed"
 
     _save(pulled, frames)
-    with phase_field_writer(
-        pushed, pixel_size=PIXEL_SIZE, height_scale=HEIGHT_SCALE
-    ) as writer:
+    with phase_field_writer(pushed, PhaseBinFolder(pulled)) as writer:
         for index, frame in enumerate(frames):
             writer.write(Slot(index, (torch.from_numpy(frame), SOURCE)))
 
@@ -163,18 +161,41 @@ def test_the_push_writer_matches_what_the_pull_one_writes(tmp_path):
         )
 
 
-def test_the_push_writer_records_the_scale_and_unit_it_was_given(tmp_path):
-    dest = tmp_path / "Bin"
+def test_the_push_writer_carries_the_source_calibration_over(tmp_path):
+    # Filtering does not change the acquisition, so the written folder describes
+    # the same one -- and a reader that saw a different scale would be wrong.
+    source = tmp_path / "source"
+    dest = tmp_path / "dest"
+    _save(source, _frames(1))
 
-    with phase_field_writer(
-        dest,
-        pixel_size=PIXEL_SIZE,
-        height_scale=HEIGHT_SCALE,
-        unit=PhaseUnit.NANOMETERS,
-    ) as writer:
+    with phase_field_writer(dest, PhaseBinFolder(source)) as writer:
         writer.write(Slot(0, (torch.from_numpy(_frames(1)[0]), SOURCE)))
 
     header = read_phase_bin_header(dest / "00000_phase.bin")
     assert header.pixel_size == pytest.approx(PIXEL_SIZE)
     assert header.height_scale == pytest.approx(HEIGHT_SCALE)
-    assert header.unit is PhaseUnit.METERS  # nanometres cannot live in a header
+
+
+def test_the_push_writer_records_the_unit_the_source_hands_out(tmp_path):
+    # `target_unit` is what the frames arriving are in, so it is what the header
+    # has to say; recording the stored unit instead scales a reader twice.
+    source = tmp_path / "source"
+    dest = tmp_path / "dest"
+    _save(source, _frames(1), unit=PhaseUnit.RADIANS)
+    reading_in = PhaseBinFolder(source).with_unit(PhaseUnit.METERS)
+
+    with phase_field_writer(dest, reading_in) as writer:
+        writer.write(Slot(0, (torch.from_numpy(_frames(1)[0]), SOURCE)))
+
+    assert read_phase_bin_header(dest / "00000_phase.bin").unit is PhaseUnit.METERS
+
+
+def test_the_push_writer_keeps_the_unit_when_nothing_converts(tmp_path):
+    source = tmp_path / "source"
+    dest = tmp_path / "dest"
+    _save(source, _frames(1), unit=PhaseUnit.RADIANS)
+
+    with phase_field_writer(dest, PhaseBinFolder(source)) as writer:
+        writer.write(Slot(0, (torch.from_numpy(_frames(1)[0]), SOURCE)))
+
+    assert read_phase_bin_header(dest / "00000_phase.bin").unit is PhaseUnit.RADIANS

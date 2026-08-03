@@ -30,12 +30,9 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from iivs.dhm.data.phase import PhaseFileFolder
-    from kaparoo.filesystem.types import StrPath
     from omegaconf import DictConfig
-    from torch import Tensor
 
     from iivs_cardio.common.device import Device
-    from iivs_cardio.common.writer import FieldWriter
 
 
 load_dotenv()
@@ -110,32 +107,14 @@ def build_sequences(
     return [build_sequence(source) for source in sources]
 
 
-def _open_writer(
-    sequence: PhaseFilteredSequence,
-    dest: StrPath,
-    target_config: TargetConfig,
-) -> FieldWriter[tuple[Tensor, Path]]:
-    header = sequence.origin.header
-
-    return phase_field_writer(
-        dest,
-        pixel_size=header.pixel_size,
-        height_scale=header.height_scale,
-        # None means each field keeps its stored unit, which is the header's.
-        unit=unwrap_or_default(sequence.origin.target_unit, header.unit),
-        overwrite=target_config.overwrite,
-    )
-
-
 def scan_sequence(
     sequence: PhaseFilteredSequence,
     source_config: SourceConfig,
     target_config: TargetConfig | None = None,
 ) -> SequenceRange:
+    sequence_root = sequence.get_meta(0).parent
     subpath = unwrap_or_default(source_config.subpath, PHASE_FLOAT_BIN)
-    source = stringify_path(
-        sequence.get_meta(0).parent, after=source_config.root, before=subpath
-    )
+    source = stringify_path(sequence_root, after=source_config.root, before=subpath)
 
     # Both jobs watch one traversal. Reading a frame again to range it would
     # re-run the kernel, the expensive half of a filtered read -- a second
@@ -145,7 +124,10 @@ def scan_sequence(
 
     if target_config is not None and target_config.save_frames:
         dest = Path(target_config.root, source, subpath)
-        node.attach(_open_writer(sequence, dest, target_config))
+        writer = phase_field_writer(
+            dest, sequence.origin, overwrite=target_config.overwrite
+        )
+        node.attach(writer)
 
     node.run()
 

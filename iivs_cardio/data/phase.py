@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from iivs.dhm.data.koala import save_koala_frames
 from iivs.dhm.data.phase import PhaseBinFolder, PhaseUnit, save_phase_bin
+from kaparoo.utils.optional import unwrap_or_default
 
 from iivs_cardio.common.writer import FieldWriter
 
@@ -16,6 +17,7 @@ if TYPE_CHECKING:
 
     import numpy as np
     from iivs.common.data import OnNonFinite
+    from iivs.dhm.data.phase import PhaseFileFolder
     from kaparoo.filesystem.types import StrPath
     from numpy.typing import NDArray
     from torch import Tensor
@@ -23,10 +25,8 @@ if TYPE_CHECKING:
 
 def phase_field_writer(
     dest: StrPath,
+    source: PhaseFileFolder,
     *,
-    pixel_size: float,
-    height_scale: float,
-    unit: PhaseUnit = PhaseUnit.RADIANS,
     overwrite: bool = False,
     on_nonfinite: OnNonFinite = "ignore",
 ) -> FieldWriter[tuple[Tensor, Path]]:
@@ -38,23 +38,30 @@ def phase_field_writer(
     the field, so it attaches to that node with nothing in between. The transfer
     to host memory happens here, on the tensor the caller already holds.
 
+    The calibration is `source`'s rather than an argument, because there is no
+    other answer: `pixel_size` and `height_scale` describe an acquisition that
+    filtering does not change, and the unit has to be the one `source` hands its
+    frames out in -- its `target_unit`, or the stored one it keeps when that is
+    unset. Recording anything else leaves a reader to scale the values twice.
+
     Args:
         dest: The folder to create and fill.
-        pixel_size: Sample spacing in metres, for the header of every field.
-        height_scale: Metres per radian, which every `.bin` header carries.
-        unit: The unit the fields hold their values in.
+        source: The folder the fields were read from, which the written one
+            describes the same acquisition as.
         overwrite: Whether to replace `dest` if it already exists.
         on_nonfinite: What to do about NaN / inf. Defaults to `"ignore"` for the
             reason `save_phase_bin_folder` gives.
     """
+    header = source.header
+    unit = unwrap_or_default(source.target_unit, header.unit)
 
     def save(path: Path, step: tuple[Tensor, Path]) -> None:
         field, _ = step
         save_phase_bin(
             path,
             field.cpu().numpy(),
-            pixel_size=pixel_size,
-            height_scale=height_scale,
+            pixel_size=header.pixel_size,
+            height_scale=header.height_scale,
             unit=unit,
             on_nonfinite=on_nonfinite,
         )
