@@ -84,7 +84,13 @@ class Node[T](ABC):
         T: What this stage yields at a step it can fill.
     """
 
-    def __init__(self, source: Node[Any] | None = None) -> None:
+    def __init__(self, source: Node[Any] | None) -> None:
+        """Take the stage this one reads from, or `None` at the head of a chain.
+
+        Required rather than defaulted, because forgetting it is silent: the
+        chain would end here, and a writer attached upstream would never be
+        opened or committed.
+        """
         self._source = source
         self._hooks: list[Hook[T]] = []
 
@@ -166,7 +172,7 @@ class Steps[T, M](Node[tuple[T, M]]):
     """
 
     def __init__(self, sequence: DataSequence[T, M]) -> None:
-        super().__init__()
+        super().__init__(None)
         self._sequence = sequence
 
     def produce(self) -> Iterator[Slot[tuple[T, M]]]:

@@ -30,7 +30,7 @@ class _Fixed(Node[str]):
     """A node yielding what it was given, recording when it was pulled."""
 
     def __init__(self, *slots: Slot[str]) -> None:
-        super().__init__()
+        super().__init__(None)
         self._slots = slots
         self.produced: list[int] = []
 
@@ -249,3 +249,15 @@ def test_a_failure_aborts_every_managed_hook_together() -> None:
 
     assert first.events == ["open", "see0", "abort"]
     assert second.events == ["open", "see0", "abort"]
+
+
+def test_a_downstream_run_fires_an_upstream_hook() -> None:
+    # A stage owns its own hooks: whatever pulls it does not have to know they
+    # are there, or arrange for them to fire.
+    seen: list[int] = []
+    source = _Fixed(Slot(0, "a"), Slot(1, "b"))
+    source.attach(lambda slot: seen.append(slot.index))
+
+    _Passthrough(source).run()
+
+    assert seen == [0, 1]
