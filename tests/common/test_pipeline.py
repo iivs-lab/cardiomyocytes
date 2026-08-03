@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from iivs_cardio.common.pipeline import Node, Slot, Steps, drain
+from iivs_cardio.common.pipeline import Node, Slot, Steps
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -103,7 +103,7 @@ def test_attached_hooks_see_every_slot() -> None:
     second: list[Slot[str]] = []
     node = _Fixed(*slots).attach(first.append, second.append)
 
-    drain(node)
+    node.run()
 
     assert first == slots
     assert second == slots
@@ -118,7 +118,7 @@ def test_hooks_fire_in_the_order_attached() -> None:
     node = _Fixed(Slot(0, "a"), Slot(1, "b"))
     node.attach(record("first")).attach(record("second"))
 
-    drain(node)
+    node.run()
 
     assert calls == [("first", 0), ("second", 0), ("first", 1), ("second", 1)]
 
@@ -142,7 +142,7 @@ def test_hooks_see_absent_slots_too() -> None:
     seen: list[Slot[str]] = []
     node = _Fixed(Slot(0, "a"), Slot[str](1, None)).attach(seen.append)
 
-    drain(node)
+    node.run()
 
     assert [(slot.index, slot.value) for slot in seen] == [(0, "a"), (1, None)]
 
@@ -162,7 +162,8 @@ def test_steps_reads_each_index_once_and_only_when_pulled() -> None:
     next(walked)
     assert sequence.reads == [0]
 
-    drain(walked)
+    for _ in walked:
+        pass
     assert sequence.reads == [0, 1, 2]
 
 
@@ -170,29 +171,16 @@ def test_steps_over_an_empty_sequence_yields_nothing() -> None:
     assert list(Steps(_Sequence([]))) == []
 
 
-def test_drain_exhausts_what_it_is_given() -> None:
-    pulled: list[int] = []
-
-    def source() -> Iterator[Slot[int]]:
-        for index in range(3):
-            pulled.append(index)
-            yield Slot(index, index)
-
-    drain(source())
-
-    assert pulled == [0, 1, 2]
-
-
-def test_drain_pulls_a_node_to_its_flush() -> None:
-    # A stage owes its buffered tail once its input ends; draining gets that
-    # only because it keeps pulling rather than stopping with the source.
+def test_run_pulls_a_node_to_its_flush() -> None:
+    # A stage owes its buffered tail once its input ends; `run` gets that only
+    # because it keeps pulling rather than stopping with the source.
     seen: list[Slot[str]] = []
     node = _Fixed(
         Slot(0, "a"), Slot(1, "b"), Slot[str](2, None)
     )  # the flush a windowing stage still owes
     node.attach(seen.append)
 
-    drain(node)
+    node.run()
 
     assert [(slot.index, slot.value) for slot in seen] == [
         (0, "a"),

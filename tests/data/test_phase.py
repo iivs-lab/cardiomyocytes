@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 import torch
@@ -9,6 +11,7 @@ from iivs_cardio.common.pipeline import Slot
 from iivs_cardio.data.phase import phase_field_writer, save_phase_bin_folder
 
 PIXEL_SIZE = 1.5e-7
+SOURCE = Path("00000_phase.bin")  # a step says where it was read from
 HEIGHT_SCALE = 2.0e-7
 
 
@@ -149,7 +152,7 @@ def test_the_push_writer_matches_what_the_pull_one_writes(tmp_path):
         pushed, pixel_size=PIXEL_SIZE, height_scale=HEIGHT_SCALE
     ) as writer:
         for index, frame in enumerate(frames):
-            writer.write(Slot(index, torch.from_numpy(frame)))
+            writer.write(Slot(index, (torch.from_numpy(frame), SOURCE)))
 
     assert sorted(p.name for p in pushed.iterdir()) == sorted(
         p.name for p in pulled.iterdir()
@@ -169,7 +172,7 @@ def test_the_push_writer_records_the_scale_and_unit_it_was_given(tmp_path):
         height_scale=HEIGHT_SCALE,
         unit=PhaseUnit.NANOMETERS,
     ) as writer:
-        writer.write(Slot(0, torch.from_numpy(_frames(1)[0])))
+        writer.write(Slot(0, (torch.from_numpy(_frames(1)[0]), SOURCE)))
 
     header = read_phase_bin_header(dest / "00000_phase.bin")
     assert header.pixel_size == pytest.approx(PIXEL_SIZE)

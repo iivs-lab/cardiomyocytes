@@ -29,12 +29,14 @@ def phase_field_writer(
     unit: PhaseUnit = PhaseUnit.RADIANS,
     overwrite: bool = False,
     on_nonfinite: OnNonFinite = "ignore",
-) -> FieldWriter[Tensor]:
+) -> FieldWriter[tuple[Tensor, Path]]:
     """A `FieldWriter` writing phase fields as the `.bin` folder `PhaseBinFolder` reads.
 
     The push-shaped counterpart of `save_phase_bin_folder`, for a traversal that
-    hands one step at a time rather than an iterable to drain. The transfer to
-    host memory happens here, so a caller passes the tensor it already holds.
+    hands one step at a time rather than an iterable to drain. It takes the step
+    a source node yields -- the field and where it was read from -- and writes
+    the field, so it attaches to that node with nothing in between. The transfer
+    to host memory happens here, on the tensor the caller already holds.
 
     Args:
         dest: The folder to create and fill.
@@ -46,7 +48,8 @@ def phase_field_writer(
             reason `save_phase_bin_folder` gives.
     """
 
-    def save(path: Path, field: Tensor) -> None:
+    def save(path: Path, step: tuple[Tensor, Path]) -> None:
+        field, _ = step
         save_phase_bin(
             path,
             field.cpu().numpy(),

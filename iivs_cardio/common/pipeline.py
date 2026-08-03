@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-__all__ = ("Hook", "Node", "Slot", "Steps", "drain")
+__all__ = ("Hook", "Node", "Slot", "Steps")
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Self
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator
+    from collections.abc import Callable, Iterator
 
     from kaparoo.data import DataSequence
 
@@ -106,6 +106,21 @@ class Node[T](ABC):
         to how deep the chain is.
         """
 
+    def run(self) -> None:
+        """Pull every slot, for the sake of what happens on the way.
+
+        The end of a chain is often wanted for nothing but its hooks -- a scan
+        writing a range document reads every frame and keeps no frame. Saying so
+        beats a loop over a discarded name, which reads like an oversight.
+
+        Exhausting the chain is also what flushes it: every stage owes the steps
+        it buffered once its input ends, and they arrive only while something
+        keeps pulling. Call this on the *last* stage; running a middle one leaves
+        everything below it unfed.
+        """
+        for _ in self:
+            pass
+
     def __iter__(self) -> Iterator[Slot[T]]:
         for slot in self.produce():
             for hook in self._hooks:
@@ -136,21 +151,3 @@ class Steps[T, M](Node[tuple[T, M]]):
         """Yield every step in order. Never absent -- a read gives an item or raises."""
         for index in range(len(self._sequence)):
             yield Slot(index, self._sequence.get_pair(index))
-
-
-def drain[T](items: Iterable[Slot[T]]) -> None:
-    """Pull `items` to exhaustion for the sake of what happens on the way.
-
-    The end of a chain is often wanted for nothing but its hooks -- a scan that
-    writes a range document reads every frame and keeps no frame. Draining says
-    that, where a bare `for` loop over a discarded name reads like an oversight.
-
-    Exhausting the chain is also what flushes it: every stage owes the steps it
-    buffered once its input ends, and they arrive only if something keeps
-    pulling.
-
-    Args:
-        items: The end of the chain. Pulled once, so a generator is spent after.
-    """
-    for _ in items:
-        pass

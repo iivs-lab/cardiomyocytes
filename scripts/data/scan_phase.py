@@ -18,7 +18,7 @@ from mpire import WorkerPool
 from omegaconf import MISSING
 from tqdm import tqdm
 
-from iivs_cardio.common.pipeline import Slot, Steps, drain
+from iivs_cardio.common.pipeline import Steps
 from iivs_cardio.data.phase import phase_field_writer
 from iivs_cardio.data.transforms.filtering import FilteredSequence
 from scripts._compute import ComputeConfig, pin_threads, plan_devices, report_insights
@@ -35,7 +35,6 @@ if TYPE_CHECKING:
     from torch import Tensor
 
     from iivs_cardio.common.device import Device
-    from iivs_cardio.common.pipeline import Hook
     from iivs_cardio.common.writer import FieldWriter
 
 
@@ -115,7 +114,7 @@ def _open_writer(
     sequence: PhaseFilteredSequence,
     dest: StrPath,
     target_config: TargetConfig,
-) -> FieldWriter[Tensor]:
+) -> FieldWriter[tuple[Tensor, Path]]:
     header = sequence.origin.header
 
     return phase_field_writer(
@@ -126,17 +125,6 @@ def _open_writer(
         unit=unwrap_or_default(sequence.origin.target_unit, header.unit),
         overwrite=target_config.overwrite,
     )
-
-
-def _write_field(writer: FieldWriter[Tensor]) -> Hook[tuple[Tensor, Path]]:
-    # A step carries where it came from as well as the field, where a folder
-    # holds only fields and numbers them itself. Adapting here rather than in
-    # the writer keeps a shape this driver chose out of the library.
-    def hook(slot: Slot[tuple[Tensor, Path]]) -> None:
-        field, _ = slot.require()
-        writer.write(Slot(slot.index, field))
-
-    return hook
 
 
 def scan_sequence(
@@ -158,9 +146,9 @@ def scan_sequence(
     if target_config is not None and target_config.save_frames:
         dest = Path(target_config.root, source, subpath)
         with _open_writer(sequence, dest, target_config) as writer:
-            drain(node.attach(_write_field(writer)))
+            node.attach(writer.write).run()
     else:
-        drain(node)
+        node.run()
 
     return collector.collected()
 

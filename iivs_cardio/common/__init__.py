@@ -4,7 +4,7 @@ from iivs_cardio.common.device import (
     DeviceKind,
     DeviceLike,
 )
-from iivs_cardio.common.pipeline import Hook, Slot, drain
+from iivs_cardio.common.pipeline import Hook, Node, Slot, Steps
 from iivs_cardio.common.range import finite_range
 from iivs_cardio.common.writer import FieldWriter
 
@@ -15,7 +15,8 @@ __all__ = (
     "DeviceLike",
     "FieldWriter",
     "Hook",
+    "Node",
     "Slot",
-    "drain",
+    "Steps",
     "finite_range",
 )
