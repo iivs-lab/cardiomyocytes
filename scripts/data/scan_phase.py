@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass
 from functools import partial
@@ -11,7 +10,7 @@ import hydra
 from dotenv import load_dotenv
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import resolve_phase_unit, search_phase_bin_folders
-from kaparoo.filesystem import StagedFile, ensure_file_extension, stringify_path
+from kaparoo.filesystem import stringify_path
 from kaparoo.filesystem.search import select
 from kaparoo.utils.optional import unwrap_or_default
 from mpire import WorkerPool
@@ -23,7 +22,12 @@ from iivs_cardio.data.phase import phase_field_writer
 from iivs_cardio.data.transforms.filtering import FilteredSequence
 from scripts._compute import ComputeConfig, pin_threads, plan_devices, report_insights
 from scripts._hydra import apply_schema, is_multirun, output_directory
-from scripts._range import DatasetRange, RangeCollector, SequenceRange, as_dict
+from scripts._range import (
+    DatasetRange,
+    RangeCollector,
+    SequenceRange,
+    save_range_document,
+)
 from scripts.data._filtering import build_filter_kernel, describe_filter_kernel
 
 if TYPE_CHECKING:
@@ -197,27 +201,20 @@ def save_dataset_range(
     target_config: TargetConfig,
     filter_config: DictConfig | None = None,
 ) -> Path:
-    document = {
+    provenance = {
         "source": {
             "phase_unit": source_config.phase_unit,
             "frame_step": source_config.frame_step,
         },
         "filter": describe_filter_kernel(filter_config),
-        "dataset": as_dict(dataset),
     }
 
-    path = Path(output_directory(), target_config.range_file)
-    path = ensure_file_extension(path, ".json", add=True)
-
-    with StagedFile(
-        path,
+    return save_range_document(
+        dataset,
+        Path(output_directory(), target_config.range_file),
+        provenance=provenance,
         overwrite=target_config.overwrite,
-        make_parents=True,
-        encoding="utf-8",
-    ) as file:
-        file.write(json.dumps(document, indent=2))
-
-    return path
+    )
 
 
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name=CONFIG_NAME)

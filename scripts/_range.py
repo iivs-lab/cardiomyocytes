@@ -8,18 +8,23 @@ __all__ = (
     "SequenceRange",
     "ValueRange",
     "as_dict",
+    "save_range_document",
 )
 
+import json
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
+from kaparoo.filesystem import StagedFile, ensure_file_extension
+
 from iivs_cardio.common.range import finite_range
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
     from pathlib import Path
 
+    from kaparoo.filesystem.types import StrPath
     from torch import Tensor
 
     from iivs_cardio.common.pipeline import Slot
@@ -139,3 +144,43 @@ class RangeCollector:
                 undefined rather than empty.
         """
         return SequenceRange(self._source, tuple(self._frames))
+
+
+def save_range_document(
+    dataset: DatasetRange,
+    path: StrPath,
+    *,
+    provenance: Mapping[str, object] | None = None,
+    overwrite: bool = False,
+) -> Path:
+    """Write `dataset` as one JSON document, under what the run can say about it.
+
+    The dataset level is the parent's to write: a worker sees one sequence, so
+    folding across them and naming the result happens where they come back. Any
+    driver that ranges what it reads wants this, which is why it does not live
+    beside the one that ranges phase.
+
+    `provenance` is the run's own -- the unit it read in, the filter it applied,
+    whatever else a reader of the numbers would have to ask. It is separate
+    because only the driver knows it, and it is optional because `.hydra/` beside
+    the document already holds the composed config; what belongs here is the
+    little a report still means something without.
+
+    Args:
+        dataset: The fold across every sequence the run scanned.
+        path: Where to write. A `.json` suffix is added if absent.
+        provenance: Merged in beside the dataset, ahead of it.
+        overwrite: Whether to replace an existing document.
+
+    Returns:
+        The path written, with its suffix settled.
+    """
+    document = {**(provenance or {}), "dataset": as_dict(dataset)}
+    path = ensure_file_extension(path, ".json", add=True)
+
+    with StagedFile(
+        path, overwrite=overwrite, make_parents=True, encoding="utf-8"
+    ) as file:
+        file.write(json.dumps(document, indent=2))
+
+    return path
