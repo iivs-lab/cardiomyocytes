@@ -4,7 +4,7 @@ __all__ = ("KernelShape", "MedianKernel", "MedianParams")
 
 from dataclasses import dataclass
 from itertools import product
-from typing import Final, Literal, get_args, override
+from typing import TYPE_CHECKING, Final, Literal, get_args, override
 
 import torch
 from beartype import beartype
@@ -20,6 +20,11 @@ from iivs_cardio.data.transforms.filtering.kernel.base import (
     WindowType,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from torch import Tensor
+
 KernelShape = Literal["ellipsoid", "cuboid"]
 KERNEL_SHAPES: Final[tuple[KernelShape, ...]] = get_args(KernelShape)
 
@@ -30,6 +35,21 @@ KERNEL_SHAPES: Final[tuple[KernelShape, ...]] = get_args(KernelShape)
 # only `sort` is paying. Measured on one GPU, but both bounds turn on the same
 # threshold, which is why this is a range rather than a fitted cutoff.
 _CUDA_TOPK_SAMPLES = range(33, 64)
+
+# How much stacked neighbourhood one pass may hold. A pixel's median reads only
+# its own neighbours, so the frame can be answered a band at a time for the same
+# result, and the band is what bounds every temporary: the sort's values and its
+# discarded `int64` indices come to about 4x this. Measured at 900x900, the whole
+# frame at 343 offsets peaks at 4.75 GB and takes 138 ms, where bands of this
+# size peak at 0.33 GB and take 106 ms -- smaller *and* faster, since the giant
+# allocation costs more than the extra launches. Far below this it inverts, a
+# band too small to keep the device busy.
+_TILE_BYTES: Final = 32 << 20
+
+
+def _tile_rows(samples: int, width: int, itemsize: int) -> int:
+    """How many rows of the frame one pass may take, at least one."""
+    return max(1, _TILE_BYTES // (samples * width * itemsize))
 
 
 class MedianKernel(FilterKernel):
@@ -103,17 +123,49 @@ class MedianKernel(FilterKernel):
         """
         self._validate_target(window, target)
         frames, height, width = window.shape
-        rx, ry = self.spatial_radius
+        offsets = [o for o in self._offsets if 0 <= target + o[2] < frames]
 
+        rx, ry = self.spatial_radius
         padded = pad(window, (rx, rx, ry, ry), value=float("nan"))
+
+        rows = _tile_rows(len(offsets), width, window.element_size())
+        if rows >= height:
+            return self._median(padded, offsets, target, 0, height, width)
+
+        filtered = torch.empty_like(window[0])
+        for start in range(0, height, rows):
+            stop = min(start + rows, height)
+            filtered[start:stop] = self._median(
+                padded, offsets, target, start, stop - start, width
+            )
+
+        return filtered
+
+    def _median(
+        self,
+        padded: Tensor,
+        offsets: Sequence[RadiusType],
+        target: int,
+        start: int,
+        rows: int,
+        width: int,
+    ) -> Tensor:
+        """Take the median for `rows` rows of the frame, beginning at `start`.
+
+        A pixel's median reads only its own neighbourhood, so a band answers
+        exactly what the whole frame would have. `padded` stays whole and each
+        band reads the taller strip its radius needs out of it.
+        """
+        rx, ry = self.spatial_radius
 
         gathered = torch.stack(
             [
                 padded[
-                    target + dz, ry + dy : ry + dy + height, rx + dx : rx + dx + width
+                    target + dz,
+                    ry + dy + start : ry + dy + start + rows,
+                    rx + dx : rx + dx + width,
                 ]
-                for dx, dy, dz in self._offsets
-                if 0 <= target + dz < frames
+                for dx, dy, dz in offsets
             ]
         )
 

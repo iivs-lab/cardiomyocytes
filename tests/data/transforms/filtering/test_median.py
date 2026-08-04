@@ -14,6 +14,7 @@ from iivs_cardio.data.transforms.filtering import (
     MedianKernel,
     MedianParams,
 )
+from iivs_cardio.data.transforms.filtering.kernel import median as median_kernel
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -357,3 +358,22 @@ def test_build_expands_the_held_radius_into_a_kernel():
     assert isinstance(kernel, MedianKernel)
     assert kernel.radius == (1, 1, 0)
     assert kernel.shape == "cuboid"
+
+
+@pytest.mark.parametrize("shape", ("ellipsoid", "cuboid"))
+@pytest.mark.parametrize("radius", ((2, 2, 1), (1, 3, 2)))
+def test_a_banded_frame_answers_exactly_what_a_whole_one_does(
+    monkeypatch, shape, radius
+):
+    # A pixel's median reads only its own neighbourhood, so answering the frame a
+    # band at a time is not an approximation. It is what bounds the temporaries:
+    # the sort's values and its discarded indices come to about 4x the stacked
+    # neighbourhood, which at 900x900 and 343 offsets is 4.75 GB in one go.
+    kernel = MedianKernel(radius, shape=shape)
+    window = torch.randn(2 * radius[2] + 1, 17, 13)
+
+    whole = kernel.apply(window, radius[2])
+    monkeypatch.setattr(median_kernel, "_TILE_BYTES", 1)  # one row a band
+    banded = kernel.apply(window, radius[2])
+
+    assert torch.equal(banded, whole)
