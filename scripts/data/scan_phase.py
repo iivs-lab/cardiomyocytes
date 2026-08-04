@@ -20,10 +20,10 @@ from tqdm import tqdm
 from iivs_cardio.common.pipeline import Steps
 from iivs_cardio.data.phase import phase_field_writer
 from iivs_cardio.data.transforms.filtering import FilteredSequence
-from scripts._compute import ComputeConfig, pin_threads, plan_devices, report_insights
+from scripts._compute import ComputeConfig, pin_threads, plan_devices
 from scripts._hydra import apply_schema, is_multirun, output_directory
-from scripts._range import DatasetRangeCollector
 from scripts.data._filtering import build_filter_kernel, describe_filter_kernel
+from scripts.data._range import DatasetRangeCollector
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -145,18 +145,11 @@ def scan_sequence(
     subpath = unwrap_or_default(source_config.subpath, PHASE_FLOAT_BIN)
     source = stringify_path(sequence_root, after=source_config.root, before=subpath)
 
-    # Both jobs watch one traversal. Reading a frame again to range it would
-    # re-run the kernel, the expensive half of a filtered read -- a second
-    # traversal measured +94% on a median (2, 2, 2).
-    collector = ranges.collector_for(source)
-    node = Steps(sequence).attach(collector)
-
+    hooks = [ranges.collector_for(source)]
     if writers is not None:
-        node.attach(writers.writer_for(source, sequence.origin))
+        hooks.append(writers.writer_for(source, sequence.origin))
 
-    # `run` ends the collector's traversal, and a collector that finished
-    # hands itself to `ranges`. Nothing here has a result to pass on.
-    node.run()
+    Steps(sequence).attach(*hooks).run()
 
 
 def _scan_on_worker(
@@ -192,16 +185,13 @@ def scan_sequences(
 
     devices = plan_devices(compute_config)[: len(sequences)]
 
-    if (workers := len(devices)) == 1:
-        # No merge: one process, so the collectors handed themselves straight
-        # to `ranges` as each traversal ended.
-        pbar = tqdm(sequences, disable=not pbar_enabled, **pbar_options)
-        for item in pbar:
+    if (num_workers := len(devices)) == 1:
+        for item in tqdm(sequences, disable=not pbar_enabled, **pbar_options):
             scan_sequence(item, source_config, ranges, writers)
         return
 
     with WorkerPool(
-        n_jobs=workers,
+        n_jobs=num_workers,
         shared_objects=devices,
         pass_worker_id=True,
         enable_insights=compute_config.insights,
@@ -213,8 +203,6 @@ def scan_sequences(
             writers=writers,
         )
 
-        # Each task takes one sequence, wrapped: `mpire` spreads any iterable
-        # task argument across the parameters, and a sequence is one.
         for gathered in pool.imap(
             scan,
             [(sequence,) for sequence in sequences],
@@ -224,9 +212,6 @@ def scan_sequences(
             progress_bar_options=pbar_options,
         ):
             ranges.merge(gathered)
-
-        if compute_config.insights:
-            report_insights(pool.get_insights())
 
 
 def range_provenance(
@@ -258,7 +243,11 @@ def main(cfg: DictConfig) -> None:
         msg = "cannot write frames in a sweep: run the winning config alone instead"
         raise ValueError(msg)
 
-    ranges = DatasetRangeCollector()
+    ranges = DatasetRangeCollector(
+        Path(output_directory(), target_config.range_file),
+        provenance=range_provenance(source_config, filter_config),
+        overwrite=target_config.overwrite,
+    )
     writers = (
         DatasetFieldWriter(
             target_config.root,
@@ -273,11 +262,7 @@ def main(cfg: DictConfig) -> None:
     scan_sequences(sequences, compute_config, source_config, ranges, writers)
 
     if target_config.save_ranges:
-        ranges.save(
-            Path(output_directory(), target_config.range_file),
-            provenance=range_provenance(source_config, filter_config),
-            overwrite=target_config.overwrite,
-        )
+        ranges.save()
 
 
 if __name__ == "__main__":

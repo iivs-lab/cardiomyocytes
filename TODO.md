@@ -93,45 +93,6 @@ still to build or decide.
   `include` / `exclude` selection, the unit override, and the two failures it
   tells apart. Move it before a second script grows its own copy.
 
-- **Both folder writers go, replaced by a push-shaped `FieldWriter`.** A hook is
-  handed one step at a time, where `save_phase_bin_folder` and `save_flow_folder`
-  each take an `Iterable` and drain it -- workable only while writing is the sole
-  consumer, which is what `scan_sequence` exploits today by passing `walk()`
-  straight in. Several hooks cannot each be given the same generator.
-
-  The inversion is small because both functions are already the same two pieces:
-  a per-file `save` callable with its metadata bound (`save_phase_bin` from
-  `iivs-lib`, an `.npy` write for flow) and the folder mechanics around it.
-  `kaparoo`'s `StagedDirectory` is that machinery in push form -- `workdir`,
-  `commit`, `abort`, a context manager -- so `FieldWriter` opens it, numbers each
-  `write` densely from `0`, and commits on a clean exit. Its `make_parents` also
-  retires the parent-directory line `save_koala_frames` forces today.
-
-  Name it for the field, not the frame: a step is `(H, W)` or `(2, H, W)` -- §2's
-  scalar and vector fields -- and phase, flow, speed and force are all one. The
-  same writer takes the kinematic outputs with nothing but a different `save`.
-  `OPD variance` is *not* one of them: it accumulates `(n, mean, M2)` rather than
-  emitting a field per step, so it is a different hook and `FieldWriter` should
-  not be stretched to cover it.
-
-  Dropping `save_koala_frames` does not mean restating its file naming:
-  `koala_frame_name(index, stem=, ext=)` is exported beside it and documents
-  itself as the single source of truth the folder readers also validate against,
-  rejecting an index past the 5-digit field rather than writing one discovery
-  would silently miss. Call it. A round-trip test -- write a folder, read it with
-  the matching reader -- is still worth having, since neither function has one
-  today and it is what would catch the writer and the reader drifting apart.
-
-  **Open: number by arrival or by the slot's index.** They agree until they do
-  not. `save_phase_bin_folder` numbers densely by arrival on purpose, so that a
-  strided read writes a dense folder rather than carrying the source's gaps, and
-  `koala_frame_name` calls the result contiguous because discovery expects it.
-  A slot's index is instead the step it describes -- which is what the range
-  document reports against. They diverge exactly when a step is missing mid-run,
-  where arrival numbering silently closes the gap and shifts every later frame
-  against its own record. That is the failure-handling item above, and whichever
-  is chosen, a hole must be refused rather than compacted.
-
 - **Not every config group takes the short override form.** `compute=cpu` works
   because the group and its package are both `compute`, but the filter group is
   mounted at another package and needs
@@ -300,38 +261,20 @@ Roughly in dependency order: each one is easier once the previous has landed.
   report today, so the two commands only read as clean by comparison until this
   file is replaced.
 
-- **Restructure `scan_phase` onto the pipeline in
-  [`docs/foundations.md`](docs/foundations.md) §6.** The shape is settled there --
-  a linear `phase -> flow -> metrics` chain whose item accumulates rather than
-  replaces, `Slot[T]` carrying an index that different nodes reach at different
-  moments, hooks at the three boundaries that observe rather than consume, and a
-  DAG confined to the metrics stage. What remains is applying it, and
-  `scan_phase` is where it lands first: it hard-codes one pipeline today -- read,
-  filter, range, and write if asked -- and `scan_sequence`'s `walk()` leaks its
-  by-product through a closure over a list, which is exactly what does not
-  compose.
+- **The per-sequence pipeline and the dataset-level containers are being
+  redesigned from the problem up.** What is in the tree -- `Slot`, `Node`,
+  `Steps`, `FieldWriter`, the range collectors -- came out of a conversation
+  that kept accreting rather than converging, and the records it left in
+  `docs/foundations.md` were steering later work toward it. Those records are
+  gone; the code is still there and passing, and is to be judged fresh rather
+  than extended.
 
-  The driver keeps what it already has. Work distribution is settled and
-  unaffected: one sequence per task, `mpire`, one device per worker, the same
-  shape whatever a task runs.
-
-  Three things the restructure must not lose:
-
-  - *The single traversal.* Ranging in a second pass over a filtered read
-    measured +94%.
-  - *Assembly inside the worker.* No estimator crosses a process boundary, so
-    the parent sends `*Params` recipes and the worker builds. `KernelParams` and
-    `EstimatorParams` already draw that line.
-  - *The drain.* Deeper nodes still hold buffered work when the source is
-    exhausted; stopping with the source silently drops the tail of every metric.
-
-  Still open, and it blocks the metrics stage rather than `scan_phase`: **what
-  the metrics mapping holds.** Its keys are whatever the config requested, so a
-  fixed dataclass cannot express it, and the values are not one type -- `force`
-  and `speed` are tensors where `OPD variance` is a Welford `(n, mean, M2)`.
-  `dict[str, object]` narrowed per consumer, a shared union that grows with every
-  metric, or forcing every metric into a tensor: none is free, and `ty` runs with
-  `error-on-warning`.
+  What a redesign still has to answer, none of it settled: what a dataset-level
+  container owns and whether it is the same object that dispatches the run; how
+  a per-sequence result crosses back from a worker; whether there is one
+  container per concern or one holding several; and where the temporal window
+  lives. `scripts/data/scan_phase.py` is the only driver on it, so it is the
+  only thing to keep working.
 
 - **Rewrite the benchmark as `scripts/optical_flow/run_estimator.py`.**
   Estimators, `common/warp.py`, `optical_flow/evaluation.py` and
