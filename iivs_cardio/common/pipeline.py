@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("Hook", "Node", "Slot", "Steps")
+__all__ = ("Hook", "SequenceStage", "Stage", "Step")
 
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, ExitStack
@@ -14,168 +14,124 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class Slot[T]:
-    """One node's value for one step of a sequence, or the absence of one.
-
-    `index` is what the value describes, not where it arrived. A node buffering a
-    temporal window falls behind its input by as many steps as that window is
-    deep, so at any moment the nodes of one pipeline sit at different indices --
-    a variance over single frames can be reporting step 40 while an acceleration
-    three differences downstream is still reporting 38. Alignment between nodes,
-    and every record a hook keeps, is therefore by `index` and never by arrival
-    order.
-
-    `value` is absent wherever the node cannot produce one. Under the forward
-    convention -- `node[i]` reads from step `i` onward -- that is the tail, where
-    the future a step would need does not exist. Absence propagates rather than
-    being skipped: a node handed an absent input has nothing to compute from and
-    passes an absent slot on, so the index still reaches the end of the chain and
-    a hook can record which steps went unfilled.
-
-    Type Parameters:
-        T: What the node yields when it has something -- a frame, a flow field,
-            a mapping of metrics. Absence is `Slot`'s to express, so `T` itself
-            should not be optional.
-    """
-
+class Step[T, E = None]:
     index: int
     value: T | None
+    extra: E | None = None
 
     def require(self) -> T:
-        """The value, where absence would be a defect rather than a tail.
-
-        A node reading a source fills every step it yields, so a consumer of one
-        has nothing to branch on -- asking here says that and narrows the type in
-        the same move, instead of a check no test can reach. Read `value`
-        directly wherever absence is expected: below a node holding a window it
-        is the ordinary end of the stream.
-
-        Raises:
-            ValueError: If this slot holds no value.
-        """
         if self.value is None:
             msg = f"step {self.index} holds no value"
             raise ValueError(msg)
 
         return self.value
 
+    def require_extra(self) -> E:
+        if self.extra is None:
+            msg = f"step {self.index} holds nothing beside its value"
+            raise ValueError(msg)
 
-type Hook[T] = Callable[[Slot[T]], None]
+        return self.extra
 
 
-class Node[T](ABC):
-    """One stage of a pipeline: slots in order, with hooks watching them pass.
+type Hook[T, E = None] = Callable[[Step[T, E]], None]
 
-    Hooks belong to the node rather than to whoever drains the chain, because a
-    chain is drained only at its end -- hanging them off the drain would leave
-    every stage but the last unobservable. Saving filtered frames watches the
-    filter, scoring a flow watches the estimator, and both run in one traversal
-    of a chain whose end is something else entirely.
 
-    A hook observes; it never consumes. Its slot is passed downstream either way,
-    and its return value is ignored, so whatever accumulates a per-step result --
-    and owns whatever lifetime that takes -- is the object that supplied the
-    hook, not this one. A writer therefore opens and commits around the
-    traversal.
+class Stage[T, E = None](ABC):
+    def __init__(self, *sources: Stage[Any, Any], window: int = 1) -> None:
+        if window < 1:
+            msg = f"invalid window {window}: expected 1 or more"
+            raise ValueError(msg)
 
-    Subclasses implement `produce`, which is where the stage's own work lives.
+        self._sources = sources
+        self._window = window
+        self._cache: dict[int, Step[T, E]] = {}
+        self._reach = -1
 
-    Type Parameters:
-        T: What this stage yields at a step it can fill.
-    """
+        self._hooks: list[Hook[T, E]] = []
+        self._notified: set[int] = set()
 
-    def __init__(self, source: Node[Any] | None) -> None:
-        """Take the stage this one reads from, or `None` at the head of a chain.
+    @property
+    def sources(self) -> tuple[Stage[Any, Any], ...]:
+        return self._sources
 
-        Required rather than defaulted, because forgetting it is silent: the
-        chain would end here, and a writer attached upstream would never be
-        opened or committed.
-        """
-        self._source = source
-        self._hooks: list[Hook[T]] = []
-
-    def _chain(self) -> Iterator[Node[Any]]:
-        """This node and everything it draws from, nearest first."""
-        node: Node[Any] | None = self
-        while node is not None:
-            yield node
-            node = node._source  # noqa: SLF001
-
-    def attach(self, *hooks: Hook[T]) -> Self:
-        """Register `hooks` to be called with every slot this node yields.
-
-        Returns this node, so a stage can be built and watched in one expression.
-        Hooks are called in the order attached, before the slot goes downstream.
-        """
+    def register_hooks(self, *hooks: Hook[T, E]) -> Self:
         self._hooks.extend(hooks)
 
         return self
 
     @abstractmethod
-    def produce(self) -> Iterator[Slot[T]]:
-        """Yield this stage's slots, in index order and one per step.
+    def __len__(self) -> int: ...
 
-        A stage holding a temporal window owes a flush once its own input ends --
-        the steps it buffered are still its to give. Returning when the input
-        does drops the tail of everything downstream, silently and in proportion
-        to how deep the chain is.
-        """
+    @abstractmethod
+    def _compute(self, index: int) -> T | None: ...
+
+    def _describe(self, index: int) -> E | None:  # noqa: ARG002
+        return None
+
+    def __getitem__(self, index: int) -> Step[T, E]:
+        if not 0 <= index < len(self):
+            msg = f"step {index} is outside 0..{len(self) - 1}"
+            raise IndexError(msg)
+
+        if (cached := self._cache.get(index)) is not None:
+            return cached
+
+        step: Step[T, E] = Step(index, self._compute(index), self._describe(index))
+        self._cache[index] = step
+        self._forget(index)
+        self._notify(step)
+
+        return step
+
+    def __iter__(self) -> Iterator[Step[T, E]]:
+        for index in range(len(self)):
+            yield self[index]
+
+    def _forget(self, index: int) -> None:
+        self._reach = max(self._reach, index)
+        oldest = self._reach - self._window + 1
+        self._cache = {i: s for i, s in self._cache.items() if i >= oldest}
+
+    def _notify(self, step: Step[T, E]) -> None:
+        if step.index in self._notified:
+            return
+
+        self._notified.add(step.index)
+        for hook in self._hooks:
+            hook(step)
+
+    def _all_hooks(self, seen: set[int] | None = None) -> Iterator[Hook[Any, Any]]:
+        seen = set() if seen is None else seen
+        if id(self) in seen:
+            return
+
+        seen.add(id(self))
+        yield from self._hooks
+
+        for source in self._sources:
+            yield from source._all_hooks(seen)  # noqa: SLF001
 
     def run(self) -> None:
-        """Pull every slot, holding open whatever the chain's hooks need held.
-
-        The end of a chain is often wanted for nothing but its hooks -- a scan
-        writing a range document reads every frame and keeps no frame. Saying so
-        beats a loop over a discarded name, which reads like an oversight.
-
-        A hook that is a context manager is entered here and left on the way
-        out, across the whole chain rather than this node alone: writers hang off
-        the stages whose output they save, which is rarely the last one. That
-        makes their commits all-or-nothing together -- a run that dies part-way
-        leaves no folder behind rather than some of them -- and it keeps the
-        caller from stacking a `with` per writer as the chain grows.
-
-        Exhausting the chain is also what flushes it: every stage owes the steps
-        it buffered once its input ends, and they arrive only while something
-        keeps pulling. Call this on the *last* stage; running a middle one leaves
-        everything below it unfed.
-        """
         with ExitStack() as stack:
-            for node in self._chain():
-                for hook in node._hooks:  # noqa: SLF001
-                    if isinstance(hook, AbstractContextManager):
-                        stack.enter_context(hook)
+            for hook in self._all_hooks():
+                if isinstance(hook, AbstractContextManager):
+                    stack.enter_context(hook)
 
             for _ in self:
                 pass
 
-    def __iter__(self) -> Iterator[Slot[T]]:
-        for slot in self.produce():
-            for hook in self._hooks:
-                hook(slot)
 
-            yield slot
-
-
-class Steps[T, M](Node[tuple[T, M]]):
-    """The source node: a `DataSequence` read in order, one slot per step.
-
-    Each slot carries the pair the sequence itself yields -- the item, and
-    whatever it records about where the item came from. The second half travels
-    because a downstream node cannot reach back into the sequence for it without
-    re-coupling to it, and a frame's own name is what a range or a report is
-    written against.
-
-    Indices are positions in `sequence`, which is what makes them positions in
-    every node downstream. A sequence that is already a strided view of another
-    therefore numbers from `0` over what it exposes, not over what it reads.
-    """
-
-    def __init__(self, sequence: DataSequence[T, M]) -> None:
-        super().__init__(None)
+class SequenceStage[T, M](Stage[T, M]):
+    def __init__(self, sequence: DataSequence[T, M], *, window: int = 1) -> None:
+        super().__init__(window=window)
         self._sequence = sequence
 
-    def produce(self) -> Iterator[Slot[tuple[T, M]]]:
-        """Yield every step in order. Never absent -- a read gives an item or raises."""
-        for index in range(len(self._sequence)):
-            yield Slot(index, self._sequence.get_pair(index))
+    def __len__(self) -> int:
+        return len(self._sequence)
+
+    def _compute(self, index: int) -> T:
+        return self._sequence.get_item(index)
+
+    def _describe(self, index: int) -> M:
+        return self._sequence.get_meta(index)

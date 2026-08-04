@@ -1,30 +1,52 @@
 from __future__ import annotations
 
 from dataclasses import fields
+from typing import TYPE_CHECKING
 
+import numpy as np
 import pytest
 from hydra import compose, initialize_config_dir
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import PhaseBinFolder
 
 from scripts._compute import ComputeConfig
-from scripts.data._range import DatasetRangeCollector, as_dict
-from scripts.data.scan_phase import (
+from scripts.data.preprocess_phase import (
     CONFIG_NAME,
     CONFIG_PATH,
-    DatasetFieldWriter,
     SourceConfig,
     TargetConfig,
-    build_sequences,
-    scan_sequences,
+    build_phase_stages,
+    preprocess_sequences,
     search_sources,
 )
-from tests.scripts.conftest import SEQUENCES
+from tests.scripts.conftest import FRAMES, SEQUENCES
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def _composed(*overrides: str):
     with initialize_config_dir(config_dir=CONFIG_PATH, version_base=None):
         return compose(config_name=CONFIG_NAME, overrides=list(overrides))
+
+
+def _scan(phase_tree: Path, dest: Path, workers: int) -> None:
+    source = SourceConfig(root=str(phase_tree))
+    target = TargetConfig(root=str(dest), save_frames=True)
+    compute = ComputeConfig(device="cpu", workers=workers, progress_bar=False)
+
+    preprocess_sequences(build_phase_stages(source, target), compute)
+
+
+def _written(dest: Path) -> dict[str, list[float]]:
+    """Every frame written under `dest`, keyed by the sequence it belongs to."""
+    out: dict[str, list[float]] = {}
+    for folder in sorted(dest.rglob(PHASE_FLOAT_BIN)):
+        read = PhaseBinFolder(folder)
+        key = folder.relative_to(dest).as_posix()
+        out[key] = [float(np.asarray(read[index]).sum()) for index in range(len(read))]
+
+    return out
 
 
 def test_sources_are_found_under_the_root(phase_tree):
@@ -71,14 +93,14 @@ def test_every_schema_field_is_reachable_from_the_command_line(group, schema):
 @pytest.mark.parametrize("group", ("cpu", "cuda"))
 def test_a_compute_group_holds_the_fields_its_path_uses(group):
     # `workers` drives the CPU path and `gpu_ids` the CUDA one, so each group
-    # carries only its own. Everything else applies whichever device is chosen,
-    # and so has to appear in both.
+    # carries only its own -- and `plan_devices` now refuses the other's.
     own = {"cpu": "workers", "cuda": "gpu_ids"}
     composed = set(_composed(f"compute={group}")["compute"])
 
     shared = {field.name for field in fields(ComputeConfig)} - set(own.values())
     assert shared <= composed
     assert own[group] in composed
+    assert own["cuda" if group == "cpu" else "cpu"] not in composed
 
 
 def test_a_key_no_schema_declares_is_refused():
@@ -87,36 +109,45 @@ def test_a_key_no_schema_declares_is_refused():
         _composed("compute.no_such_field=1")
 
 
-def test_the_pool_returns_what_the_lone_path_does(phase_tree, tmp_path):
+def test_a_factory_offers_one_stage_per_sequence(phase_tree):
+    stages = build_phase_stages(SourceConfig(root=str(phase_tree)))
+
+    assert len(stages) == SEQUENCES
+
+
+def test_a_run_without_a_target_writes_nothing(phase_tree, tmp_path):
+    # `target_config=None` is how a run that only reads -- a cached source, or a
+    # timing pass -- says it wants no side branch.
+    dest = tmp_path / "out"
+    compute = ComputeConfig(device="cpu", workers=0, progress_bar=False)
+
+    preprocess_sequences(
+        build_phase_stages(SourceConfig(root=str(phase_tree))), compute
+    )
+
+    assert not dest.exists()
+
+
+def test_the_pool_writes_what_the_lone_path_does(phase_tree, tmp_path):
     # Covers the whole worker path in one assertion. `mpire` hands its workers a
     # positional signature that no type checker sees, so the pool can go wrong
     # while every other check stays green.
-    source_config = SourceConfig(root=str(phase_tree))
-    lone = ComputeConfig(device="cpu", workers=0, progress_bar=False)
-    pooled = ComputeConfig(device="cpu", workers=2, progress_bar=False)
+    _scan(phase_tree, tmp_path / "lone", workers=0)
+    _scan(phase_tree, tmp_path / "pooled", workers=2)
 
-    expected = DatasetRangeCollector(tmp_path / "lone")
-    actual = DatasetRangeCollector(tmp_path / "pooled")
-    scan_sequences(build_sequences(lone, source_config), lone, source_config, expected)
-    scan_sequences(
-        build_sequences(pooled, source_config), pooled, source_config, actual
-    )
-
-    assert as_dict(actual.collected()) == as_dict(expected.collected())
+    lone = _written(tmp_path / "lone")
+    assert len(lone) == SEQUENCES
+    assert all(len(frames) == FRAMES for frames in lone.values())
+    assert _written(tmp_path / "pooled") == lone
 
 
-def test_the_pool_writes_the_folders_a_container_points_it_at(phase_tree, tmp_path):
-    # A writer container crosses to the workers as a recipe, so the folders have
-    # to land under its root -- with nothing coming back to say they did.
-    out = tmp_path / "out"
-    source_config = SourceConfig(root=str(phase_tree))
-    compute = ComputeConfig(device="cpu", workers=2, progress_bar=False)
-    writers = DatasetFieldWriter(str(out), PHASE_FLOAT_BIN)
+def test_the_written_tree_mirrors_the_source(phase_tree, tmp_path):
+    # A destination crosses to the workers as a recipe, so the folders have to
+    # land under its root -- with nothing coming back to say they did.
+    dest = tmp_path / "out"
 
-    ranges = DatasetRangeCollector(tmp_path / "range")
-    sequences = build_sequences(compute, source_config)
-    scan_sequences(sequences, compute, source_config, ranges, writers)
+    _scan(phase_tree, dest, workers=2)
 
-    for sequence in ranges.collected().sequences:
-        written = PhaseBinFolder(out / sequence.source / PHASE_FLOAT_BIN)
-        assert len(written) == len(sequence.frames)
+    for sequence in range(SEQUENCES):
+        written = PhaseBinFolder(dest / f"TL_{sequence:02d}" / PHASE_FLOAT_BIN)
+        assert len(written) == FRAMES

@@ -8,7 +8,7 @@ import pytest
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import save_phase_bin
 
-# `scan_phase` reads this at import, and normally takes it from `.env`. Setting it
+# `preprocess_phase` reads this at import, and normally takes it from `.env`. Setting it
 # here keeps the tests runnable in a clone that has not generated one yet.
 CONFIGS_ROOT = str(Path(__file__).resolve().parents[2] / "configs")
 os.environ.setdefault("CONFIGS_ROOT", CONFIGS_ROOT)

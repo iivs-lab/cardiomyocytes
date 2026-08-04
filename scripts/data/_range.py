@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from kaparoo.filesystem.types import StrPath
     from torch import Tensor
 
-    from iivs_cardio.common.pipeline import Slot
+    from iivs_cardio.common.pipeline import Step
 
 
 class ValueRange(Protocol):
@@ -107,24 +107,25 @@ class SequenceRangeCollector:
         self._frames: list[FrameRange] = []
         self._finished = False
 
-    def observe(self, slot: Slot[tuple[Tensor, Path]]) -> None:
-        """Range this step's field, recording it under the file it came from.
+    def observe(self, step: Step[Tensor, Path]) -> None:
+        """Range this step's frame, recording it under the file it came from.
 
         Raises:
-            ValueError: If the field holds no finite value, naming the file.
+            ValueError: If the frame holds no finite value, naming the file.
         """
-        field, path = slot.require()
+        frame = step.require()
+        path = step.require_extra()
 
-        found = finite_range(field)
+        found = finite_range(frame)
         if found is None:
             msg = f"no finite value in {self._source}/{path.name}"
             raise ValueError(msg)
 
         self._frames.append(FrameRange(path.name, *found))
 
-    def __call__(self, slot: Slot[tuple[Tensor, Path]]) -> None:
-        """`observe`, so the collector attaches to a node as the hook it is."""
-        self.observe(slot)
+    def __call__(self, step: Step[Tensor, Path]) -> None:
+        """`observe`, so the collector attaches to a stage as the hook it is."""
+        self.observe(step)
 
     def __enter__(self) -> Self:
         return self

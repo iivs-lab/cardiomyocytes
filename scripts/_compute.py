@@ -3,7 +3,7 @@ from __future__ import annotations
 __all__ = ("ComputeConfig", "pin_threads", "plan_devices", "report_insights")
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import torch
@@ -23,7 +23,7 @@ _UNPINNED_THREADS = torch.get_num_threads()
 class ComputeConfig:
     device: str = "cpu"
     workers: int | None = None
-    gpu_ids: list[int] | None = field(default_factory=lambda: [0])
+    gpu_ids: list[int] | None = None
     progress_bar: bool = True
     insights: bool = False
     worker_lifespan: int | None = None
@@ -35,17 +35,30 @@ def plan_devices(config: ComputeConfig) -> tuple[Device, ...]:
     A single entry means this process does the work itself, so "sequential / many
     processes / many GPUs" is one length check downstream rather than three cases.
 
+    Each device reads one knob and ignores the other's, so setting the other's is
+    refused rather than dropped: a `workers` a CUDA run cannot honour is a wall
+    clock several times what the caller planned for, with nothing saying why.
+
     Raises:
-        ValueError: If the worker count is negative, or CUDA is asked for and the
-            driver reports no device.
+        ValueError: If a knob belongs to the other device -- `workers` under
+            CUDA, `gpu_ids` under CPU -- or the worker count is negative, or
+            CUDA is asked for and the driver reports no device.
     """
     if not Device.resolve(config.device).is_cuda:
+        if config.gpu_ids is not None:
+            msg = "`gpu_ids` has no effect on cpu: drop it, or set `compute=cuda`"
+            raise ValueError(msg)
+
         workers = unwrap_or_default(config.workers, DEFAULT_WORKERS)
         if workers < 0:
             msg = f"invalid worker count {workers}: expected 0 or more, or null"
             raise ValueError(msg)
 
         return Device.resolve_all(["cpu"] * max(workers, 1))
+
+    if config.workers is not None:
+        msg = "`workers` has no effect on cuda: use `gpu_ids` to pick the devices"
+        raise ValueError(msg)
 
     if not config.gpu_ids:
         devices = Device.visible_cuda()

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from iivs_cardio.common.pipeline import Slot, Steps
+from iivs_cardio.common.pipeline import SequenceStage, Step
 from scripts.data._range import (
     DatasetRange,
     DatasetRangeCollector,
@@ -130,17 +130,20 @@ def test_the_document_survives_the_serializer_it_is_written_with():
     assert encoded["sequences"][0]["frames"][0]["source"] == "00000_phase.bin"
 
 
-class _Fields:
-    """The slice of `DataSequence` a scan reads, as fields with their filenames."""
+class _Frames:
+    """The slice of `DataSequence` a scan reads, as frames with their filenames."""
 
-    def __init__(self, *fields: torch.Tensor) -> None:
-        self._fields = fields
+    def __init__(self, *frames: torch.Tensor) -> None:
+        self._frames = frames
 
     def __len__(self) -> int:
-        return len(self._fields)
+        return len(self._frames)
 
-    def get_pair(self, index: int) -> tuple[torch.Tensor, Path]:
-        return self._fields[index], Path(f"{index:05d}_phase.bin")
+    def get_item(self, index: int) -> torch.Tensor:
+        return self._frames[index]
+
+    def get_meta(self, index: int) -> Path:
+        return Path(f"{index:05d}_phase.bin")
 
 
 def _collector(tmp_path, provenance=None) -> DatasetRangeCollector:
@@ -149,8 +152,8 @@ def _collector(tmp_path, provenance=None) -> DatasetRangeCollector:
 
 def _scan(ranges: DatasetRangeCollector, source: str, *bounds: tuple[float, float]):
     """Range one sequence the way a driver would: attach, run, call nothing."""
-    fields = _Fields(*(torch.tensor([[low, high]]) for low, high in bounds))
-    Steps(fields).attach(ranges.collector_for(source)).run()
+    frames = _Frames(*(torch.tensor([[low, high]]) for low, high in bounds))
+    SequenceStage(frames).register_hooks(ranges.collector_for(source)).run()
 
 
 def test_a_finished_collector_hands_itself_over(tmp_path):
@@ -195,12 +198,12 @@ def test_a_collector_writes_the_document_it_gathered(tmp_path):
 
 
 def test_a_run_tells_the_collector_the_traversal_ended(tmp_path):
-    # Attached as itself, so `Node.run` can signal it -- nothing calls `collected`
+    # Registered as itself, so `Stage.run` can signal it -- nothing calls `collected`
     # at the right moment by hand.
     collector = _collector(tmp_path).collector_for("seq")
-    fields = _Fields(torch.tensor([[0.0, 2.0]]), torch.tensor([[-1.0, 1.0]]))
+    frames = _Frames(torch.tensor([[0.0, 2.0]]), torch.tensor([[-1.0, 1.0]]))
 
-    Steps(fields).attach(collector).run()
+    SequenceStage(frames).register_hooks(collector).run()
 
     ranged = collector.collected()
     assert (ranged.min_value, ranged.max_value) == (-1.0, 2.0)
@@ -212,7 +215,7 @@ def test_a_run_tells_the_collector_the_traversal_ended(tmp_path):
 
 def test_a_collector_refuses_a_fold_over_a_prefix(tmp_path):
     collector = _collector(tmp_path).collector_for("seq")
-    collector.observe(Slot(0, (torch.tensor([[1.0]]), Path("00000_phase.bin"))))
+    collector.observe(Step(0, torch.tensor([[1.0]]), Path("00000_phase.bin")))
 
     with pytest.raises(ValueError, match="the traversal of seq did not finish"):
         collector.collected()
@@ -221,15 +224,16 @@ def test_a_collector_refuses_a_fold_over_a_prefix(tmp_path):
 def test_a_collector_refuses_after_a_traversal_that_died(tmp_path):
     # The steps it saw are a prefix, not this sequence's range, and reporting
     # them would put a hole in the dataset's bounds where nobody would see it.
-    def explode(slot: Slot[tuple[torch.Tensor, Path]]) -> None:
+    def explode(step: Step[torch.Tensor, Path]) -> None:
         msg = "the run gave up"
         raise RuntimeError(msg)
 
     collector = _collector(tmp_path).collector_for("seq")
-    node = Steps(_Fields(torch.tensor([[1.0]]))).attach(collector, explode)
+    stage = SequenceStage(_Frames(torch.tensor([[1.0]])))
+    stage.register_hooks(collector, explode)
 
     with pytest.raises(RuntimeError, match="the run gave up"):
-        node.run()
+        stage.run()
 
     with pytest.raises(ValueError, match="did not finish"):
         collector.collected()
@@ -237,16 +241,16 @@ def test_a_collector_refuses_after_a_traversal_that_died(tmp_path):
 
 def test_a_traversal_that_died_hands_over_nothing(tmp_path):
     # A prefix cannot reach the dataset's bounds, and no driver had to know.
-    def explode(slot: Slot[tuple[torch.Tensor, Path]]) -> None:
+    def explode(step: Step[torch.Tensor, Path]) -> None:
         msg = "the run gave up"
         raise RuntimeError(msg)
 
     ranges = _collector(tmp_path)
-    node = Steps(_Fields(torch.tensor([[1.0]])))
-    node.attach(ranges.collector_for("seq"), explode)
+    stage = SequenceStage(_Frames(torch.tensor([[1.0]])))
+    stage.register_hooks(ranges.collector_for("seq"), explode)
 
     with pytest.raises(RuntimeError, match="the run gave up"):
-        node.run()
+        stage.run()
 
     with pytest.raises(ValueError, match="holds nothing"):
         ranges.collected()

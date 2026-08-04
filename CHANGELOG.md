@@ -16,19 +16,34 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   each of those keeps a process-global current device, and CuPy's was never set,
   so it stayed on device 0 while `gpumat_to_cupy` wrapped pointers cv2 had
   allocated elsewhere.
-- `save_phase_bin_folder`, writing filtered frames as a numbered `.bin` folder
-  `PhaseBinFolder` reads back. Frames are numbered from `0`, so a strided read
-  writes a dense sequence, and the folder is staged: a failure part-way leaves
-  any existing destination untouched.
 - `finite_range` in `iivs_cardio/common/range.py`, the `(min, max)` of a frame's
   finite values or `None` when it has none, so a caller holding a frame can range
   it without a second read. Non-finite values are ignored rather than propagated,
   which keeps a masked frame's NaN background from swallowing the range.
-- `scan_phase` writes the filtered frames when `target.save_frames` is
-  set, in the same traversal that ranges them. `target.overwrite` decides whether
-  an output already under `target.root` may be replaced, and `target.range_file`
-  names the range document -- `.json` is added when the name lacks it.
-- `scan_phase` refuses `target.save_frames` in a `--multirun`. Frames go to
+- The pipeline model in `iivs_cardio/common/pipeline.py`. `Step` carries an
+  index, the value it describes or its absence, and whatever the stream itself
+  does not consume; `Stage` is an indexed source that fills each step once and
+  keeps a window of them, so one filtered frame reaches every consumer that asks
+  for it rather than being computed per consumer (+94% for a second read at
+  median `(2,2,2)`). Hooks are the side branches, firing once per index however
+  often a step is asked for, and `Stage.run` opens every hook in the graph
+  together -- a stage feeding two others is reached along both paths and still
+  opened once, and a failure part-way leaves no folder behind rather than some
+  of them. `SequenceStage` adapts any `DataSequence`, which is what makes an
+  online source and a cached folder the same thing to whatever reads them.
+- `KoalaFrameWriter`, writing one frame per step into a numbered folder the
+  Koala readers discover by, staged and moved into place on a clean exit. The
+  push-shaped counterpart of `save_koala_frames`: the per-file format arrives as
+  `save`, so one class serves phase, flow and metric frames, and a gap in the
+  indices is refused rather than closed. `phase_frame_writer` binds the phase
+  `.bin` format to it, taking the calibration as numbers rather than reaching
+  into a reader for them.
+- `preprocess_phase` writes the filtered frames when `target.save_frames` is set.
+  `target.overwrite` decides whether an output already under `target.root` may
+  be replaced. `FrameDestination` carries what every sequence's writer shares
+  and `PhaseStageFactory` hands out a stage with its hooks already registered,
+  so whatever owns a stage never wires that stage's side branches.
+- `preprocess_phase` refuses `target.save_frames` in a `--multirun`. Frames go to
   `target.root`, which carries no job number, so every job of a sweep would write
   the one tree: 1.45 TB apiece, in turn, and nothing in the tree would say which
   config finally left it there. `is_multirun` is what answers the question.
@@ -52,16 +67,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   wrong ways -- a bare unpack error, a channel count the array never had, or a
   broadcast failure at the assignment -- and `_cv_type` names the pairs it takes
   from the table beside it.
-- `scan_phase` ranges every sequence unconditionally, so `save_ranges`
-  only decides whether the document is written; a run asking for frames alone
-  used to do nothing.
-- The range document keeps `phase_unit`, `frame_step` and the filter, dropping
-  what `.hydra/config.yaml` and each `SequenceRange.source` already answer. Its
-  `version` is gone -- unread, and not bumped when the shape above changed --
-  and so is the timestamp in its filename, which never separated the jobs of a
-  sweep (they share one process, and so one import) where the per-job directory
-  always did. Each record now leads with `source`, as `FrameRange` already did.
-- `scan_phase` runs its workers through `mpire`, which retires
+- `plan_devices` refuses the knob that belongs to the other device -- `workers`
+  under CUDA, `gpu_ids` under CPU -- rather than dropping it silently. A worker
+  count a CUDA run cannot honour is a wall clock several times what the caller
+  planned for, with nothing saying why; `gpu_ids` defaults to `None` so that a
+  value the caller wrote can be told from one they did not.
+- `preprocess_phase` runs its workers through `mpire`, which retires
   `_WORKER_DEVICE`, the `SimpleQueue` that filled it and `_adopt_device`: a
   worker picks its device out of `shared_objects` by worker id, and binds the
   process to it per task rather than once, which `activate` is cheap enough for.
@@ -72,8 +83,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The script helpers split by what they know: `scripts/_hydra.py` holds the
   hydra boundary (`apply_schema`, `output_directory`, `is_multirun`),
   `scripts/_compute.py` the machine's division (`ComputeConfig`, `plan_devices`,
-  `pin_threads`, `report_insights`), and `scripts/_range.py` the shape a run
-  reports its value ranges in (`ValueRange`, `CompositeRange`, `FrameRange`,
+  `pin_threads`, `report_insights`), and `scripts/data/_range.py` the shape a
+  run reports its value ranges in (`ValueRange`, `CompositeRange`, `FrameRange`,
   `SequenceRange`, `DatasetRange`, `as_dict`). `scripts/_config.py` is gone into
   the first. The range types are a document schema rather than library code --
   each `source` is a path relative to something only the document fixes -- which
