@@ -27,15 +27,13 @@
 flowchart LR
   raw[/"원본 위상 폴더"/] ==> S1
   c1[/"캐시된 전처리 폴더"/] -. "또는 로드" .-> S1
-  S1["(1) 전처리"] ==> P["전처리된 위상"]
+  S1["(1) 전처리<br/>→ 전처리된 위상"] ==> S2
 
-  P ==> S2
   c2[/"캐시된 flow 폴더"/] -. "또는 로드" .-> S2
-  S2["(2) 모션 추출"] ==> FL["flow 프레임"]
+  S2["(2) 모션 추출<br/>→ flow 프레임"] ==> S3
 
-  P ==> S3
-  FL ==> S3["(3) 지표 계산"]
-  S3 ==> D["지표별 프레임"]
+  S1 ==> S3
+  S3["(3) 지표 계산<br/>→ 지표별 프레임"]
 
   subgraph H1 ["(1) 곁가지"]
     direction LR
@@ -53,9 +51,9 @@ flowchart LR
     B3["B · 저장"]
   end
 
-  P -.-> H1
-  FL -.-> H2
-  D -.-> H3
+  S1 -.-> H1
+  S2 -.-> H2
+  S3 -.-> H3
 
   classDef stage stroke-width:4px
   class S1,S2,S3 stage
