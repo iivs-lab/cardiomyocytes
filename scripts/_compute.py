@@ -1,15 +1,27 @@
 from __future__ import annotations
 
-__all__ = ("ComputeConfig", "pin_threads", "plan_devices", "report_insights")
+__all__ = (
+    "ComputeConfig",
+    "StageFactory",
+    "pin_threads",
+    "plan_devices",
+    "report_insights",
+    "run_all",
+)
 
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 import torch
 from kaparoo.utils.optional import unwrap_or_default
+from mpire import WorkerPool
+from tqdm import trange
 
 from iivs_cardio.common.device import Device
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
 
 DEFAULT_WORKERS = os.cpu_count() or 1
 
@@ -93,6 +105,86 @@ def pin_threads(workers: int) -> None:
         return
 
     torch.set_num_threads(max(1, _UNPINNED_THREADS // workers))
+
+
+class StageFactory(Protocol):
+    """A run's work, divided into items a device can take one at a time.
+
+    What a runner needs and no more: how many items there are, how to run one of
+    them on a device, and a bracket around the whole run for the side branches
+    that only finish once every item has. Composing the graph an item is run
+    through stays inside the implementation, which is what keeps this the same
+    shape at every stage of the pipeline -- an estimator needs the filter's
+    stage and a metric needs both, and neither divergence reaches here.
+    """
+
+    def __len__(self) -> int: ...
+
+    def run_one(self, index: int, device: Device, /) -> None: ...
+
+    def running(self) -> AbstractContextManager[Any]: ...
+
+
+def _run_on_worker(
+    worker_id: int, shared: tuple[tuple[Device, ...], StageFactory], index: int
+) -> None:
+    devices, stages = shared
+
+    device = devices[worker_id]
+    device.activate()
+    pin_threads(len(devices))
+
+    stages.run_one(index, device)
+
+
+def run_all(
+    stages: StageFactory,
+    config: ComputeConfig,
+    *,
+    desc: str = "running",
+    unit: str = "it",
+) -> None:
+    """Run everything `stages` offers, sequentially or across a worker pool.
+
+    The lone path goes through the same call the pool does, with worker `0` being
+    this process: `plan_devices` answers one device for it, so the two differ in
+    where the loop lives rather than in what an item gets.
+
+    Args:
+        stages: What to run, and what to hold open around the run.
+        config: Which devices to divide the work across, and how to report it.
+        desc: What the progress bar calls this run.
+        unit: What the progress bar calls one item of it.
+    """
+    num_stages = len(stages)
+
+    devices = plan_devices(config)[:num_stages]
+    shared = (devices, stages)
+    pbar_options = {"desc": desc, "unit": unit}
+
+    with stages.running():
+        if (num_workers := len(devices)) == 1:
+            indices = trange(
+                num_stages, disable=not config.progress_bar, **pbar_options
+            )
+            for index in indices:
+                _run_on_worker(0, shared, index)
+            return
+
+        with WorkerPool(
+            n_jobs=num_workers,
+            shared_objects=shared,
+            pass_worker_id=True,
+            enable_insights=config.insights,
+        ) as pool:
+            pool.map(
+                _run_on_worker,
+                range(num_stages),
+                chunk_size=1,
+                worker_lifespan=config.worker_lifespan,
+                progress_bar=config.progress_bar,
+                progress_bar_options=pbar_options,
+            )
 
 
 def report_insights(insights: dict[str, Any]) -> None:

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 import hydra
 from dotenv import load_dotenv
@@ -12,19 +13,17 @@ from iivs.dhm.data.phase import resolve_phase_unit, search_phase_bin_folders
 from kaparoo.filesystem import stringify_path
 from kaparoo.filesystem.search import select
 from kaparoo.utils.optional import unwrap_or_default
-from mpire import WorkerPool
 from omegaconf import MISSING
-from tqdm import tqdm
 
 from iivs_cardio.common.pipeline import SequenceStage
 from iivs_cardio.data.phase import phase_frame_writer
 from iivs_cardio.data.transforms.filtering import FilteredSequence
-from scripts._compute import ComputeConfig, pin_threads, plan_devices
+from scripts._compute import ComputeConfig, run_all
 from scripts._hydra import apply_schema, is_multirun
 from scripts.data._filtering import build_filter_kernel
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
 
     from iivs.dhm.data.phase import PhaseFileFolder
     from omegaconf import DictConfig
@@ -40,7 +39,6 @@ CONFIG_PATH = os.environ["CONFIGS_ROOT"]
 CONFIG_NAME = "data/preprocess_phase/config"
 
 type PhaseFilteredSequence = FilteredSequence[PhaseFileFolder, Path]
-type PreprocessShared = tuple[tuple[Device, ...], PhaseStageFactory]
 
 
 @dataclass
@@ -84,10 +82,10 @@ class PhaseStageFactory:
     def __init__(
         self,
         sequences: Sequence[PhaseFilteredSequence],
-        *hooks: FrameDestination,
+        *branches: FrameDestination,
     ) -> None:
         self._sequences = sequences
-        self._hooks = hooks
+        self._branches = branches
 
     def __len__(self) -> int:
         return len(self._sequences)
@@ -97,9 +95,23 @@ class PhaseStageFactory:
         sequence.device = device
 
         stage = SequenceStage(sequence)
-        stage.register_hooks(*(hook.hook_for(sequence.origin) for hook in self._hooks))
+        stage.register_hooks(
+            *(branch.hook_for(sequence.origin) for branch in self._branches)
+        )
 
         return stage
+
+    def run_one(self, index: int, device: Device) -> None:
+        self.stage_for(index, device).run()
+
+    @contextmanager
+    def running(self) -> Iterator[Self]:
+        with ExitStack() as stack:
+            for branch in self._branches:
+                if isinstance(branch, AbstractContextManager):
+                    stack.enter_context(branch)
+
+            yield self
 
 
 def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
@@ -163,48 +175,6 @@ def build_phase_stages(
     return PhaseStageFactory(build_sequences(source_config, filter_config), *hooks)
 
 
-def preprocess_sequence(worker_id: int, shared: PreprocessShared, index: int) -> None:
-    devices, stages = shared
-
-    device = devices[worker_id]
-    device.activate()
-    pin_threads(len(devices))
-
-    stages.stage_for(index, device).run()
-
-
-def preprocess_sequences(
-    stages: PhaseStageFactory,
-    compute_config: ComputeConfig,
-) -> None:
-    pbar_enabled = compute_config.progress_bar
-    pbar_options = {"desc": "preprocessing", "unit": "seq"}
-
-    devices = plan_devices(compute_config)[: len(stages)]
-    shared: PreprocessShared = (devices, stages)
-
-    if (num_workers := len(devices)) == 1:
-        indices = tqdm(range(len(stages)), disable=not pbar_enabled, **pbar_options)
-        for index in indices:
-            preprocess_sequence(0, shared, index)
-        return
-
-    with WorkerPool(
-        n_jobs=num_workers,
-        shared_objects=shared,
-        pass_worker_id=True,
-        enable_insights=compute_config.insights,
-    ) as pool:
-        pool.map(
-            preprocess_sequence,
-            range(len(stages)),
-            chunk_size=1,
-            worker_lifespan=compute_config.worker_lifespan,
-            progress_bar=pbar_enabled,
-            progress_bar_options=pbar_options,
-        )
-
-
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name=CONFIG_NAME)
 def main(cfg: DictConfig) -> None:
     compute_config = apply_schema(ComputeConfig, cfg.compute)
@@ -217,7 +187,7 @@ def main(cfg: DictConfig) -> None:
         raise ValueError(msg)
 
     stages = build_phase_stages(source_config, target_config, filter_config)
-    preprocess_sequences(stages, compute_config)
+    run_all(stages, compute_config, desc="preprocessing", unit="seq")
 
 
 if __name__ == "__main__":

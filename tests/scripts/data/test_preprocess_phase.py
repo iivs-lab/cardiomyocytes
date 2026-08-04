@@ -9,14 +9,13 @@ from hydra import compose, initialize_config_dir
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import PhaseBinFolder
 
-from scripts._compute import ComputeConfig
+from scripts._compute import ComputeConfig, run_all
 from scripts.data.preprocess_phase import (
     CONFIG_NAME,
     CONFIG_PATH,
     SourceConfig,
     TargetConfig,
     build_phase_stages,
-    preprocess_sequences,
     search_sources,
 )
 from tests.scripts.conftest import FRAMES, SEQUENCES
@@ -35,7 +34,7 @@ def _scan(phase_tree: Path, dest: Path, workers: int) -> None:
     target = TargetConfig(root=str(dest), save_frames=True)
     compute = ComputeConfig(device="cpu", workers=workers, progress_bar=False)
 
-    preprocess_sequences(build_phase_stages(source, target), compute)
+    run_all(build_phase_stages(source, target), compute)
 
 
 def _written(dest: Path) -> dict[str, list[float]]:
@@ -121,9 +120,7 @@ def test_a_run_without_a_target_writes_nothing(phase_tree, tmp_path):
     dest = tmp_path / "out"
     compute = ComputeConfig(device="cpu", workers=0, progress_bar=False)
 
-    preprocess_sequences(
-        build_phase_stages(SourceConfig(root=str(phase_tree))), compute
-    )
+    run_all(build_phase_stages(SourceConfig(root=str(phase_tree))), compute)
 
     assert not dest.exists()
 
