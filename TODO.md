@@ -199,23 +199,6 @@ flow가 같은 장치면 프레임이 장치를 떠나지 않는다. 나누면 �
   추정기가 못 얻을 수 있다. `empty_cache()`는 **시퀀스 경계**에 — 프레임 경계에 두면 비싼
   해제를 손으로 매 프레임 하는 셈이다.
 
-## iivs-lib 소비 경계 (⚠️ 코드 재검증 필수)
-
-이 프로젝트는 iivs-lib를 **소비만** 한다. flow·warping·kinematic·kinetic·OPD variance·필터는
-전부 이 프로젝트 소유.
-
-- **스케일·헤더**: `PhaseBinHeader`가 `pixel_size`(m)와 `height_scale`(m/rad)를 들고 있음 —
-  설치본에서 확인 완료. `OPDConverter.opd_scale`, `DryMassCalculator.drymass_scale`은 아직
-  **미확인 추정**.
-- ⚠️ **타입 함정**: `PhaseFloatSequence`는 **본문 없는 마커**라 `DataSequence` 표면만 준다.
-  `frame_shape`·`value_range()`·`header`는 **구체 클래스**(`PhaseFileList`/`PhaseBinFolder`)
-  에만 있다 — 파라미터를 마커로 넓게 받으면 스케일·통계·shape를 포기하게 된다.
-- **`iivs-lib[torch]`를 어디까지 쓸지 정할 것.** 이 extra는 `iivs.dhm.analysis.pytorch`
-  (`phase_to_opd`, `calc_drymass`)와 `iivs.common.data.pytorch`(마스크 지원 `Mean`/
-  `Variance`/`Norm` reduction)를 연다. tensor-in/tensor-out이고 device와 autograd를
-  보존한다. **이것이 (3)단계의 상당 부분과 겹친다** — 마스크 지원 공간 reduction은 곧
-  필드→시그널 요약 그 자체다. 양마다 소유자를 하나만 정할 것(단일 수학 출처).
-
 ## 파이프라인·컨테이너는 처음부터 다시 설계 중
 
 트리에 있는 `Slot`·`Node`·`Steps`·`FieldWriter`·range collector들은 수렴하지 못한 대화에서
@@ -454,7 +437,15 @@ ML 런타임·대용량 산출물을 **구조로 커밋하지 말고 gitignore**
 - **reduction** — 지표마다 고정(벡터장은 norm의 평균, OPD variance는 평균, dry mass는 합).
   설정으로 고르는 값이 아니다.
 - **시그널 저장** — 지표마다 `.npy`, `(T′,)` float32.
-- **`iivs-lib[torch]`와의 경계** — 위 공통 항목 참조. 마스크 지원 reduction이 겹친다.
+- **`iivs-lib`이 이미 가진 것부터 확인할 것.** `iivs-lib[torch]`는 이미 의존성이고
+  (`>=0.3.1`), 이 단계가 쓸 것이 상당수 거기 있다 — `iivs.dhm.analysis.pytorch`에
+  `OpticalPathDifference`·`DryMass`·`OpticalHeight`·`calc_drymass` 등이,
+  `iivs.common.data.pytorch`에 `MaskedReduction`·`Mean`·`Sum`·`Norm`·`Variance`·
+  `apply_mask`·`region_stack`이 있다. **마스크 지원 reduction은 곧 필드→시그널 요약
+  그 자체**이고, `Variance`는 OPD variance와 겹친다.
+
+  이름만 확인했고 시그니처와 의미는 안 봤다. 양마다 소유자를 하나만 정할 것 — 이 프로젝트가
+  다시 쓰는 것은 거기 없는 것뿐이어야 한다.
 
 ---
 
