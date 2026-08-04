@@ -15,17 +15,20 @@ from kaparoo.filesystem.search import select
 from kaparoo.utils.optional import unwrap_or_default
 from omegaconf import MISSING
 
-from iivs_cardio.common.pipeline import SequenceStage
+from iivs_cardio.common.pipeline import SequenceStage, SideBranch
 from iivs_cardio.data.phase import phase_frame_writer
 from iivs_cardio.data.transforms.filtering import FilteredSequence
 from scripts._compute import ComputeConfig, run_all
-from scripts._hydra import apply_schema, is_multirun
-from scripts.data._filtering import build_filter_kernel
+from scripts._hydra import apply_schema, is_multirun, output_directory
+from scripts.data._filtering import build_filter_kernel, describe_filter_kernel
+from scripts.data._range import RangeDocument
+from scripts.data._source import sequence_name
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
     from iivs.dhm.data.phase import PhaseFileFolder
+    from kaparoo.filesystem.types import StrPath
     from omegaconf import DictConfig
     from torch import Tensor
 
@@ -56,18 +59,18 @@ class TargetConfig:
     root: str = MISSING
     overwrite: bool = False
     save_frames: bool = False
+    save_ranges: bool = True
+    range_file: str = "phase_range"
 
 
 @dataclass(frozen=True, slots=True)
 class FrameDestination:
-    source_root: str
     target_root: str
     subpath: str
     overwrite: bool = False
 
-    def hook_for(self, origin: PhaseFileFolder) -> KoalaFrameWriter[Tensor]:
+    def hook_for(self, name: str, origin: PhaseFileFolder) -> KoalaFrameWriter[Tensor]:
         header = origin.header
-        name = stringify_path(origin.root, after=self.source_root, before=self.subpath)
 
         return phase_frame_writer(
             Path(self.target_root, name, self.subpath),
@@ -82,9 +85,13 @@ class PhaseStageFactory:
     def __init__(
         self,
         sequences: Sequence[PhaseFilteredSequence],
-        *branches: FrameDestination,
+        source_root: str,
+        subpath: str,
+        *branches: SideBranch[PhaseFileFolder, Tensor, Path],
     ) -> None:
         self._sequences = sequences
+        self._source_root = source_root
+        self._subpath = subpath
         self._branches = branches
 
     def __len__(self) -> int:
@@ -94,9 +101,12 @@ class PhaseStageFactory:
         sequence = self._sequences[index]
         sequence.device = device
 
+        origin = sequence.origin
+        name = sequence_name(origin, self._source_root, self._subpath)
+
         stage = SequenceStage(sequence)
         stage.register_hooks(
-            *(branch.hook_for(sequence.origin) for branch in self._branches)
+            *(branch.hook_for(name, origin) for branch in self._branches)
         )
 
         return stage
@@ -157,22 +167,53 @@ def build_sequences(
     return [build_sequence(source) for source in sources]
 
 
+def range_provenance(
+    source_config: SourceConfig, filter_config: DictConfig | None = None
+) -> dict[str, object]:
+    # What a reader of the numbers cannot get from the numbers. The rest of the
+    # run is in `.hydra/` beside the document.
+    return {
+        "source": {
+            "phase_unit": source_config.phase_unit,
+            "frame_step": source_config.frame_step,
+        },
+        "filter": describe_filter_kernel(filter_config),
+    }
+
+
 def build_phase_stages(
     source_config: SourceConfig,
     target_config: TargetConfig | None = None,
     filter_config: DictConfig | None = None,
+    *,
+    output_root: StrPath | None = None,
 ) -> PhaseStageFactory:
-    hooks: list[FrameDestination] = []
+    subpath = unwrap_or_default(source_config.subpath, PHASE_FLOAT_BIN)
+    branches: list[SideBranch[PhaseFileFolder, Tensor, Path]] = []
+
     if target_config is not None and target_config.save_frames:
-        hooks.append(
+        branches.append(
             FrameDestination(
-                source_config.root,
-                target_config.root,
-                unwrap_or_default(source_config.subpath, PHASE_FLOAT_BIN),
+                target_config.root, subpath, overwrite=target_config.overwrite
+            )
+        )
+
+    if target_config is not None and target_config.save_ranges:
+        root = unwrap_or_default(output_root, target_config.root)
+        branches.append(
+            RangeDocument(
+                Path(root, target_config.range_file),
+                provenance=range_provenance(source_config, filter_config),
                 overwrite=target_config.overwrite,
             )
         )
-    return PhaseStageFactory(build_sequences(source_config, filter_config), *hooks)
+
+    return PhaseStageFactory(
+        build_sequences(source_config, filter_config),
+        source_config.root,
+        subpath,
+        *branches,
+    )
 
 
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name=CONFIG_NAME)
@@ -182,11 +223,17 @@ def main(cfg: DictConfig) -> None:
     target_config = apply_schema(TargetConfig, cfg.target)
     filter_config: DictConfig | None = cfg.filter
 
+    if not (target_config.save_ranges or target_config.save_frames):
+        msg = "nothing to do: set `target.save_ranges` or `target.save_frames`"
+        raise ValueError(msg)
+
     if target_config.save_frames and is_multirun():
         msg = "cannot write frames in a sweep: run the winning config alone instead"
         raise ValueError(msg)
 
-    stages = build_phase_stages(source_config, target_config, filter_config)
+    stages = build_phase_stages(
+        source_config, target_config, filter_config, output_root=output_directory()
+    )
     run_all(stages, compute_config, desc="preprocessing", unit="seq")
 
 

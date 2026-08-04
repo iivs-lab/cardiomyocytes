@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import fields
 from typing import TYPE_CHECKING
 
@@ -29,12 +30,25 @@ def _composed(*overrides: str):
         return compose(config_name=CONFIG_NAME, overrides=list(overrides))
 
 
-def _scan(phase_tree: Path, dest: Path, workers: int) -> None:
+def _scan(
+    phase_tree: Path,
+    dest: Path,
+    workers: int,
+    *,
+    save_frames: bool = True,
+    save_ranges: bool = False,
+) -> None:
     source = SourceConfig(root=str(phase_tree))
-    target = TargetConfig(root=str(dest), save_frames=True)
     compute = ComputeConfig(device="cpu", workers=workers, progress_bar=False)
+    config = TargetConfig(
+        root=str(dest), save_frames=save_frames, save_ranges=save_ranges
+    )
 
-    run_all(build_phase_stages(source, target), compute)
+    run_all(build_phase_stages(source, config), compute)
+
+
+def _document(dest: Path) -> dict:
+    return json.loads((dest / "phase_range.json").read_text(encoding="utf-8"))
 
 
 def _written(dest: Path) -> dict[str, list[float]]:
@@ -123,6 +137,32 @@ def test_a_run_without_a_target_writes_nothing(phase_tree, tmp_path):
     run_all(build_phase_stages(SourceConfig(root=str(phase_tree))), compute)
 
     assert not dest.exists()
+
+
+def test_the_pool_reports_what_the_lone_path_does(phase_tree, tmp_path):
+    # The range branch gathers through files a worker leaves behind, so the two
+    # paths agree only if what crosses the process boundary is complete.
+    _scan(phase_tree, tmp_path / "lone", workers=0, save_frames=False, save_ranges=True)
+    _scan(
+        phase_tree, tmp_path / "pooled", workers=2, save_frames=False, save_ranges=True
+    )
+
+    lone = _document(tmp_path / "lone")
+    assert [s["source"] for s in lone["dataset"]["sequences"]] == [
+        f"TL_{index:02d}" for index in range(SEQUENCES)
+    ]
+    assert all(len(s["frames"]) == FRAMES for s in lone["dataset"]["sequences"])
+    assert _document(tmp_path / "pooled")["dataset"] == lone["dataset"]
+
+
+def test_the_parts_a_run_gathered_stay_beside_the_document(phase_tree, tmp_path):
+    dest = tmp_path / "out"
+
+    _scan(phase_tree, dest, workers=2, save_frames=False, save_ranges=True)
+
+    assert sorted(p.name for p in (dest / "phase_range.parts").iterdir()) == [
+        f"TL_{index:02d}.json" for index in range(SEQUENCES)
+    ]
 
 
 def test_the_pool_writes_what_the_lone_path_does(phase_tree, tmp_path):

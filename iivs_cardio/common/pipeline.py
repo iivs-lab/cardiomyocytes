@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-__all__ = ("Hook", "SequenceStage", "Stage", "Step")
+__all__ = ("Hook", "SequenceStage", "SideBranch", "Stage", "Step")
 
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Protocol, Self
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -35,6 +35,10 @@ class Step[T, E = None]:
 
 
 type Hook[T, E = None] = Callable[[Step[T, E]], None]
+
+
+class SideBranch[S, T, E = None](Protocol):
+    def hook_for(self, name: str, source: S, /) -> Hook[T, E]: ...
 
 
 class Stage[T, E = None](ABC):

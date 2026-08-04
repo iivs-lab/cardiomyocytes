@@ -67,6 +67,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   wrong ways -- a bare unpack error, a channel count the array never had, or a
   broadcast failure at the assignment -- and `_cv_type` names the pairs it takes
   from the table beside it.
+- `preprocess_phase` writes the range document again, under
+  `target.save_ranges` / `target.range_file`. `RangeDocument` is a side branch
+  with a lifetime: it hands each sequence a `SequenceRangeMeter`, and folds what
+  the meters left once every sequence has run. Each meter writes its own
+  `SequenceRange` into a `<document>.parts` folder on a clean exit, which is how
+  an answer leaves a worker at all -- `shared_objects` travels one way, so a
+  copy the workers filled never comes home. A traversal that died writes
+  nothing, since a prefix folded into the dataset's bounds is a hole nobody
+  would see; the parts that did finish stay behind, and entering clears them so
+  a re-run into the same output directory cannot fold an earlier run's answers
+  in with its own.
+- `SideBranch` in `iivs_cardio/common/pipeline.py`, what a stage factory holds:
+  something that hands a named sequence a hook. Being a context manager is
+  optional and is what tells the two apart -- a frame writer commits itself per
+  sequence, where a range document only finishes once every sequence has, and
+  `StageFactory.running` brackets the ones that need it exactly as `Stage.run`
+  brackets the hooks a level down.
 - `plan_devices` refuses the knob that belongs to the other device -- `workers`
   under CUDA, `gpu_ids` under CPU -- rather than dropping it silently. A worker
   count a CUDA run cannot honour is a wall clock several times what the caller

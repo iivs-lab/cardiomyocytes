@@ -9,9 +9,10 @@ import torch
 from iivs_cardio.common.pipeline import SequenceStage, Step
 from scripts.data._range import (
     DatasetRange,
-    DatasetRangeCollector,
     FrameRange,
+    RangeDocument,
     SequenceRange,
+    SequenceRangeMeter,
     as_dict,
 )
 
@@ -146,66 +147,28 @@ class _Frames:
         return Path(f"{index:05d}_phase.bin")
 
 
-def _collector(tmp_path, provenance=None) -> DatasetRangeCollector:
-    return DatasetRangeCollector(tmp_path / "range", provenance)
+def _meter(tmp_path, source: str = "seq") -> SequenceRangeMeter:
+    return SequenceRangeMeter(source, tmp_path / "range.parts")
 
 
-def _scan(ranges: DatasetRangeCollector, source: str, *bounds: tuple[float, float]):
-    """Range one sequence the way a driver would: attach, run, call nothing."""
-    frames = _Frames(*(torch.tensor([[low, high]]) for low, high in bounds))
-    SequenceStage(frames).register_hooks(ranges.collector_for(source)).run()
+def _range(*bounds: tuple[float, float]) -> _Frames:
+    return _Frames(*(torch.tensor([[low, high]]) for low, high in bounds))
 
 
-def test_a_finished_collector_hands_itself_over(tmp_path):
-    ranges = _collector(tmp_path)
-
-    _scan(ranges, "a", (-1.0, 2.0))
-    _scan(ranges, "b", (-3.0, 1.0))
-
-    dataset = ranges.collected()
-    assert dataset.min_value == -3.0
-    assert dataset.max_value == 2.0
-    assert dataset.min_index == 1  # the second sequence held the low
-    assert dataset.max_index == 0
+def _scan(meter: SequenceRangeMeter, *bounds: tuple[float, float]) -> None:
+    """Range one sequence the way a stage would: register, run, call nothing."""
+    SequenceStage(_range(*bounds)).register_hooks(meter).run()
 
 
-def test_a_collector_absorbs_across_calls(tmp_path):
-    # Results come back per worker, so absorbing is not a single handover.
-    ranges = _collector(tmp_path)
-
-    _scan(ranges, "a", (0.0, 1.0))
-    _scan(ranges, "b", (0.0, 5.0))
-
-    assert ranges.collected().max_value == 5.0
+# ---------------------------------- the meter ----------------------------------
 
 
-def test_a_collector_that_absorbed_nothing_refuses_to_fold(tmp_path):
-    with pytest.raises(ValueError, match="holds nothing"):
-        _collector(tmp_path).collected()
+def test_a_meter_ranges_every_frame_under_the_file_it_came_from(tmp_path):
+    meter = _meter(tmp_path)
 
+    _scan(meter, (0.0, 2.0), (-1.0, 1.0))
 
-def test_a_collector_writes_the_document_it_gathered(tmp_path):
-    ranges = _collector(tmp_path, {"filter": "identity"})
-    _scan(ranges, "a", (-1.0, 2.0))
-
-    path = ranges.save()
-
-    assert path == tmp_path / "range.json"
-    document = json.loads(path.read_text(encoding="utf-8"))
-    assert document["filter"] == "identity"
-    assert document["dataset"]["max_value"] == 2.0
-    assert document["dataset"]["sequences"][0]["source"] == "a"
-
-
-def test_a_run_tells_the_collector_the_traversal_ended(tmp_path):
-    # Registered as itself, so `Stage.run` can signal it -- nothing calls `collected`
-    # at the right moment by hand.
-    collector = _collector(tmp_path).collector_for("seq")
-    frames = _Frames(torch.tensor([[0.0, 2.0]]), torch.tensor([[-1.0, 1.0]]))
-
-    SequenceStage(frames).register_hooks(collector).run()
-
-    ranged = collector.collected()
+    ranged = meter.collected()
     assert (ranged.min_value, ranged.max_value) == (-1.0, 2.0)
     assert [frame.source for frame in ranged.frames] == [
         "00000_phase.bin",
@@ -213,54 +176,122 @@ def test_a_run_tells_the_collector_the_traversal_ended(tmp_path):
     ]
 
 
-def test_a_collector_refuses_a_fold_over_a_prefix(tmp_path):
-    collector = _collector(tmp_path).collector_for("seq")
-    collector.observe(Step(0, torch.tensor([[1.0]]), Path("00000_phase.bin")))
+def test_a_meter_refuses_a_frame_with_no_finite_value(tmp_path):
+    meter = _meter(tmp_path, "TL_00")
+    frames = _Frames(torch.tensor([[float("nan")]]))
 
-    with pytest.raises(ValueError, match="the traversal of seq did not finish"):
-        collector.collected()
+    with pytest.raises(ValueError, match=r"no finite value in TL_00/00000_phase.bin"):
+        SequenceStage(frames).register_hooks(meter).run()
 
 
-def test_a_collector_refuses_after_a_traversal_that_died(tmp_path):
-    # The steps it saw are a prefix, not this sequence's range, and reporting
-    # them would put a hole in the dataset's bounds where nobody would see it.
+def test_a_finished_meter_leaves_its_part_behind(tmp_path):
+    # What carries the answer out of a worker: `shared_objects` travels one way.
+    meter = _meter(tmp_path)
+
+    _scan(meter, (-1.0, 2.0))
+
+    part = tmp_path / "range.parts" / "seq.json"
+    written = json.loads(part.read_text(encoding="utf-8"))
+
+    assert written == json.loads(json.dumps(as_dict(meter.collected())))
+
+
+def test_a_name_that_is_a_path_does_not_nest(tmp_path):
+    _scan(_meter(tmp_path, "plate/TL_00"), (0.0, 1.0))
+
+    assert [p.name for p in (tmp_path / "range.parts").iterdir()] == [
+        "plate%2FTL_00.json"
+    ]
+
+
+def test_a_traversal_that_died_leaves_nothing(tmp_path):
+    # The frames it saw are a prefix, and a prefix folded into the dataset's
+    # bounds is a hole where nobody would see it.
     def explode(step: Step[torch.Tensor, Path]) -> None:
         msg = "the run gave up"
         raise RuntimeError(msg)
 
-    collector = _collector(tmp_path).collector_for("seq")
-    stage = SequenceStage(_Frames(torch.tensor([[1.0]])))
-    stage.register_hooks(collector, explode)
+    stage = SequenceStage(_range((0.0, 1.0)))
+    stage.register_hooks(_meter(tmp_path), explode)
 
     with pytest.raises(RuntimeError, match="the run gave up"):
         stage.run()
 
-    with pytest.raises(ValueError, match="did not finish"):
-        collector.collected()
+    assert not (tmp_path / "range.parts").exists()
 
 
-def test_a_traversal_that_died_hands_over_nothing(tmp_path):
-    # A prefix cannot reach the dataset's bounds, and no driver had to know.
-    def explode(step: Step[torch.Tensor, Path]) -> None:
-        msg = "the run gave up"
-        raise RuntimeError(msg)
+def test_a_meter_that_saw_nothing_is_refused_by_name(tmp_path):
+    with (
+        pytest.raises(ValueError, match="SequenceRange holds nothing"),
+        _meter(tmp_path),
+    ):
+        pass
 
-    ranges = _collector(tmp_path)
-    stage = SequenceStage(_Frames(torch.tensor([[1.0]])))
-    stage.register_hooks(ranges.collector_for("seq"), explode)
+
+# --------------------------------- the document --------------------------------
+
+
+def test_the_parts_folder_sits_beside_the_document(tmp_path):
+    named = RangeDocument(tmp_path / "phase_range.json")
+    bare = RangeDocument(tmp_path / "phase_range")
+
+    assert named.parts == bare.parts == tmp_path / "phase_range.parts"
+
+
+def test_a_document_folds_the_parts_in_name_order(tmp_path):
+    document = RangeDocument(tmp_path / "range")
+    with document:
+        _scan(_meter(tmp_path, "b"), (0.0, 5.0))
+        _scan(_meter(tmp_path, "a"), (-3.0, 1.0))
+
+    dataset = json.loads((tmp_path / "range.json").read_text(encoding="utf-8"))
+
+    assert [s["source"] for s in dataset["dataset"]["sequences"]] == ["a", "b"]
+    assert dataset["dataset"]["min_index"] == 0  # `a` held the low
+    assert dataset["dataset"]["max_index"] == 1
+
+
+def test_a_document_writes_the_provenance_it_was_given(tmp_path):
+    with RangeDocument(tmp_path / "range", provenance={"filter": "identity"}):
+        _scan(_meter(tmp_path, "a"), (-1.0, 2.0))
+
+    document = json.loads((tmp_path / "range.json").read_text(encoding="utf-8"))
+    assert document["filter"] == "identity"
+    assert document["dataset"]["max_value"] == 2.0
+
+
+def test_a_document_that_gathered_nothing_is_refused_by_name(tmp_path):
+    with (
+        pytest.raises(ValueError, match="DatasetRange holds nothing"),
+        RangeDocument(tmp_path / "range"),
+    ):
+        pass
+
+
+def test_a_run_that_died_writes_no_document(tmp_path):
+    # The parts it did finish stay: they are what a re-run does not have to redo.
+    def die() -> None:
+        with RangeDocument(tmp_path / "range"):
+            _scan(_meter(tmp_path, "a"), (0.0, 1.0))
+            msg = "the run gave up"
+            raise RuntimeError(msg)
 
     with pytest.raises(RuntimeError, match="the run gave up"):
-        stage.run()
+        die()
 
-    with pytest.raises(ValueError, match="holds nothing"):
-        ranges.collected()
+    assert not (tmp_path / "range.json").exists()
+    assert (tmp_path / "range.parts" / "a.json").exists()
 
 
-def test_merge_brings_a_workers_copy_home(tmp_path):
-    parent, worker = _collector(tmp_path), _collector(tmp_path)
-    _scan(parent, "a", (0.0, 1.0))
-    _scan(worker, "b", (0.0, 5.0))
+def test_entering_drops_what_an_earlier_run_left(tmp_path):
+    # `output_directory` is pinned rather than timestamped, so a re-run lands in
+    # the same folder -- and a stale part would fold in as if it were this run's.
+    with RangeDocument(tmp_path / "range"):
+        _scan(_meter(tmp_path, "a"), (0.0, 1.0))
+        _scan(_meter(tmp_path, "b"), (0.0, 5.0))
 
-    parent.merge(worker)
+    with RangeDocument(tmp_path / "range", overwrite=True):
+        _scan(_meter(tmp_path, "a"), (0.0, 1.0))
 
-    assert [s.source for s in parent.collected().sequences] == ["a", "b"]
+    document = json.loads((tmp_path / "range.json").read_text(encoding="utf-8"))
+    assert [s["source"] for s in document["dataset"]["sequences"]] == ["a"]
