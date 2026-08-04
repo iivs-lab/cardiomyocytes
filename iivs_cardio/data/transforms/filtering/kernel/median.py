@@ -28,38 +28,20 @@ if TYPE_CHECKING:
 KernelShape = Literal["ellipsoid", "cuboid"]
 KERNEL_SHAPES: Final[tuple[KernelShape, ...]] = get_args(KernelShape)
 
-# Where CUDA's `sort` and `topk` each leave a faster shared-memory path. Measured
-# on a band-shaped slice: both step at 32 elements and again at 128.
+# Where CUDA's `sort` and `topk` each leave a faster shared-memory path.
 _SHARED_TIERS: Final = (32, 128)
+
+# Stacked neighbourhood one pass may hold; every temporary scales with it.
+_TILE_BYTES: Final = 32 << 20
 
 
 def _prefers_topk(samples: int) -> bool:
-    """Whether `topk` beats a full `sort` for this many samples, on CUDA.
-
-    Only the two central order statistics are read, so `topk` need order just
-    `samples // 2 + 1` where `sort` orders every sample. That is worth its
-    clumsier kernel exactly when the two counts land in different tiers -- when
-    the halved count still fits a path the full one has fallen out of.
-
-    Measured at 16 sample counts from 16 to 343, the tiers predict the winner at
-    every one: `topk` takes 33..63 and 129..255, `sort` the rest.
-    """
+    """Whether `topk` beats a full `sort`, which it does across a tier boundary."""
 
     def tier(count: int) -> int:
         return sum(count > bound for bound in _SHARED_TIERS)
 
     return tier(samples) > tier(samples // 2 + 1)
-
-
-# How much stacked neighbourhood one pass may hold. A pixel's median reads only
-# its own neighbours, so the frame can be answered a band at a time for the same
-# result, and the band is what bounds every temporary: the sort's values and its
-# discarded `int64` indices come to about 4x this. Measured at 900x900, the whole
-# frame at 343 offsets peaks at 4.75 GB and takes 138 ms, where bands of this
-# size peak at 0.33 GB and take 106 ms -- smaller *and* faster, since the giant
-# allocation costs more than the extra launches. Far below this it inverts, a
-# band too small to keep the device busy.
-_TILE_BYTES: Final = 32 << 20
 
 
 def _tile_rows(samples: int, width: int, itemsize: int) -> int:
@@ -165,12 +147,7 @@ class MedianKernel(FilterKernel):
         rows: int,
         width: int,
     ) -> Tensor:
-        """Take the median for `rows` rows of the frame, beginning at `start`.
-
-        A pixel's median reads only its own neighbourhood, so a band answers
-        exactly what the whole frame would have. `padded` stays whole and each
-        band reads the taller strip its radius needs out of it.
-        """
+        """Take the median for `rows` rows of the frame, beginning at `start`."""
         rx, ry = self.spatial_radius
 
         gathered = torch.stack(
@@ -184,22 +161,14 @@ class MedianKernel(FilterKernel):
             ]
         )
 
-        # Only the two central order statistics are read, so the lower half is
-        # enough: however many samples are valid, neither rank reaches past
-        # `samples // 2`.
         samples = gathered.shape[0]
         if gathered.is_cuda and _prefers_topk(samples):
             ordered = gathered.topk(samples // 2 + 1, dim=0, largest=False).values
         else:
             ordered = gathered.sort(dim=0).values
 
-        # NaNs order last either way, so the valid samples occupy `[0, valid)`
-        # and the median is one element for an odd count, the middle two to
-        # average for an even one -- which is why `torch.median` cannot serve.
-        # An odd count needs no case of its own: the two ranks coincide, and
-        # halving the sample added to itself only moves the exponent, so it
-        # comes back bit-for-bit.
-        valid = (~gathered.isnan()).sum(dim=0)  # >= 1: the centre never drops
+        # NaNs order last, so the valid samples occupy `[0, valid)`.
+        valid = (~gathered.isnan()).sum(dim=0)
         pair = ordered.gather(0, torch.stack(((valid - 1) // 2, valid // 2)))
 
         return (pair[0] + pair[1]) / 2
