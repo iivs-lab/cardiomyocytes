@@ -195,9 +195,10 @@ class DatasetRangeCollector:
     across them can only happen where their results come back. Owning both the
     fold and the write here is what keeps a driver from restating either.
 
-    It cannot hand collectors out. A worker builds its own -- a copy sent across
-    would be mutated in that process and never seen again -- so what crosses back
-    is each sequence's finished range, and `absorb` is the way in.
+    A copy of it crosses to each worker, which is safe because `collector_for`
+    only builds: the collector it returns lives and fills in that process, and
+    what comes back is the finished range. Mutating the copy would be lost, so
+    `absorb` is the only way in.
 
     This is also the only object that sees how many arrived against how many were
     dispatched, which is what a partial run will have to report against once a
@@ -206,6 +207,15 @@ class DatasetRangeCollector:
 
     def __init__(self) -> None:
         self._sequences: list[SequenceRange] = []
+
+    def collector_for(self, source: str) -> RangeCollector:
+        """The collector for one sequence, to attach where that sequence is read.
+
+        Here rather than at the call site so that what a run collects is decided
+        once. Nothing configures a range today, but a switch to per-frame
+        histograms would be this object's to hold, not every driver's.
+        """
+        return RangeCollector(source)
 
     def absorb(self, *collected: SequenceRange) -> None:
         """Take the ranges workers finished, in the order given."""

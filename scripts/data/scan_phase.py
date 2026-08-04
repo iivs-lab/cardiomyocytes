@@ -22,7 +22,7 @@ from iivs_cardio.data.phase import phase_field_writer
 from iivs_cardio.data.transforms.filtering import FilteredSequence
 from scripts._compute import ComputeConfig, pin_threads, plan_devices, report_insights
 from scripts._hydra import apply_schema, is_multirun, output_directory
-from scripts._range import DatasetRangeCollector, RangeCollector, SequenceRange
+from scripts._range import DatasetRangeCollector, SequenceRange
 from scripts.data._filtering import build_filter_kernel, describe_filter_kernel
 
 if TYPE_CHECKING:
@@ -30,8 +30,10 @@ if TYPE_CHECKING:
 
     from iivs.dhm.data.phase import PhaseFileFolder
     from omegaconf import DictConfig
+    from torch import Tensor
 
     from iivs_cardio.common.device import Device
+    from iivs_cardio.common.writer import FieldWriter
 
 
 load_dotenv()
@@ -59,6 +61,33 @@ class TargetConfig:
     save_frames: bool = False
     save_ranges: bool = True
     range_file: str = "phase_range"
+
+
+@dataclass(frozen=True, slots=True)
+class DatasetFieldWriter:
+    """Where a run writes its filtered fields, and the writer for each sequence.
+
+    Holds what every sequence's writer shares -- the tree to fill, the layout
+    inside a sequence, and whether an existing folder may go -- so a worker is
+    handed the run's decision instead of the config it was read from. Frozen and
+    made of strings, so a copy crosses to a worker for the cost of the strings.
+
+    What differs per sequence is the destination and the calibration, and both
+    follow from the sequence: the first from where it sat under the source root,
+    the second from the folder it was read out of.
+    """
+
+    root: str
+    subpath: str
+    overwrite: bool = False
+
+    def writer_for(
+        self, source: str, origin: PhaseFileFolder
+    ) -> FieldWriter[tuple[Tensor, Path]]:
+        """The writer for the sequence at `source`, read out of `origin`."""
+        return phase_field_writer(
+            Path(self.root, source, self.subpath), origin, overwrite=self.overwrite
+        )
 
 
 def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
@@ -109,7 +138,8 @@ def build_sequences(
 def scan_sequence(
     sequence: PhaseFilteredSequence,
     source_config: SourceConfig,
-    target_config: TargetConfig | None = None,
+    ranges: DatasetRangeCollector,
+    writers: DatasetFieldWriter | None = None,
 ) -> SequenceRange:
     sequence_root = sequence.get_meta(0).parent
     subpath = unwrap_or_default(source_config.subpath, PHASE_FLOAT_BIN)
@@ -118,15 +148,11 @@ def scan_sequence(
     # Both jobs watch one traversal. Reading a frame again to range it would
     # re-run the kernel, the expensive half of a filtered read -- a second
     # traversal measured +94% on a median (2, 2, 2).
-    collector = RangeCollector(source)
+    collector = ranges.collector_for(source)
     node = Steps(sequence).attach(collector.observe)
 
-    if target_config is not None and target_config.save_frames:
-        dest = Path(target_config.root, source, subpath)
-        writer = phase_field_writer(
-            dest, sequence.origin, overwrite=target_config.overwrite
-        )
-        node.attach(writer)
+    if writers is not None:
+        node.attach(writers.writer_for(source, sequence.origin))
 
     node.run()
 
@@ -138,21 +164,23 @@ def _scan_on_worker(
     devices: tuple[Device, ...],
     sequence: PhaseFilteredSequence,
     source_config: SourceConfig,
-    target_config: TargetConfig,
+    ranges: DatasetRangeCollector,
+    writers: DatasetFieldWriter | None,
 ) -> SequenceRange:
     device = devices[worker_id]
     device.activate()
     pin_threads(len(devices))
     sequence.device = device
 
-    return scan_sequence(sequence, source_config, target_config)
+    return scan_sequence(sequence, source_config, ranges, writers)
 
 
 def scan_sequences(
     sequences: Sequence[PhaseFilteredSequence],
     compute_config: ComputeConfig,
     source_config: SourceConfig,
-    target_config: TargetConfig,
+    ranges: DatasetRangeCollector,
+    writers: DatasetFieldWriter | None = None,
 ) -> list[SequenceRange]:
     pbar_enabled = compute_config.progress_bar
     pbar_options = {"desc": "scanning", "unit": "seq"}
@@ -161,7 +189,7 @@ def scan_sequences(
 
     if (workers := len(devices)) == 1:
         pbar = tqdm(sequences, disable=not pbar_enabled, **pbar_options)
-        return [scan_sequence(item, source_config, target_config) for item in pbar]
+        return [scan_sequence(item, source_config, ranges, writers) for item in pbar]
 
     with WorkerPool(
         n_jobs=workers,
@@ -170,7 +198,10 @@ def scan_sequences(
         enable_insights=compute_config.insights,
     ) as pool:
         scan = partial(
-            _scan_on_worker, source_config=source_config, target_config=target_config
+            _scan_on_worker,
+            source_config=source_config,
+            ranges=ranges,
+            writers=writers,
         )
 
         # Each task takes one sequence, wrapped: `mpire` spreads any iterable
@@ -220,9 +251,19 @@ def main(cfg: DictConfig) -> None:
         raise ValueError(msg)
 
     ranges = DatasetRangeCollector()
+    writers = (
+        DatasetFieldWriter(
+            target_config.root,
+            unwrap_or_default(source_config.subpath, PHASE_FLOAT_BIN),
+            overwrite=target_config.overwrite,
+        )
+        if target_config.save_frames
+        else None
+    )
+
     sequences = build_sequences(compute_config, source_config, filter_config)
     ranges.absorb(
-        *scan_sequences(sequences, compute_config, source_config, target_config)
+        *scan_sequences(sequences, compute_config, source_config, ranges, writers)
     )
 
     if target_config.save_ranges:
