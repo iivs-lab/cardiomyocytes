@@ -115,17 +115,20 @@ class RangeCollector:
     expensive half of a filtered read.
 
     Attach it to the node it should watch rather than its `observe`, so that
-    `Node.run` can tell it when the traversal ended. A range is only a range once
-    every step has been seen, and nothing else in the chain knows the difference
-    between a fold that finished and one that stopped part-way.
+    `Node.run` can tell it when the traversal ended. On a clean end it hands
+    itself to the `DatasetRangeCollector` it came from, which is what spares a
+    driver from remembering: whatever builds the chain attaches this and runs,
+    and a range that finished is in the dataset by the time `run` returns. A
+    traversal that died hands over nothing, since a fold over a prefix is not
+    the sequence's range.
 
-    Args:
-        source: The sequence's path relative to the dataset root, which every
-            `FrameRange` is reported under and which names a frame in the error.
+    Build one through `DatasetRangeCollector.collector_for` rather than
+    directly, so that it knows where it belongs.
     """
 
-    def __init__(self, source: str) -> None:
+    def __init__(self, source: str, into: DatasetRangeCollector) -> None:
         self._source = source
+        self._into = into
         self._frames: list[FrameRange] = []
         self._finished = False
 
@@ -160,7 +163,11 @@ class RangeCollector:
         # Only a clean exit means every step was seen. A traversal that died
         # part-way leaves a fold over a prefix, which is not this sequence's
         # range and must not be reported as one.
-        self._finished = exc_type is None
+        if exc_type is not None:
+            return
+
+        self._finished = True
+        self._into.take(self)
 
     def collected(self) -> SequenceRange:
         """The fold over every step of the sequence.
@@ -246,19 +253,44 @@ class DatasetRangeCollector:
         """The collector for one sequence, to attach where that sequence is read.
 
         Here rather than at the call site so that what a run collects is decided
-        once. Nothing configures a range today, but a switch to per-frame
-        histograms would be this object's to hold, not every driver's.
+        once, and so the collector knows where to hand itself when it finishes.
+        Nothing configures a range today, but a switch to per-frame histograms
+        would be this object's to hold, not every driver's.
         """
-        return RangeCollector(source)
+        return RangeCollector(source, self)
 
-    def absorb(self, collector: RangeCollector) -> None:
-        """Take one finished collector, in the order they finish.
+    def take(self, collector: RangeCollector) -> None:
+        """Take one collector that has just finished. Called by the collector.
+
+        Not for a driver to call: a collector hands itself over when its
+        traversal ends cleanly, so nothing that builds a chain has to remember
+        to. What a driver calls is `save`.
 
         Raises:
             ValueError: If its traversal did not finish, since a fold over a
                 prefix is not the sequence's range.
         """
         self._sequences.append(collector.collected())
+
+    def fresh(self) -> DatasetRangeCollector:
+        """An empty container configured like this one.
+
+        A worker keeps whatever it was handed between tasks, so a task that
+        gathered into the copy it arrived with would carry every earlier task's
+        sequences home again. One of these per task is what keeps `merge` from
+        counting them twice.
+        """
+        return DatasetRangeCollector()
+
+    def merge(self, other: DatasetRangeCollector) -> None:
+        """Take everything `other` gathered.
+
+        For the process boundary alone. A worker fills its own copy of this,
+        and merging is how that copy comes home; in a single process the
+        collectors have already handed themselves to the one container there
+        is, and merging would count them twice.
+        """
+        self._sequences.extend(other._sequences)
 
     def collected(self) -> DatasetRange:
         """The fold across everything absorbed.

@@ -22,7 +22,7 @@ from iivs_cardio.data.phase import phase_field_writer
 from iivs_cardio.data.transforms.filtering import FilteredSequence
 from scripts._compute import ComputeConfig, pin_threads, plan_devices, report_insights
 from scripts._hydra import apply_schema, is_multirun, output_directory
-from scripts._range import DatasetRangeCollector, RangeCollector
+from scripts._range import DatasetRangeCollector
 from scripts.data._filtering import build_filter_kernel, describe_filter_kernel
 
 if TYPE_CHECKING:
@@ -140,7 +140,7 @@ def scan_sequence(
     source_config: SourceConfig,
     ranges: DatasetRangeCollector,
     writers: DatasetFieldWriter | None = None,
-) -> RangeCollector:
+) -> None:
     sequence_root = sequence.get_meta(0).parent
     subpath = unwrap_or_default(source_config.subpath, PHASE_FLOAT_BIN)
     source = stringify_path(sequence_root, after=source_config.root, before=subpath)
@@ -154,9 +154,9 @@ def scan_sequence(
     if writers is not None:
         node.attach(writers.writer_for(source, sequence.origin))
 
+    # `run` ends the collector's traversal, and a collector that finished
+    # hands itself to `ranges`. Nothing here has a result to pass on.
     node.run()
-
-    return collector
 
 
 def _scan_on_worker(
@@ -166,13 +166,18 @@ def _scan_on_worker(
     source_config: SourceConfig,
     ranges: DatasetRangeCollector,
     writers: DatasetFieldWriter | None,
-) -> RangeCollector:
+) -> DatasetRangeCollector:
     device = devices[worker_id]
     device.activate()
     pin_threads(len(devices))
     sequence.device = device
 
-    return scan_sequence(sequence, source_config, ranges, writers)
+    # Not the `ranges` that arrived: a worker keeps it between tasks, so
+    # gathering into it would carry every earlier task's sequences home again.
+    gathered = ranges.fresh()
+    scan_sequence(sequence, source_config, gathered, writers)
+
+    return gathered
 
 
 def scan_sequences(
@@ -188,9 +193,11 @@ def scan_sequences(
     devices = plan_devices(compute_config)[: len(sequences)]
 
     if (workers := len(devices)) == 1:
+        # No merge: one process, so the collectors handed themselves straight
+        # to `ranges` as each traversal ended.
         pbar = tqdm(sequences, disable=not pbar_enabled, **pbar_options)
         for item in pbar:
-            ranges.absorb(scan_sequence(item, source_config, ranges, writers))
+            scan_sequence(item, source_config, ranges, writers)
         return
 
     with WorkerPool(
@@ -208,7 +215,7 @@ def scan_sequences(
 
         # Each task takes one sequence, wrapped: `mpire` spreads any iterable
         # task argument across the parameters, and a sequence is one.
-        for collector in pool.imap(
+        for gathered in pool.imap(
             scan,
             [(sequence,) for sequence in sequences],
             chunk_size=1,
@@ -216,7 +223,7 @@ def scan_sequences(
             progress_bar=pbar_enabled,
             progress_bar_options=pbar_options,
         ):
-            ranges.absorb(collector)
+            ranges.merge(gathered)
 
         if compute_config.insights:
             report_insights(pool.get_insights())
