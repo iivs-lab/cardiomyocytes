@@ -28,13 +28,28 @@ if TYPE_CHECKING:
 KernelShape = Literal["ellipsoid", "cuboid"]
 KERNEL_SHAPES: Final[tuple[KernelShape, ...]] = get_args(KernelShape)
 
-# Sample counts where CUDA's `topk` beats its `sort`. Both leave the same
-# shared-memory path once they must order more than 32 elements, and both step
-# about 3x when they do -- `sort` orders every sample, so it steps at 33, while
-# `topk` orders `samples // 2 + 1`, so it steps at 64. Between those two steps
-# only `sort` is paying. Measured on one GPU, but both bounds turn on the same
-# threshold, which is why this is a range rather than a fitted cutoff.
-_CUDA_TOPK_SAMPLES = range(33, 64)
+# Where CUDA's `sort` and `topk` each leave a faster shared-memory path. Measured
+# on a band-shaped slice: both step at 32 elements and again at 128.
+_SHARED_TIERS: Final = (32, 128)
+
+
+def _prefers_topk(samples: int) -> bool:
+    """Whether `topk` beats a full `sort` for this many samples, on CUDA.
+
+    Only the two central order statistics are read, so `topk` need order just
+    `samples // 2 + 1` where `sort` orders every sample. That is worth its
+    clumsier kernel exactly when the two counts land in different tiers -- when
+    the halved count still fits a path the full one has fallen out of.
+
+    Measured at 16 sample counts from 16 to 343, the tiers predict the winner at
+    every one: `topk` takes 33..63 and 129..255, `sort` the rest.
+    """
+
+    def tier(count: int) -> int:
+        return sum(count > bound for bound in _SHARED_TIERS)
+
+    return tier(samples) > tier(samples // 2 + 1)
+
 
 # How much stacked neighbourhood one pass may hold. A pixel's median reads only
 # its own neighbours, so the frame can be answered a band at a time for the same
@@ -171,15 +186,14 @@ class MedianKernel(FilterKernel):
 
         # Only the two central order statistics are read, so the lower half is
         # enough: however many samples are valid, neither rank reaches past
-        # `samples // 2`. `topk` supplies it more cheaply than a full sort
-        # except on CUDA outside `_CUDA_TOPK_SAMPLES`.
+        # `samples // 2`.
         samples = gathered.shape[0]
-        if gathered.is_cuda and samples not in _CUDA_TOPK_SAMPLES:
-            ordered = gathered.sort(dim=0).values
-        else:
+        if gathered.is_cuda and _prefers_topk(samples):
             ordered = gathered.topk(
                 samples // 2 + 1, dim=0, largest=False, sorted=True
             ).values
+        else:
+            ordered = gathered.sort(dim=0).values
 
         # NaNs order last either way, so the valid samples occupy `[0, valid)`
         # and the median is one element for an odd count, the middle two to
