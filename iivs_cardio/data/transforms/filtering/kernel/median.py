@@ -189,9 +189,7 @@ class MedianKernel(FilterKernel):
         # `samples // 2`.
         samples = gathered.shape[0]
         if gathered.is_cuda and _prefers_topk(samples):
-            ordered = gathered.topk(
-                samples // 2 + 1, dim=0, largest=False, sorted=True
-            ).values
+            ordered = gathered.topk(samples // 2 + 1, dim=0, largest=False).values
         else:
             ordered = gathered.sort(dim=0).values
 
