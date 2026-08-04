@@ -227,8 +227,12 @@ class DatasetRangeCollector:
 
     A copy of it crosses to each worker, which is safe because `collector_for`
     only builds: the collector it returns lives and fills in that process, and
-    what comes back is the finished range. Mutating the copy would be lost, so
-    `absorb` is the only way in.
+    comes back filled. Mutating the copy would be lost, so `absorb` is the only
+    way in -- one finished collector at a time, since that is how they finish.
+
+    Nothing outside holds a `SequenceRange`. A driver asks for a collector,
+    hands the filled one back, and asks for the document; what a sequence's
+    range is, and when it is one, stays here.
 
     This is also the only object that sees how many arrived against how many were
     dispatched, which is what a partial run will have to report against once a
@@ -247,9 +251,14 @@ class DatasetRangeCollector:
         """
         return RangeCollector(source)
 
-    def absorb(self, *collected: SequenceRange) -> None:
-        """Take the ranges workers finished, in the order given."""
-        self._sequences.extend(collected)
+    def absorb(self, collector: RangeCollector) -> None:
+        """Take one finished collector, in the order they finish.
+
+        Raises:
+            ValueError: If its traversal did not finish, since a fold over a
+                prefix is not the sequence's range.
+        """
+        self._sequences.append(collector.collected())
 
     def collected(self) -> DatasetRange:
         """The fold across everything absorbed.

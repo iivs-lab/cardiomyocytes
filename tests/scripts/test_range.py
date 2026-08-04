@@ -131,10 +131,20 @@ def test_the_document_survives_the_serializer_it_is_written_with():
     assert encoded["sequences"][0]["frames"][0]["source"] == "00000_phase.bin"
 
 
+def _finished(source: str, *bounds: tuple[float, float]) -> RangeCollector:
+    collector = RangeCollector(source)
+    for index, (low, high) in enumerate(bounds):
+        collector.observe(Slot(index, (torch.tensor([[low, high]]), Path(source))))
+    with collector:
+        pass
+    return collector
+
+
 def test_a_collector_folds_what_it_absorbed():
     ranges = DatasetRangeCollector()
 
-    ranges.absorb(_sequence("a", (-1.0, 2.0)), _sequence("b", (-3.0, 1.0)))
+    ranges.absorb(_finished("a", (-1.0, 2.0)))
+    ranges.absorb(_finished("b", (-3.0, 1.0)))
 
     dataset = ranges.collected()
     assert dataset.min_value == -3.0
@@ -147,8 +157,8 @@ def test_a_collector_absorbs_across_calls():
     # Results come back per worker, so absorbing is not a single handover.
     ranges = DatasetRangeCollector()
 
-    ranges.absorb(_sequence("a", (0.0, 1.0)))
-    ranges.absorb(_sequence("b", (0.0, 5.0)))
+    ranges.absorb(_finished("a", (0.0, 1.0)))
+    ranges.absorb(_finished("b", (0.0, 5.0)))
 
     assert ranges.collected().max_value == 5.0
 
@@ -160,7 +170,7 @@ def test_a_collector_that_absorbed_nothing_refuses_to_fold():
 
 def test_a_collector_writes_the_document_it_gathered(tmp_path):
     ranges = DatasetRangeCollector()
-    ranges.absorb(_sequence("a", (-1.0, 2.0)))
+    ranges.absorb(_finished("a", (-1.0, 2.0)))
 
     path = ranges.save(tmp_path / "range", provenance={"filter": "identity"})
 
@@ -223,3 +233,13 @@ def test_a_collector_refuses_after_a_traversal_that_died():
 
     with pytest.raises(ValueError, match="did not finish"):
         collector.collected()
+
+
+def test_absorbing_an_unfinished_collector_is_refused():
+    # The container is what decides a range is a range, so a prefix cannot get
+    # into a dataset's bounds by way of it either.
+    collector = RangeCollector("seq")
+    collector.observe(Slot(0, (torch.tensor([[1.0]]), Path("00000_phase.bin"))))
+
+    with pytest.raises(ValueError, match="did not finish"):
+        DatasetRangeCollector().absorb(collector)

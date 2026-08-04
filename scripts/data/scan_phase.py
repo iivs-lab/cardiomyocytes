@@ -22,7 +22,7 @@ from iivs_cardio.data.phase import phase_field_writer
 from iivs_cardio.data.transforms.filtering import FilteredSequence
 from scripts._compute import ComputeConfig, pin_threads, plan_devices, report_insights
 from scripts._hydra import apply_schema, is_multirun, output_directory
-from scripts._range import DatasetRangeCollector, SequenceRange
+from scripts._range import DatasetRangeCollector, RangeCollector
 from scripts.data._filtering import build_filter_kernel, describe_filter_kernel
 
 if TYPE_CHECKING:
@@ -140,7 +140,7 @@ def scan_sequence(
     source_config: SourceConfig,
     ranges: DatasetRangeCollector,
     writers: DatasetFieldWriter | None = None,
-) -> SequenceRange:
+) -> RangeCollector:
     sequence_root = sequence.get_meta(0).parent
     subpath = unwrap_or_default(source_config.subpath, PHASE_FLOAT_BIN)
     source = stringify_path(sequence_root, after=source_config.root, before=subpath)
@@ -156,7 +156,7 @@ def scan_sequence(
 
     node.run()
 
-    return collector.collected()
+    return collector
 
 
 def _scan_on_worker(
@@ -166,7 +166,7 @@ def _scan_on_worker(
     source_config: SourceConfig,
     ranges: DatasetRangeCollector,
     writers: DatasetFieldWriter | None,
-) -> SequenceRange:
+) -> RangeCollector:
     device = devices[worker_id]
     device.activate()
     pin_threads(len(devices))
@@ -181,7 +181,7 @@ def scan_sequences(
     source_config: SourceConfig,
     ranges: DatasetRangeCollector,
     writers: DatasetFieldWriter | None = None,
-) -> list[SequenceRange]:
+) -> None:
     pbar_enabled = compute_config.progress_bar
     pbar_options = {"desc": "scanning", "unit": "seq"}
 
@@ -189,7 +189,9 @@ def scan_sequences(
 
     if (workers := len(devices)) == 1:
         pbar = tqdm(sequences, disable=not pbar_enabled, **pbar_options)
-        return [scan_sequence(item, source_config, ranges, writers) for item in pbar]
+        for item in pbar:
+            ranges.absorb(scan_sequence(item, source_config, ranges, writers))
+        return
 
     with WorkerPool(
         n_jobs=workers,
@@ -206,19 +208,18 @@ def scan_sequences(
 
         # Each task takes one sequence, wrapped: `mpire` spreads any iterable
         # task argument across the parameters, and a sequence is one.
-        scanned: list[SequenceRange] = pool.map(
+        for collector in pool.imap(
             scan,
             [(sequence,) for sequence in sequences],
             chunk_size=1,
             worker_lifespan=compute_config.worker_lifespan,
             progress_bar=pbar_enabled,
             progress_bar_options=pbar_options,
-        )
+        ):
+            ranges.absorb(collector)
 
         if compute_config.insights:
             report_insights(pool.get_insights())
-
-    return scanned
 
 
 def range_provenance(
@@ -262,9 +263,7 @@ def main(cfg: DictConfig) -> None:
     )
 
     sequences = build_sequences(compute_config, source_config, filter_config)
-    ranges.absorb(
-        *scan_sequences(sequences, compute_config, source_config, ranges, writers)
-    )
+    scan_sequences(sequences, compute_config, source_config, ranges, writers)
 
     if target_config.save_ranges:
         ranges.save(

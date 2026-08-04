@@ -8,7 +8,7 @@ from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import PhaseBinFolder
 
 from scripts._compute import ComputeConfig
-from scripts._range import DatasetRangeCollector
+from scripts._range import DatasetRangeCollector, as_dict
 from scripts.data.scan_phase import (
     CONFIG_NAME,
     CONFIG_PATH,
@@ -92,21 +92,16 @@ def test_the_pool_returns_what_the_lone_path_does(phase_tree, tmp_path):
     # positional signature that no type checker sees, so the pool can go wrong
     # while every other check stays green.
     source_config = SourceConfig(root=str(phase_tree))
-    ranges = DatasetRangeCollector()
-
     lone = ComputeConfig(device="cpu", workers=0, progress_bar=False)
     pooled = ComputeConfig(device="cpu", workers=2, progress_bar=False)
 
-    expected = scan_sequences(
-        build_sequences(lone, source_config), lone, source_config, ranges
-    )
-    actual = scan_sequences(
-        build_sequences(pooled, source_config), pooled, source_config, ranges
+    expected, actual = DatasetRangeCollector(), DatasetRangeCollector()
+    scan_sequences(build_sequences(lone, source_config), lone, source_config, expected)
+    scan_sequences(
+        build_sequences(pooled, source_config), pooled, source_config, actual
     )
 
-    assert [(s.source, s.min_value, s.max_value) for s in actual] == [
-        (s.source, s.min_value, s.max_value) for s in expected
-    ]
+    assert as_dict(actual.collected()) == as_dict(expected.collected())
 
 
 def test_the_pool_writes_the_folders_a_container_points_it_at(phase_tree, tmp_path):
@@ -117,11 +112,10 @@ def test_the_pool_writes_the_folders_a_container_points_it_at(phase_tree, tmp_pa
     compute = ComputeConfig(device="cpu", workers=2, progress_bar=False)
     writers = DatasetFieldWriter(str(out), PHASE_FLOAT_BIN)
 
+    ranges = DatasetRangeCollector()
     sequences = build_sequences(compute, source_config)
-    scanned = scan_sequences(
-        sequences, compute, source_config, DatasetRangeCollector(), writers
-    )
+    scan_sequences(sequences, compute, source_config, ranges, writers)
 
-    for sequence in scanned:
+    for sequence in ranges.collected().sequences:
         written = PhaseBinFolder(out / sequence.source / PHASE_FLOAT_BIN)
         assert len(written) == len(sequence.frames)
