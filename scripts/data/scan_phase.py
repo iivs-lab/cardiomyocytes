@@ -149,7 +149,7 @@ def scan_sequence(
     # re-run the kernel, the expensive half of a filtered read -- a second
     # traversal measured +94% on a median (2, 2, 2).
     collector = ranges.collector_for(source)
-    node = Steps(sequence).attach(collector.observe)
+    node = Steps(sequence).attach(collector)
 
     if writers is not None:
         node.attach(writers.writer_for(source, sequence.origin))

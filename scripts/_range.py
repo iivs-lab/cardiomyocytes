@@ -15,7 +15,7 @@ __all__ = (
 import json
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, Self
 
 from kaparoo.filesystem import StagedFile, ensure_file_extension
 
@@ -24,6 +24,7 @@ from iivs_cardio.common.range import finite_range
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from pathlib import Path
+    from types import TracebackType
 
     from kaparoo.filesystem.types import StrPath
     from torch import Tensor
@@ -113,6 +114,11 @@ class RangeCollector:
     in hand where reading it again would re-run the filter kernel, which is the
     expensive half of a filtered read.
 
+    Attach it to the node it should watch rather than its `observe`, so that
+    `Node.run` can tell it when the traversal ended. A range is only a range once
+    every step has been seen, and nothing else in the chain knows the difference
+    between a fold that finished and one that stopped part-way.
+
     Args:
         source: The sequence's path relative to the dataset root, which every
             `FrameRange` is reported under and which names a frame in the error.
@@ -121,6 +127,7 @@ class RangeCollector:
     def __init__(self, source: str) -> None:
         self._source = source
         self._frames: list[FrameRange] = []
+        self._finished = False
 
     def observe(self, slot: Slot[tuple[Tensor, Path]]) -> None:
         """Range this step's field, recording it under the file it came from.
@@ -137,13 +144,36 @@ class RangeCollector:
 
         self._frames.append(FrameRange(path.name, *found))
 
+    def __call__(self, slot: Slot[tuple[Tensor, Path]]) -> None:
+        """`observe`, so the collector attaches to a node as the hook it is."""
+        self.observe(slot)
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        # Only a clean exit means every step was seen. A traversal that died
+        # part-way leaves a fold over a prefix, which is not this sequence's
+        # range and must not be reported as one.
+        self._finished = exc_type is None
+
     def collected(self) -> SequenceRange:
-        """Everything observed so far, folded.
+        """The fold over every step of the sequence.
 
         Raises:
-            ValueError: If nothing was observed, since a range over no frame is
-                undefined rather than empty.
+            ValueError: If the traversal has not finished cleanly, since a fold
+                over a prefix is not a range, or if nothing was observed, since
+                a range over no frame is undefined rather than empty.
         """
+        if not self._finished:
+            msg = f"the traversal of {self._source} did not finish"
+            raise ValueError(msg)
+
         return SequenceRange(self._source, tuple(self._frames))
 
 

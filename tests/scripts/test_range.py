@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
+import torch
 
+from iivs_cardio.common.pipeline import Slot, Steps
 from scripts._range import (
     DatasetRange,
     DatasetRangeCollector,
     FrameRange,
+    RangeCollector,
     SequenceRange,
     as_dict,
 )
@@ -165,3 +169,57 @@ def test_a_collector_writes_the_document_it_gathered(tmp_path):
     assert document["filter"] == "identity"
     assert document["dataset"]["max_value"] == 2.0
     assert document["dataset"]["sequences"][0]["source"] == "a"
+
+
+class _Fields:
+    """The slice of `DataSequence` a scan reads, as fields with their filenames."""
+
+    def __init__(self, *fields: torch.Tensor) -> None:
+        self._fields = fields
+
+    def __len__(self) -> int:
+        return len(self._fields)
+
+    def get_pair(self, index: int) -> tuple[torch.Tensor, Path]:
+        return self._fields[index], Path(f"{index:05d}_phase.bin")
+
+
+def test_a_run_tells_the_collector_the_traversal_ended():
+    # Attached as itself, so `Node.run` can signal it -- nothing calls `collected`
+    # at the right moment by hand.
+    collector = RangeCollector("seq")
+    fields = _Fields(torch.tensor([[0.0, 2.0]]), torch.tensor([[-1.0, 1.0]]))
+
+    Steps(fields).attach(collector).run()
+
+    ranged = collector.collected()
+    assert (ranged.min_value, ranged.max_value) == (-1.0, 2.0)
+    assert [frame.source for frame in ranged.frames] == [
+        "00000_phase.bin",
+        "00001_phase.bin",
+    ]
+
+
+def test_a_collector_refuses_a_fold_over_a_prefix():
+    collector = RangeCollector("seq")
+    collector.observe(Slot(0, (torch.tensor([[1.0]]), Path("00000_phase.bin"))))
+
+    with pytest.raises(ValueError, match="the traversal of seq did not finish"):
+        collector.collected()
+
+
+def test_a_collector_refuses_after_a_traversal_that_died():
+    # The steps it saw are a prefix, not this sequence's range, and reporting
+    # them would put a hole in the dataset's bounds where nobody would see it.
+    def explode(slot: Slot[tuple[torch.Tensor, Path]]) -> None:
+        msg = "the run gave up"
+        raise RuntimeError(msg)
+
+    collector = RangeCollector("seq")
+    node = Steps(_Fields(torch.tensor([[1.0]]))).attach(collector, explode)
+
+    with pytest.raises(RuntimeError, match="the run gave up"):
+        node.run()
+
+    with pytest.raises(ValueError, match="did not finish"):
+        collector.collected()
