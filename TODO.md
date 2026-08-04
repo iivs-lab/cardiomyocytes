@@ -92,11 +92,6 @@ flowchart LR
   dm --> fo
 ```
 
-**3D와 Lagrangian 워핑은 나중이다.** 3D에서는 `Displacement`가 `xy`(`flow × pixel_size`)와
-`z`(height의 시간차분)로 갈리고 `Height`가 위상에서 나온다. Lagrangian 차분은 `Acceleration`과
-`Displacement z`에 `flow`를 하나 더 먹여 물질 점을 따라가게 한다. 둘 다 지금 결정할 것이
-아니라 그림에서 뺐다.
-
 **요청한 지표 수와 만들어지는 계산기 수는 다르다.** Force 하나를 요청해도 그 안에
 DryMass와 Acceleration이, Acceleration 안에 Speed가, Speed 안에 Displacement가 있다 —
 계산기 5개, 시그널 1개. 무엇을 뽑을지는 설정으로 받는다.
@@ -160,18 +155,6 @@ force          4     3, 4, 5 → acceleration 4
 # 공통
 
 어느 단계에나 걸리는 결정.
-
-## 아키텍처 (가급적 재론 금지)
-
-- **umbrella 패키지 + 연구별 서브패키지**: `iivs_cardio/<research>/`, 공용 코드는
-  `iivs_cardio/common/` (공유 `Device`가 여기 사는 근거).
-- **얇은 `scripts/`**: 인자 파싱·설정 로드·IO·device/시퀀스 배선만. **모든 실제 로직은
-  `iivs_cardio/`** 에 둔다 (단일 수학 출처 원칙 보호).
-- **모듈은 문제의 세 단계를 따른다**: `data/`(+`transforms/`) · `optical_flow/` ·
-  `beating_profile/`(미생성). `scripts/`도 같은 삼분할.
-- **editable install은 개발 편의용**: `import iivs_cardio` 안정화 목적. PyPI 배포 아님,
-  `py.typed` 없음.
-- **console entry point 기각**: CLI 코드를 패키지 안으로 끌어들여 `scripts/` 분리와 충돌.
 
 ## 멀티 GPU
 
