@@ -8,7 +8,7 @@ from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import PhaseBinFolder
 
 from scripts._compute import ComputeConfig
-from scripts._range import DatasetRangeCollector, as_dict
+from scripts.data._range import DatasetRangeCollector, as_dict
 from scripts.data.scan_phase import (
     CONFIG_NAME,
     CONFIG_PATH,
@@ -95,7 +95,8 @@ def test_the_pool_returns_what_the_lone_path_does(phase_tree, tmp_path):
     lone = ComputeConfig(device="cpu", workers=0, progress_bar=False)
     pooled = ComputeConfig(device="cpu", workers=2, progress_bar=False)
 
-    expected, actual = DatasetRangeCollector(), DatasetRangeCollector()
+    expected = DatasetRangeCollector(tmp_path / "lone")
+    actual = DatasetRangeCollector(tmp_path / "pooled")
     scan_sequences(build_sequences(lone, source_config), lone, source_config, expected)
     scan_sequences(
         build_sequences(pooled, source_config), pooled, source_config, actual
@@ -112,7 +113,7 @@ def test_the_pool_writes_the_folders_a_container_points_it_at(phase_tree, tmp_pa
     compute = ComputeConfig(device="cpu", workers=2, progress_bar=False)
     writers = DatasetFieldWriter(str(out), PHASE_FLOAT_BIN)
 
-    ranges = DatasetRangeCollector()
+    ranges = DatasetRangeCollector(tmp_path / "range")
     sequences = build_sequences(compute, source_config)
     scan_sequences(sequences, compute, source_config, ranges, writers)
 

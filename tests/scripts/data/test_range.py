@@ -7,7 +7,7 @@ import pytest
 import torch
 
 from iivs_cardio.common.pipeline import Slot, Steps
-from scripts._range import (
+from scripts.data._range import (
     DatasetRange,
     DatasetRangeCollector,
     FrameRange,
@@ -130,53 +130,6 @@ def test_the_document_survives_the_serializer_it_is_written_with():
     assert encoded["sequences"][0]["frames"][0]["source"] == "00000_phase.bin"
 
 
-def _scan(ranges: DatasetRangeCollector, source: str, *bounds: tuple[float, float]):
-    """Range one sequence the way a driver would: attach, run, call nothing."""
-    fields = _Fields(*(torch.tensor([[low, high]]) for low, high in bounds))
-    Steps(fields).attach(ranges.collector_for(source)).run()
-
-
-def test_a_finished_collector_hands_itself_over():
-    ranges = DatasetRangeCollector()
-
-    _scan(ranges, "a", (-1.0, 2.0))
-    _scan(ranges, "b", (-3.0, 1.0))
-
-    dataset = ranges.collected()
-    assert dataset.min_value == -3.0
-    assert dataset.max_value == 2.0
-    assert dataset.min_index == 1  # the second sequence held the low
-    assert dataset.max_index == 0
-
-
-def test_a_collector_absorbs_across_calls():
-    # Results come back per worker, so absorbing is not a single handover.
-    ranges = DatasetRangeCollector()
-
-    _scan(ranges, "a", (0.0, 1.0))
-    _scan(ranges, "b", (0.0, 5.0))
-
-    assert ranges.collected().max_value == 5.0
-
-
-def test_a_collector_that_absorbed_nothing_refuses_to_fold():
-    with pytest.raises(ValueError, match="holds nothing"):
-        DatasetRangeCollector().collected()
-
-
-def test_a_collector_writes_the_document_it_gathered(tmp_path):
-    ranges = DatasetRangeCollector()
-    _scan(ranges, "a", (-1.0, 2.0))
-
-    path = ranges.save(tmp_path / "range", provenance={"filter": "identity"})
-
-    assert path == tmp_path / "range.json"
-    document = json.loads(path.read_text(encoding="utf-8"))
-    assert document["filter"] == "identity"
-    assert document["dataset"]["max_value"] == 2.0
-    assert document["dataset"]["sequences"][0]["source"] == "a"
-
-
 class _Fields:
     """The slice of `DataSequence` a scan reads, as fields with their filenames."""
 
@@ -190,10 +143,61 @@ class _Fields:
         return self._fields[index], Path(f"{index:05d}_phase.bin")
 
 
-def test_a_run_tells_the_collector_the_traversal_ended():
+def _collector(tmp_path, provenance=None) -> DatasetRangeCollector:
+    return DatasetRangeCollector(tmp_path / "range", provenance)
+
+
+def _scan(ranges: DatasetRangeCollector, source: str, *bounds: tuple[float, float]):
+    """Range one sequence the way a driver would: attach, run, call nothing."""
+    fields = _Fields(*(torch.tensor([[low, high]]) for low, high in bounds))
+    Steps(fields).attach(ranges.collector_for(source)).run()
+
+
+def test_a_finished_collector_hands_itself_over(tmp_path):
+    ranges = _collector(tmp_path)
+
+    _scan(ranges, "a", (-1.0, 2.0))
+    _scan(ranges, "b", (-3.0, 1.0))
+
+    dataset = ranges.collected()
+    assert dataset.min_value == -3.0
+    assert dataset.max_value == 2.0
+    assert dataset.min_index == 1  # the second sequence held the low
+    assert dataset.max_index == 0
+
+
+def test_a_collector_absorbs_across_calls(tmp_path):
+    # Results come back per worker, so absorbing is not a single handover.
+    ranges = _collector(tmp_path)
+
+    _scan(ranges, "a", (0.0, 1.0))
+    _scan(ranges, "b", (0.0, 5.0))
+
+    assert ranges.collected().max_value == 5.0
+
+
+def test_a_collector_that_absorbed_nothing_refuses_to_fold(tmp_path):
+    with pytest.raises(ValueError, match="holds nothing"):
+        _collector(tmp_path).collected()
+
+
+def test_a_collector_writes_the_document_it_gathered(tmp_path):
+    ranges = _collector(tmp_path, {"filter": "identity"})
+    _scan(ranges, "a", (-1.0, 2.0))
+
+    path = ranges.save()
+
+    assert path == tmp_path / "range.json"
+    document = json.loads(path.read_text(encoding="utf-8"))
+    assert document["filter"] == "identity"
+    assert document["dataset"]["max_value"] == 2.0
+    assert document["dataset"]["sequences"][0]["source"] == "a"
+
+
+def test_a_run_tells_the_collector_the_traversal_ended(tmp_path):
     # Attached as itself, so `Node.run` can signal it -- nothing calls `collected`
     # at the right moment by hand.
-    collector = DatasetRangeCollector().collector_for("seq")
+    collector = _collector(tmp_path).collector_for("seq")
     fields = _Fields(torch.tensor([[0.0, 2.0]]), torch.tensor([[-1.0, 1.0]]))
 
     Steps(fields).attach(collector).run()
@@ -206,22 +210,22 @@ def test_a_run_tells_the_collector_the_traversal_ended():
     ]
 
 
-def test_a_collector_refuses_a_fold_over_a_prefix():
-    collector = DatasetRangeCollector().collector_for("seq")
+def test_a_collector_refuses_a_fold_over_a_prefix(tmp_path):
+    collector = _collector(tmp_path).collector_for("seq")
     collector.observe(Slot(0, (torch.tensor([[1.0]]), Path("00000_phase.bin"))))
 
     with pytest.raises(ValueError, match="the traversal of seq did not finish"):
         collector.collected()
 
 
-def test_a_collector_refuses_after_a_traversal_that_died():
+def test_a_collector_refuses_after_a_traversal_that_died(tmp_path):
     # The steps it saw are a prefix, not this sequence's range, and reporting
     # them would put a hole in the dataset's bounds where nobody would see it.
     def explode(slot: Slot[tuple[torch.Tensor, Path]]) -> None:
         msg = "the run gave up"
         raise RuntimeError(msg)
 
-    collector = DatasetRangeCollector().collector_for("seq")
+    collector = _collector(tmp_path).collector_for("seq")
     node = Steps(_Fields(torch.tensor([[1.0]]))).attach(collector, explode)
 
     with pytest.raises(RuntimeError, match="the run gave up"):
@@ -231,13 +235,13 @@ def test_a_collector_refuses_after_a_traversal_that_died():
         collector.collected()
 
 
-def test_a_traversal_that_died_hands_over_nothing():
+def test_a_traversal_that_died_hands_over_nothing(tmp_path):
     # A prefix cannot reach the dataset's bounds, and no driver had to know.
     def explode(slot: Slot[tuple[torch.Tensor, Path]]) -> None:
         msg = "the run gave up"
         raise RuntimeError(msg)
 
-    ranges = DatasetRangeCollector()
+    ranges = _collector(tmp_path)
     node = Steps(_Fields(torch.tensor([[1.0]])))
     node.attach(ranges.collector_for("seq"), explode)
 
@@ -248,8 +252,8 @@ def test_a_traversal_that_died_hands_over_nothing():
         ranges.collected()
 
 
-def test_merge_brings_a_workers_copy_home():
-    parent, worker = DatasetRangeCollector(), DatasetRangeCollector()
+def test_merge_brings_a_workers_copy_home(tmp_path):
+    parent, worker = _collector(tmp_path), _collector(tmp_path)
     _scan(parent, "a", (0.0, 1.0))
     _scan(worker, "b", (0.0, 5.0))
 

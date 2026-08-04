@@ -86,18 +86,16 @@ flowchart LR
   phase --> dm["Dry mass"]
   opd --> ov["OPD variance"]
   flow(["optical flow"]) --> disp["Displacement"]
-  flow --> ac["Acceleration"]
   disp --> sp["Speed"]
-  sp --> ac
+  sp --> ac["Acceleration"]
   ac --> fo["Force"]
   dm --> fo
 ```
 
-`flow`가 `Acceleration`에도 들어가는 것은 **Lagrangian 워핑** 때문이다 — 물질 점을 따라가지
-않으면 오차가 `(v·∇)v`만큼 남고, 그것은 `dt`와 무관해서 프레임률을 올려도 안 메워진다.
-
-3D는 나중이다. `Displacement`가 `xy`(`flow × pixel_size`)와 `z`(height의 시간차분)로 갈리고
-`Height`가 위상에서 나오지만, 지금 중요한 것이 아니라 그림에서 뺐다.
+**3D와 Lagrangian 워핑은 나중이다.** 3D에서는 `Displacement`가 `xy`(`flow × pixel_size`)와
+`z`(height의 시간차분)로 갈리고 `Height`가 위상에서 나온다. Lagrangian 차분은 `Acceleration`과
+`Displacement z`에 `flow`를 하나 더 먹여 물질 점을 따라가게 한다. 둘 다 지금 결정할 것이
+아니라 그림에서 뺐다.
 
 **요청한 지표 수와 만들어지는 계산기 수는 다르다.** Force 하나를 요청해도 그 안에
 DryMass와 Acceleration이, Acceleration 안에 Speed가, Speed 안에 Displacement가 있다 —
@@ -436,7 +434,7 @@ flow가 같은 장치면 프레임이 장치를 떠나지 않는다. 나누면 �
 
 문제 정의의 지표 DAG·arity·reduction이 명세다. 그 위에 필요한 것:
 
-- **kinematic 커널** — 채널-첫(CHW) 규약. Lagrangian 워핑이 기본.
+- **kinematic 커널** — 채널-첫(CHW) 규약.
 - **계산기 구성** — 상위가 하위를 포함하고 하위 결과를 캐시한다. Force ⊃ {Acceleration,
   DryMass}, Acceleration ⊃ Speed, Speed ⊃ Displacement.
 - **reduction** — 지표마다 고정(벡터장은 norm의 평균, OPD variance는 평균, dry mass는 합).
@@ -505,26 +503,3 @@ flow가 같은 장치면 프레임이 장치를 떠나지 않는다. 나누면 �
   **부분 실행은 그렇다고 말해야 한다.** 부분집합에 대해 접은 범위는 데이터셋의 범위가
   아니며, 그것으로 정규화 정책을 정하는 소비자는 **구멍을 데이터로 읽게** 된다. 문서가 무엇을
   얻든 — 건너뛴 목록이든 찾은 개수 대비 카운트든 — 읽는 사람이 놓칠 수 없는 것이어야 한다.
-
-## 테스트
-
-- **픽스처 위의 opt-in 실데이터 테스트.** Koala 타임랩스는 비공개
-  `iivs-lab/iivs-lib-fixtures` 릴리스에 있다(`gh release download v1 -R
-  iivs-lab/iivs-lib-fixtures -D fixtures`). 자동으로 가져오는 것은 없다 — `iivs-lib`의
-  `scripts/fixtures/fetch.py` + `lock.json` 쌍이 옮길 만하다. 그쪽 테스트 패턴을 따를 것:
-  존재하는 타임랩스에 파라미터화된 `conftest.py` 픽스처라 없는 폴더는 실패가 아니라 스킵.
-  그 시점에 디렉터리를 gitignore할 것 — ~1.2 GB다. 합성 스위트가 못 하는 것을 거기서
-  주장할 값이 있다: flow가 identity baseline을 이기면서 **동시에** forward-backward
-  일관성을 유지하는가.
-
-- **`tests/scripts/`가 지금 수집조차 안 된다.** `scripts._range`가 `scripts.data._range`로
-  옮겨졌는데 테스트가 따라가지 않았다. 위치가 `scripts/data/` 아래로 확정됐으므로 테스트도
-  `tests/scripts/data/`로 가야 미러 규칙에 맞는다.
-
-## 결정으로 미룬 것
-
-`KernelParams`와 optical-flow params 클래스들의 `Params` 접미사를 `Config`로 바꾸는 것.
-범위를 구하면서 프레임을 여러 스레드로 읽는 것. `FilteredSequence`에 `FrameShapedMixin` /
-`ValueRangeMixin`을 붙이는 것 — 후자는 작성된 대로는 텐서에 쓸 수 없다. 빈 것을
-`finite.size == 0`으로 검사하는데 `Tensor`의 `size`는 메서드라 비교가 참이 되는 일이
-없으며, 그래서 `finite_range`가 `numel()`을 묻는다.
