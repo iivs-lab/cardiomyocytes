@@ -72,22 +72,20 @@ flowchart LR
 flowchart LR
   phase(["전처리된 위상"]) --> opd["OPD"]
   phase --> dm["Dry mass"]
-  phase --> h["Height"]
-  flow(["optical flow"]) --> dxy["Displacement xy"]
-  flow --> dz["Displacement z"]
-  flow --> ac["Acceleration"]
-  h --> dz
   opd --> ov["OPD variance"]
-  dxy --> disp["Displacement"]
-  dz --> disp
+  flow(["optical flow"]) --> disp["Displacement"]
+  flow --> ac["Acceleration"]
   disp --> sp["Speed"]
   sp --> ac
   ac --> fo["Force"]
   dm --> fo
 ```
 
-`flow`가 `Acceleration`과 `Displacement z`에도 들어가는 것은 **Lagrangian 워핑** 때문이다
-(§ 정확성 3규약).
+`flow`가 `Acceleration`에도 들어가는 것은 **Lagrangian 워핑** 때문이다 — 물질 점을 따라가지
+않으면 오차가 `(v·∇)v`만큼 남고, 그것은 `dt`와 무관해서 프레임률을 올려도 안 메워진다.
+
+3D는 나중이다. `Displacement`가 `xy`(`flow × pixel_size`)와 `z`(height의 시간차분)로 갈리고
+`Height`가 위상에서 나오지만, 지금 중요한 것이 아니라 그림에서 뺐다.
 
 **요청한 지표 수와 만들어지는 계산기 수는 다르다.** Force 하나를 요청해도 그 안에
 DryMass와 Acceleration이, Acceleration 안에 Speed가, Speed 안에 Displacement가 있다 —
@@ -164,81 +162,6 @@ force          4     3, 4, 5 → acceleration 4
 - **editable install은 개발 편의용**: `import iivs_cardio` 안정화 목적. PyPI 배포 아님,
   `py.typed` 없음.
 - **console entry point 기각**: CLI 코드를 패키지 안으로 끌어들여 `scripts/` 분리와 충돌.
-
-## compute 커널 — 단일 수학 출처
-
-DL·파이프라인·2D/3D·numpy/torch가 **모두 같은 수학 함수**를 호출한다(중복 금지).
-입력은 시간축-우선 블록: 스칼라장 `(T, H, W)`, 벡터장 `(T, 2, H, W)` — **채널-첫(CHW)**.
-
-> **CHW인 이유 (결정 완료).** 결정적 근거는 하나다: Lagrangian 체인이 벡터장을
-> `grid_sample`로 반복 워핑하는데 그 **이미지 입력이 `(N, C, H, W)`** 라 2-벡터장은
-> `(N, 2, H, W)`가 native다. HWC면 **매 warp마다 permute in/out(+복사)** 이 hot-path에서
-> 반복된다. 나머지는 상쇄된다 — cv2(HWC) ↔ DL(CHW) 경계는 어느 규약이든 permute-view
-> 1회로 대칭이고, 인덱싱 가독성은 코스메틱이며, 지표는 레이아웃과 무관하다.
-> 적용: estimators ✅ / `common/warp.py` ✅ / DL ✅ / **kinematic 커널 ⬜ 미구현**.
-
-```python
-def opd_from_phase(phase, opd_scale):        # phase(rad) → OPD(nm)
-    return phase * opd_scale
-
-def height_from_phase(phase, height_scale):  # phase(rad) → height(m)
-    return phase * height_scale
-
-def warp(field_next, flow):                  # field_next[t]를 flow(t→t+1)로 t좌표계 정렬
-    ...                                      # grid_sample / remap
-
-def displacement_xy(flow, pixel_size):       # flow(px) → 횡변위(m). (T-1, 2, H, W)
-    return flow * pixel_size
-
-def z_displacement(height, flow, *, lagrangian=True):  # 물질 점 높이 변화. (T-1, H, W)
-    if lagrangian:
-        return warp(height[1:], flow) - height[:-1]
-    return height[1:] - height[:-1]                    # Eulerian(소운동 근사)
-
-def speed(displacement, dt):
-    return displacement / dt
-
-def acceleration(v, flow, dt, *, lagrangian=True):     # 물질미분
-    if lagrangian:
-        return (warp(v[1:], flow) - v[:-1]) / dt
-    return (v[1:] - v[:-1]) / dt
-
-def force(accel, mass):                      # mass (T-1, H, W) → 채널축 삽입
-    return mass[..., None, :, :] * accel     # 벡터 차원 D=2 or 3 무관
-```
-
-- **kinematic 커널에 CHW를 전파할 것.** 조상 문서 `new-project-DESIGN.md` §4.1은 아직
-  채널-last다 — 그 정정을 염두에 두고 읽어야 한다.
-
-## 정확성 3규약 + Lagrangian (조용한 버그 방지)
-
-1. **시간 정렬(arity)**: per-interval 양은 `T → T−1`. flow·z변위·가속도가 일관 정렬.
-2. **단위 정합**: flow는 픽셀 단위 → `× pixel_size`로 미터화한 뒤 z(미터)와 결합.
-3. **Lagrangian 워핑**: 물질 점을 따라가는 차분(flow로 워핑 후 차분).
-
-- **Acceleration**: 물질미분 `Dv/Dt = ∂v/∂t + (v·∇)v`. Eulerian 격차 = `(v·∇)v` →
-  **O(1), dt 무관** → dt를 줄여도 못 메운다(정상류라도 입자는 가속). ⇒ 사실상 필수.
-- **Displacement(z)**: Eulerian 오차 = `(v·∇)h·dt` → O(dt). 그래도 (u,v)가 이미
-  Lagrangian이라 **일관성** 때문에 Lagrangian 기본.
-- 진단: `‖(v·∇)v‖` 대 `‖∂v/∂t‖`.
-
-## 2D → 3D 확장
-
-- **차원이 바뀌는 건 displacement 하나뿐.** `speed/accel/force`는 `(..., D)`에 동일 동작
-  → **공유**(Speed3D 등 불필요).
-- `Displacement3D = concat(xy = flow×pixel_size [m], z = z_displacement [m])`.
-- **단위 정합 필수**: xy를 `pixel_size`로 미터화한 뒤 z(미터)와 결합.
-
-## 수치
-
-- **OPD variance 전역값**: 프레임별 `(n, mean, M2)`를 **Welford/Chan으로 병합** →
-  finalize. **float64 누적.**
-- variance/dry mass 합산은 **float64**, 그 외 기본 float32(필요 시 AMP).
-- **배치는 이득이 확실하지 않다.** 900×900에서는 프레임 하나가 이미 장치를 채워 필터는
-  배치로 **0.97~1.08배**에 그쳤다(측정). OpenCV 추정기는 배치 API 자체가 없다
-  (`calc_batch`가 파이썬 루프인 이유). DL 추정기의 coarse 레벨과 반복 갱신처럼 **커널
-  실행 오버헤드가 지배하는 곳에서만** 이득이 예상된다. 배치 크기는 활성값 메모리와
-  직결되므로 설정으로 노출하고 기본값은 보수적으로 둔다.
 
 ## 멀티 GPU
 
@@ -525,7 +448,7 @@ ML 런타임·대용량 산출물을 **구조로 커밋하지 말고 gitignore**
 
 문제 정의의 지표 DAG·arity·reduction이 명세다. 그 위에 필요한 것:
 
-- **kinematic 커널** — 문제 정의의 스케치가 채널-첫 규약이다. Lagrangian 워핑이 기본.
+- **kinematic 커널** — 채널-첫(CHW) 규약. Lagrangian 워핑이 기본.
 - **계산기 구성** — 상위가 하위를 포함하고 하위 결과를 캐시한다. Force ⊃ {Acceleration,
   DryMass}, Acceleration ⊃ Speed, Speed ⊃ Displacement.
 - **reduction** — 지표마다 고정(벡터장은 norm의 평균, OPD variance는 평균, dry mass는 합).
