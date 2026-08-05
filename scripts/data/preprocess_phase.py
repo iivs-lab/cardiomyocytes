@@ -83,8 +83,8 @@ class TargetConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class FrameDestination:
-    target_root: StrPath
+class FrameTree:
+    root: StrPath
     subpath: str
     overwrite: bool = False
 
@@ -93,7 +93,7 @@ class FrameDestination:
         header = origin.header
 
         return phase_frame_writer(
-            Path(self.target_root, source.name, self.subpath),
+            Path(self.root, source.name, self.subpath),
             pixel_size=header.pixel_size,
             height_scale=header.height_scale,
             unit=unwrap_or_default(origin.target_unit, header.unit),
@@ -212,7 +212,7 @@ def build_phase_stages(
 
         if target_config.save_frames:
             branches.append(
-                FrameDestination(
+                FrameTree(
                     root,
                     subpath=unwrap_or_default(source_config.subpath, PHASE_FLOAT_BIN),
                     overwrite=target_config.overwrite,

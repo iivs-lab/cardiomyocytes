@@ -40,7 +40,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   into a reader for them.
 - `preprocess_phase` writes the filtered frames when `target.save_frames` is set.
   `target.overwrite` decides whether an output already under `target.root` may
-  be replaced. `FrameDestination` carries what every sequence's writer shares
+  be replaced. `FrameTree` carries what every sequence's writer shares
   and `PhaseStageFactory` hands out a stage with its hooks already registered,
   so whatever owns a stage never wires that stage's side branches.
 - `preprocess_phase` refuses `target.save_frames` in a `--multirun`. Frames go to
