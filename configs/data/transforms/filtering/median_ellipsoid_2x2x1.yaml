@@ -1,3 +1,3 @@
-_target_: iivs_cardio.data.transforms.filtering.kernel.median.MedianParams
+_target_: iivs_cardio.data.transforms.filtering.kernel.median.MedianConfig
 radius: [2, 2, 1]
 shape: "ellipsoid"

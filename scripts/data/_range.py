@@ -4,6 +4,7 @@ __all__ = (
     "CompositeRange",
     "DatasetRange",
     "FrameRange",
+    "Named",
     "RangeDocument",
     "SequenceRange",
     "SequenceRangeMeter",
@@ -27,13 +28,19 @@ if TYPE_CHECKING:
     from pathlib import Path
     from types import TracebackType
 
-    from iivs.dhm.data.phase import PhaseFileFolder
     from kaparoo.filesystem.types import StrPath
     from torch import Tensor
 
     from iivs_cardio.common.pipeline import Step
 
 PARTS_SUFFIX = ".parts"
+
+
+class Named(Protocol):
+    """Whatever a range document needs of a sequence: what to file it under."""
+
+    @property
+    def name(self) -> str: ...
 
 
 class ValueRange(Protocol):
@@ -230,9 +237,9 @@ class RangeDocument:
         """The folder the sequences of this run leave their results in."""
         return self.path.with_suffix(PARTS_SUFFIX)
 
-    def hook_for(self, name: str, origin: PhaseFileFolder) -> SequenceRangeMeter:  # noqa: ARG002
-        """The meter for the sequence `name`, which `origin` was read out of."""
-        return SequenceRangeMeter(name, self.parts)
+    def hook_for(self, source: Named) -> SequenceRangeMeter:
+        """The meter for `source`, filed under the name it answers to."""
+        return SequenceRangeMeter(source.name, self.parts)
 
     def collected(self) -> DatasetRange:
         """Fold what the sequences of this run left behind, in name order.

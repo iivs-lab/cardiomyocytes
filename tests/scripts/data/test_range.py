@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -236,6 +237,20 @@ def test_the_parts_folder_sits_beside_the_document(tmp_path):
     bare = RangeDocument(tmp_path / "phase_range")
 
     assert named.parts == bare.parts == tmp_path / "phase_range.parts"
+
+
+def test_a_document_asks_a_sequence_only_what_it_is_called(tmp_path):
+    # `Named` is the whole of what a range document needs, so it never learns
+    # what a phase folder or a filtered sequence is.
+    @dataclass(frozen=True, slots=True)
+    class _Named:
+        name: str
+
+    meter = RangeDocument(tmp_path / "range").hook_for(_Named("plate/TL_00"))
+    with meter:
+        meter(Step(0, torch.tensor([[0.0, 1.0]]), Path("00000_phase.bin")))
+
+    assert (tmp_path / "range.parts" / "plate%2FTL_00.json").exists()
 
 
 def test_a_document_folds_the_parts_in_name_order(tmp_path):

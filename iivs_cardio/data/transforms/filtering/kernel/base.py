@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-__all__ = ("FilterKernel", "KernelParams", "RadiusLike", "RadiusType")
+__all__ = ("FilterKernel", "KernelConfig", "RadiusLike", "RadiusType")
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import cast
+from dataclasses import dataclass
+from typing import ClassVar, cast
 
 from jaxtyping import Float32
 from torch import Tensor
@@ -136,15 +137,22 @@ class FilterKernel(ABC):
             raise ValueError(msg)
 
 
-class KernelParams(ABC):
+@dataclass(frozen=True, slots=True)
+class KernelConfig(ABC):
     """A kernel's constructor arguments as one value, buildable into the kernel.
 
     Separate from `FilterKernel` so a config, a CLI, or the cache sidecar carries the
     settings without a live object -- and what a later run reconstructs is
     exactly what was recorded. Closed at the same family as `FilterKernel`; each
-    concrete params is a plain frozen record that neither expands nor validates
+    concrete config is a plain frozen record that neither expands nor validates
     its fields, leaving the kernel the one place that interprets them.
+
+    `kind` is what a record says the filter was. Declared rather than read off
+    the class or the import path, so moving the code cannot make two runs that
+    filtered the same way look different to whoever compares their records.
     """
+
+    kind: ClassVar[str]
 
     @abstractmethod
     def build(self) -> FilterKernel:

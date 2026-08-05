@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-__all__ = ("IdentityKernel", "IdentityParams")
+__all__ = ("IdentityConfig", "IdentityKernel")
 
 from dataclasses import dataclass
-from typing import override
+from typing import ClassVar, override
 
 from beartype import beartype
 from jaxtyping import jaxtyped
@@ -11,7 +11,7 @@ from jaxtyping import jaxtyped
 from iivs_cardio.data.transforms.filtering.kernel.base import (
     FilterKernel,
     FrameType,
-    KernelParams,
+    KernelConfig,
     WindowType,
 )
 
@@ -52,7 +52,9 @@ class IdentityKernel(FilterKernel):
 
 
 @dataclass(frozen=True, slots=True)
-class IdentityParams(KernelParams):
+class IdentityConfig(KernelConfig):
+    kind: ClassVar[str] = "identity"
+
     @override
     def build(self) -> IdentityKernel:
         return IdentityKernel()

@@ -10,9 +10,9 @@ import pytest
 import torch
 
 from iivs_cardio.data.transforms.filtering import (
-    KernelParams,
+    KernelConfig,
+    MedianConfig,
     MedianKernel,
-    MedianParams,
 )
 from iivs_cardio.data.transforms.filtering.kernel import median as median_kernel
 
@@ -195,12 +195,12 @@ def test_the_rejection_message_names_both_valid_shapes():
 
 
 def test_params_reject_a_bad_shape_when_built():
-    # `MedianParams` only records the fields; the check belongs to the kernel,
+    # `MedianConfig` only records the fields; the check belongs to the kernel,
     # so a config's typo surfaces at `build()` rather than being carried along.
-    params = MedianParams((1, 1, 1), shape="sphere")  # ty: ignore[invalid-argument-type]
+    config = MedianConfig((1, 1, 1), shape="sphere")  # ty: ignore[invalid-argument-type]
 
     with pytest.raises(ValueError, match="unsupported shape"):
-        params.build()
+        config.build()
 
 
 def test_cuboid_takes_the_whole_box_in_scan_order():
@@ -324,37 +324,37 @@ def test_median_matches_a_brute_force_pass_over_explicit_neighbours():
         )
 
 
-# --------------------------------- params --------------------------------- #
+# --------------------------------- config --------------------------------- #
 
 
 def test_params_hold_what_they_were_given():
     # A plain record: it neither expands the radius nor checks it, so a config
     # round-trips through it unchanged and the kernel stays the one place that
     # interprets a radius. Whatever builds a kernel from these does the rest.
-    assert MedianParams(2).radius == 2
-    assert MedianParams((2, 5)).radius == (2, 5)
-    assert MedianParams((1, -1, 1)).radius == (1, -1, 1)  # invalid, and still held
+    assert MedianConfig(2).radius == 2
+    assert MedianConfig((2, 5)).radius == (2, 5)
+    assert MedianConfig((1, -1, 1)).radius == (1, -1, 1)  # invalid, and still held
 
-    assert MedianParams((1, 1, 1)).shape == "ellipsoid"  # the only default
+    assert MedianConfig((1, 1, 1)).shape == "ellipsoid"  # the only default
 
 
 def test_params_are_frozen_records():
     # They are what the cache sidecar records; a mutated one would describe a
     # cache that had been built with something else.
-    params = MedianParams((1, 1, 1))
+    config = MedianConfig((1, 1, 1))
 
-    assert params.shape == "ellipsoid"
+    assert config.shape == "ellipsoid"
     with pytest.raises(FrozenInstanceError):
-        params.radius = (2, 2, 2)  # ty: ignore[invalid-assignment]
+        config.radius = (2, 2, 2)  # ty: ignore[invalid-assignment]
 
 
 def test_build_expands_the_held_radius_into_a_kernel():
-    # `build` is the `KernelParams` contract, and the step that finally
+    # `build` is the `KernelConfig` contract, and the step that finally
     # interprets a short radius the record kept verbatim.
-    params = MedianParams((1, 0), shape="cuboid")
-    kernel = params.build()
+    config = MedianConfig((1, 0), shape="cuboid")
+    kernel = config.build()
 
-    assert isinstance(params, KernelParams)
+    assert isinstance(config, KernelConfig)
     assert isinstance(kernel, MedianKernel)
     assert kernel.radius == (1, 1, 0)
     assert kernel.shape == "cuboid"

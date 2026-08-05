@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("EstimatorParams", "OpticalFlowEstimator")
+__all__ = ("EstimatorConfig", "OpticalFlowEstimator")
 
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, ClassVar
@@ -71,14 +71,14 @@ class OpticalFlowEstimator(ABC):
         """
 
 
-class EstimatorParams(ABC):
+class EstimatorConfig(ABC):
     """An estimator's constructor arguments as one value, buildable into it.
 
     Separate from `OpticalFlowEstimator` so a config, a CLI, or a process-pool
     recipe carries the settings without a live estimator -- which cannot cross a
     process boundary, holding a `cv2` object that does not pickle. `build`
     reconstructs one on the target device inside the worker. Mirrors
-    `filtering.kernel.KernelParams`; `device` is the one addition, since an
+    `filtering.kernel.KernelConfig`; `device` is the one addition, since an
     estimator is device-bound where a kernel is not.
     """
 

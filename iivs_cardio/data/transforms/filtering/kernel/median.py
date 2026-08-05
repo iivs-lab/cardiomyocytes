@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-__all__ = ("KernelShape", "MedianKernel", "MedianParams")
+__all__ = ("KernelShape", "MedianConfig", "MedianKernel")
 
 from dataclasses import dataclass
 from itertools import product
-from typing import TYPE_CHECKING, Final, Literal, get_args, override
+from typing import TYPE_CHECKING, ClassVar, Final, Literal, get_args, override
 
 import torch
 from beartype import beartype
@@ -14,7 +14,7 @@ from torch.nn.functional import pad
 from iivs_cardio.data.transforms.filtering.kernel.base import (
     FilterKernel,
     FrameType,
-    KernelParams,
+    KernelConfig,
     RadiusLike,
     RadiusType,
     WindowType,
@@ -175,7 +175,9 @@ class MedianKernel(FilterKernel):
 
 
 @dataclass(frozen=True, slots=True)
-class MedianParams(KernelParams):
+class MedianConfig(KernelConfig):
+    kind: ClassVar[str] = "median"
+
     radius: RadiusLike
     shape: KernelShape = "ellipsoid"
 

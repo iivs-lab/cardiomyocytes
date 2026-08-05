@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-__all__ = ("DeepFlow", "DeepFlowParams")
+__all__ = ("DeepFlow", "DeepFlowConfig")
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, override
 
 import cv2
 
-from iivs_cardio.optical_flow.estimators.base import EstimatorParams
+from iivs_cardio.optical_flow.estimators.base import EstimatorConfig
 from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVEstimator
 
 if TYPE_CHECKING:
@@ -23,10 +23,10 @@ class DeepFlow(OpenCVEstimator):
 
 
 @dataclass(frozen=True, slots=True)
-class DeepFlowParams(EstimatorParams):
+class DeepFlowConfig(EstimatorConfig):
     """DeepFlow's (empty) recipe: it exposes no tunable parameters.
 
-    Held anyway so every estimator has a buildable `EstimatorParams`, letting a
+    Held anyway so every estimator has a buildable `EstimatorConfig`, letting a
     worker construct any of them through the one `build` interface.
     """
 

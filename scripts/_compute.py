@@ -2,7 +2,6 @@ from __future__ import annotations
 
 __all__ = (
     "ComputeConfig",
-    "StageFactory",
     "pin_threads",
     "plan_devices",
     "report_insights",
@@ -11,7 +10,7 @@ __all__ = (
 
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 import torch
 from kaparoo.utils.optional import unwrap_or_default
@@ -21,7 +20,7 @@ from tqdm import trange
 from iivs_cardio.common.device import Device
 
 if TYPE_CHECKING:
-    from contextlib import AbstractContextManager
+    from iivs_cardio.common.pipeline import StageFactory
 
 DEFAULT_WORKERS = os.cpu_count() or 1
 
@@ -105,24 +104,6 @@ def pin_threads(workers: int) -> None:
         return
 
     torch.set_num_threads(max(1, _UNPINNED_THREADS // workers))
-
-
-class StageFactory(Protocol):
-    """A run's work, divided into items a device can take one at a time.
-
-    What a runner needs and no more: how many items there are, how to run one of
-    them on a device, and a bracket around the whole run for the side branches
-    that only finish once every item has. Composing the graph an item is run
-    through stays inside the implementation, which is what keeps this the same
-    shape at every stage of the pipeline -- an estimator needs the filter's
-    stage and a metric needs both, and neither divergence reaches here.
-    """
-
-    def __len__(self) -> int: ...
-
-    def run_one(self, index: int, device: Device, /) -> None: ...
-
-    def running(self) -> AbstractContextManager[Any]: ...
 
 
 def _run_on_worker(

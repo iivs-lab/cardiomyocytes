@@ -8,12 +8,12 @@ import torch
 from iivs_cardio.common import Device
 from iivs_cardio.optical_flow.estimators import (
     DeepFlow,
-    DeepFlowParams,
+    DeepFlowConfig,
     DualTVL1,
-    DualTVL1Params,
-    EstimatorParams,
+    DualTVL1Config,
+    EstimatorConfig,
     Farneback,
-    FarnebackParams,
+    FarnebackConfig,
 )
 
 # All three OpenCV methods run on CPU, so the streaming contract is tested
@@ -166,25 +166,25 @@ def test_supported_devices():
 
 
 def test_custom_params_are_retained():
-    of = Farneback(FarnebackParams(num_levels=1, win_size=7), device="cpu")
-    assert of.params.num_levels == 1
-    assert of.params.win_size == 7
+    of = Farneback(FarnebackConfig(num_levels=1, win_size=7), device="cpu")
+    assert of.config.num_levels == 1
+    assert of.config.win_size == 7
 
 
 @pytest.mark.parametrize(
-    ("params", "expected"),
+    ("config", "expected"),
     (
-        pytest.param(FarnebackParams(win_size=21), Farneback, id="farneback"),
-        pytest.param(DualTVL1Params(nscales=5), DualTVL1, id="dualtvl1"),
-        pytest.param(DeepFlowParams(), DeepFlow, id="deepflow"),
+        pytest.param(FarnebackConfig(win_size=21), Farneback, id="farneback"),
+        pytest.param(DualTVL1Config(nscales=5), DualTVL1, id="dualtvl1"),
+        pytest.param(DeepFlowConfig(), DeepFlow, id="deepflow"),
     ),
 )
-def test_params_build_their_estimator_on_the_given_device(params, expected):
-    # The `EstimatorParams.build` recipe a pool worker uses: a picklable params
+def test_params_build_their_estimator_on_the_given_device(config, expected):
+    # The `EstimatorConfig.build` recipe a pool worker uses: a picklable config
     # object reconstructs the (unpicklable) estimator on the worker's device.
-    assert isinstance(params, EstimatorParams)
+    assert isinstance(config, EstimatorConfig)
 
-    estimator = params.build("cpu")
+    estimator = config.build("cpu")
     assert isinstance(estimator, expected)
     assert estimator.device == Device("cpu")
 
@@ -192,19 +192,19 @@ def test_params_build_their_estimator_on_the_given_device(params, expected):
 def test_build_forwards_the_held_params():
     # `build` must pass its own fields through, not defaults -- the one step that
     # turns a stored config back into a configured estimator.
-    built = FarnebackParams(num_levels=1, win_size=7).build("cpu")
+    built = FarnebackConfig(num_levels=1, win_size=7).build("cpu")
 
-    assert built.params.num_levels == 1
-    assert built.params.win_size == 7
+    assert built.config.num_levels == 1
+    assert built.config.win_size == 7
 
 
 def test_estimator_params_pickle_across_a_process_boundary():
-    # Why the recipe is params, not a live estimator: the estimator holds a `cv2`
-    # object that does not pickle, but its params do -- so they cross to a worker.
+    # Why the recipe is config, not a live estimator: the estimator holds a `cv2`
+    # object that does not pickle, but its config do -- so they cross to a worker.
     import pickle
 
-    for params in (FarnebackParams(win_size=21), DualTVL1Params(), DeepFlowParams()):
-        assert pickle.loads(pickle.dumps(params)) == params  # noqa: S301
+    for config in (FarnebackConfig(win_size=21), DualTVL1Config(), DeepFlowConfig()):
+        assert pickle.loads(pickle.dumps(config)) == config  # noqa: S301
 
 
 @pytest.mark.parametrize("flow_cls", (Farneback, DualTVL1))

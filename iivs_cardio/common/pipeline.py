@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("Hook", "SequenceStage", "SideBranch", "Stage", "Step")
+__all__ = ("Hook", "SequenceStage", "SideBranch", "Stage", "StageFactory", "Step")
 
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, ExitStack
@@ -11,6 +11,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
     from kaparoo.data import DataSequence
+
+    from iivs_cardio.common.device import Device
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,7 +40,15 @@ type Hook[T, E = None] = Callable[[Step[T, E]], None]
 
 
 class SideBranch[S, T, E = None](Protocol):
-    def hook_for(self, name: str, source: S, /) -> Hook[T, E]: ...
+    def hook_for(self, source: S, /) -> Hook[T, E]: ...
+
+
+class StageFactory(Protocol):
+    def __len__(self) -> int: ...
+
+    def run_one(self, index: int, device: Device, /) -> None: ...
+
+    def running(self) -> AbstractContextManager[Any]: ...
 
 
 class Stage[T, E = None](ABC):

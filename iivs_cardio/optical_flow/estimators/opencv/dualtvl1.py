@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("DualTVL1", "DualTVL1Params")
+__all__ = ("DualTVL1", "DualTVL1Config")
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, override
@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, override
 import cv2
 from kaparoo.utils.optional import unwrap_or_factory
 
-from iivs_cardio.optical_flow.estimators.base import EstimatorParams
+from iivs_cardio.optical_flow.estimators.base import EstimatorConfig
 from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVEstimator
 
 if TYPE_CHECKING:
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class DualTVL1Params(EstimatorParams):
+class DualTVL1Config(EstimatorConfig):
     tau: float = 0.25
     lambda_: float = 0.05
     theta: float = 0.3
@@ -41,42 +41,42 @@ class DualTVL1Params(EstimatorParams):
 class DualTVL1(OpenCVEstimator):
     def __init__(
         self,
-        params: DualTVL1Params | None = None,
+        config: DualTVL1Config | None = None,
         *,
         device: DeviceLike = "cpu",
     ) -> None:
-        self.params = unwrap_or_factory(params, DualTVL1Params)
+        self.config = unwrap_or_factory(config, DualTVL1Config)
         super().__init__(device)
 
     @override
     def _create_algorithm(self) -> OpenCVAlgorithm:
-        params = self.params
+        config = self.config
 
         if self.is_cuda:
             return cv2.cuda.OpticalFlowDual_TVL1.create(
-                tau=params.tau,
-                lambda_=params.lambda_,
-                theta=params.theta,
-                nscales=params.nscales,
-                warps=params.warps,
-                epsilon=params.epsilon,
-                iterations=params.iterations,
-                scaleStep=params.scale_step,
-                gamma=params.gamma,
+                tau=config.tau,
+                lambda_=config.lambda_,
+                theta=config.theta,
+                nscales=config.nscales,
+                warps=config.warps,
+                epsilon=config.epsilon,
+                iterations=config.iterations,
+                scaleStep=config.scale_step,
+                gamma=config.gamma,
                 useInitialFlow=False,
             )
 
         return cv2.optflow.DualTVL1OpticalFlow.create(
-            tau=params.tau,
-            lambda_=params.lambda_,
-            theta=params.theta,
-            nscales=params.nscales,
-            warps=params.warps,
-            epsilon=params.epsilon,
-            innnerIterations=params.inner_iterations,  # OpenCV's parameter name (triple n)
-            outerIterations=params.outer_iterations,
-            scaleStep=params.scale_step,
-            gamma=params.gamma,
-            medianFiltering=params.median_filtering,
+            tau=config.tau,
+            lambda_=config.lambda_,
+            theta=config.theta,
+            nscales=config.nscales,
+            warps=config.warps,
+            epsilon=config.epsilon,
+            innnerIterations=config.inner_iterations,  # OpenCV's parameter name (triple n)
+            outerIterations=config.outer_iterations,
+            scaleStep=config.scale_step,
+            gamma=config.gamma,
+            medianFiltering=config.median_filtering,
             useInitialFlow=False,
         )

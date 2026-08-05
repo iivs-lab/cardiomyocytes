@@ -17,6 +17,7 @@ from scripts.data.preprocess_phase import (
     SourceConfig,
     TargetConfig,
     build_phase_stages,
+    build_sequences,
     search_sources,
 )
 from tests.scripts.conftest import FRAMES, SEQUENCES
@@ -44,7 +45,7 @@ def _scan(
         root=str(dest), save_frames=save_frames, save_ranges=save_ranges
     )
 
-    run_all(build_phase_stages(source, config), compute)
+    run_all(build_phase_stages(source, config, output_root=dest), compute)
 
 
 def _document(dest: Path) -> dict:
@@ -120,6 +121,26 @@ def test_a_key_no_schema_declares_is_refused():
     # Guards the test above: it only means something while composition is strict.
     with pytest.raises(Exception, match=r"(?i)could not override|not in struct"):
         _composed("compute.no_such_field=1")
+
+
+def test_a_target_asking_for_nothing_is_refused(phase_tree, tmp_path):
+    # Both branches off is a config that configures nothing, which is a mistake
+    # rather than a way to say "just read" -- that is `target_config=None`.
+    source = SourceConfig(root=str(phase_tree))
+    target = TargetConfig(root=str(tmp_path), save_frames=False, save_ranges=False)
+
+    with pytest.raises(ValueError, match=r"nothing to do"):
+        build_phase_stages(source, target)
+
+
+def test_a_sequence_knows_what_it_is_called_in_its_dataset(phase_tree):
+    # Derived from the folder it was opened over, so a side branch reading the
+    # name cannot land somewhere the frames did not come from.
+    sequences = build_sequences(SourceConfig(root=str(phase_tree)))
+
+    assert [sequence.name for sequence in sequences] == [
+        f"TL_{index:02d}" for index in range(SEQUENCES)
+    ]
 
 
 def test_a_factory_offers_one_stage_per_sequence(phase_tree):

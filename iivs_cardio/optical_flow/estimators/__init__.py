@@ -1,25 +1,25 @@
 __all__ = (
     "DeepFlow",
-    "DeepFlowParams",
+    "DeepFlowConfig",
     "DualTVL1",
-    "DualTVL1Params",
-    "EstimatorParams",
+    "DualTVL1Config",
+    "EstimatorConfig",
     "Farneback",
-    "FarnebackParams",
+    "FarnebackConfig",
     "OpenCVEstimator",
     "OpticalFlowEstimator",
 )
 
 from iivs_cardio.optical_flow.estimators.base import (
-    EstimatorParams,
+    EstimatorConfig,
     OpticalFlowEstimator,
 )
 from iivs_cardio.optical_flow.estimators.opencv import (
     DeepFlow,
-    DeepFlowParams,
+    DeepFlowConfig,
     DualTVL1,
-    DualTVL1Params,
+    DualTVL1Config,
     Farneback,
-    FarnebackParams,
+    FarnebackConfig,
     OpenCVEstimator,
 )

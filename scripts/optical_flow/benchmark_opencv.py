@@ -48,7 +48,7 @@ sweep is the same command with `--multirun`:
     uv run scripts/optical_flow/benchmark_opencv.py sample=10hz_tif
     uv run scripts/optical_flow/benchmark_opencv.py --multirun \\
         preprocess=legacy,raw \\
-        algorithms.farneback.estimator.params.win_size=9,15,21
+        algorithms.farneback.estimator.config.win_size=9,15,21
 
 Each run writes `benchmark.json` -- every row plus the configuration that
 produced it -- next to its log under `outputs/`, so a sweep can be collected

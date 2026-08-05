@@ -4,7 +4,14 @@ from iivs_cardio.common.device import (
     DeviceKind,
     DeviceLike,
 )
-from iivs_cardio.common.pipeline import Hook, SequenceStage, Stage, Step
+from iivs_cardio.common.pipeline import (
+    Hook,
+    SequenceStage,
+    SideBranch,
+    Stage,
+    StageFactory,
+    Step,
+)
 from iivs_cardio.common.range import finite_range
 from iivs_cardio.common.writer import KoalaFrameWriter
 
@@ -16,7 +23,9 @@ __all__ = (
     "Hook",
     "KoalaFrameWriter",
     "SequenceStage",
+    "SideBranch",
     "Stage",
+    "StageFactory",
     "Step",
     "finite_range",
 )

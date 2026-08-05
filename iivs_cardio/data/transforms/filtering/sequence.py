@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from torch import Tensor
 
     from iivs_cardio.common.device import DeviceLike
-    from iivs_cardio.data.transforms.filtering.kernel import FilterKernel, KernelParams
+    from iivs_cardio.data.transforms.filtering.kernel import FilterKernel, KernelConfig
 
 type NumPyRealDType = np.floating | np.integer
 """Any real numpy dtype. Complex is excluded: casting one drops its phase."""
@@ -108,23 +108,23 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
         self._device = device
 
     @classmethod
-    def from_params(
+    def from_config(
         cls,
         source: S,
-        params: KernelParams,
+        config: KernelConfig,
         *,
         step: int = 1,
         device: DeviceLike = "cpu",
     ) -> FilteredSequence[S, M, T]:
-        """Build the kernel `params` describes, and filter `source` with it.
+        """Build the kernel `config` describes, and filter `source` with it.
 
         Args:
             source: the frames to filter.
-            params: which kernel to build, and with what.
+            config: which kernel to build, and with what.
             step: keep every `step`-th frame, counting from the first.
             device: where filtering runs and the returned tensors live.
         """
-        return cls(source, params.build(), step=step, device=device)
+        return cls(source, config.build(), step=step, device=device)
 
     @property
     def origin(self) -> S:

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-__all__ = ("GaussianKernel", "GaussianParams", "SigmaLike", "SigmaType")
+__all__ = ("GaussianConfig", "GaussianKernel", "SigmaLike", "SigmaType")
 
 from dataclasses import dataclass
-from typing import override
+from typing import ClassVar, override
 
 import torch
 from beartype import beartype
@@ -14,7 +14,7 @@ from torch.nn.functional import conv2d
 from iivs_cardio.data.transforms.filtering.kernel.base import (
     FilterKernel,
     FrameType,
-    KernelParams,
+    KernelConfig,
     WindowType,
     _normalize_triple,
 )
@@ -157,7 +157,9 @@ class GaussianKernel(FilterKernel):
 
 
 @dataclass(frozen=True, slots=True)
-class GaussianParams(KernelParams):
+class GaussianConfig(KernelConfig):
+    kind: ClassVar[str] = "gaussian"
+
     sigma: SigmaLike
     truncate: float = 4.0
 

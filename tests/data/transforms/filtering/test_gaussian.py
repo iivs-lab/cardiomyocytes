@@ -9,9 +9,9 @@ import pytest
 import torch
 
 from iivs_cardio.data.transforms.filtering import (
+    GaussianConfig,
     GaussianKernel,
-    GaussianParams,
-    KernelParams,
+    KernelConfig,
 )
 
 if TYPE_CHECKING:
@@ -200,27 +200,27 @@ def test_gaussian_matches_a_brute_force_weighted_mean():
         )
 
 
-# --------------------------------- params --------------------------------- #
+# --------------------------------- config --------------------------------- #
 
 
 def test_params_hold_what_they_were_given():
-    assert GaussianParams(1.0).sigma == 1.0
-    assert GaussianParams((1.0, 2.0)).sigma == (1.0, 2.0)
-    assert GaussianParams((1.0, 1.0, 1.0)).truncate == 4.0  # the only default
+    assert GaussianConfig(1.0).sigma == 1.0
+    assert GaussianConfig((1.0, 2.0)).sigma == (1.0, 2.0)
+    assert GaussianConfig((1.0, 1.0, 1.0)).truncate == 4.0  # the only default
 
 
 def test_params_are_frozen_records():
-    params = GaussianParams((1.0, 1.0, 1.0))
+    config = GaussianConfig((1.0, 1.0, 1.0))
 
     with pytest.raises(FrozenInstanceError):
-        params.truncate = 2.0  # ty: ignore[invalid-assignment]
+        config.truncate = 2.0  # ty: ignore[invalid-assignment]
 
 
 def test_build_expands_the_held_sigma_into_a_kernel():
-    params = GaussianParams((1.0, 0.5), truncate=2.0)
-    kernel = params.build()
+    config = GaussianConfig((1.0, 0.5), truncate=2.0)
+    kernel = config.build()
 
-    assert isinstance(params, KernelParams)
+    assert isinstance(config, KernelConfig)
     assert isinstance(kernel, GaussianKernel)
     assert kernel.sigma == (1.0, 1.0, 0.5)
     assert kernel.truncate == 2.0

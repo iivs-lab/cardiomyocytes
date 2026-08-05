@@ -11,10 +11,10 @@ from numpy.typing import NDArray
 from iivs_cardio.common import Device
 from iivs_cardio.data.transforms.filtering import (
     FilteredSequence,
+    IdentityConfig,
     IdentityKernel,
-    IdentityParams,
+    MedianConfig,
     MedianKernel,
-    MedianParams,
 )
 
 requires_cuda = pytest.mark.skipif(
@@ -165,18 +165,18 @@ def test_the_source_dtype_is_carried_on_the_type_parameter():
     assert filtered[2].dtype == torch.float32
 
 
-# ------------------------------ from_params ------------------------------- #
+# ------------------------------ from_config ------------------------------- #
 
 
 def test_from_params_builds_the_kernel_it_describes():
     frames = _frames(6)
-    params = MedianParams((1, 1, 1), shape="cuboid")
+    config = MedianConfig((1, 1, 1), shape="cuboid")
 
-    built = FilteredSequence.from_params(_Frames(frames), params)
+    built = FilteredSequence.from_config(_Frames(frames), config)
     direct = FilteredSequence(_Frames(frames), MedianKernel((1, 1, 1), shape="cuboid"))
 
     assert isinstance(built.kernel, MedianKernel)
-    assert built.kernel.shape == "cuboid"  # not the default, so it came from params
+    assert built.kernel.shape == "cuboid"  # not the default, so it came from config
     for index in range(len(frames)):
         assert torch.equal(built[index], direct[index])
 
@@ -184,7 +184,7 @@ def test_from_params_builds_the_kernel_it_describes():
 def test_from_params_passes_a_short_radius_through_to_the_kernel():
     # The record holds the radius verbatim, so this is the only step that
     # expands it -- and the one a config-driven caller depends on.
-    built = FilteredSequence.from_params(_Frames(_frames(4)), MedianParams((1, 0)))
+    built = FilteredSequence.from_config(_Frames(_frames(4)), MedianConfig((1, 0)))
 
     assert built.kernel.radius == (1, 1, 0)
     assert built.kernel.temporal_radius == 0
@@ -231,8 +231,8 @@ def test_step_below_one_is_rejected(step):
 
 
 def test_from_params_forwards_the_step():
-    sequence = FilteredSequence.from_params(
-        _Frames(_frames(6)), IdentityParams(), step=3
+    sequence = FilteredSequence.from_config(
+        _Frames(_frames(6)), IdentityConfig(), step=3
     )
 
     assert len(sequence) == 2

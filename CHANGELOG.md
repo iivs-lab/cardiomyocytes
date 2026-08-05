@@ -67,6 +67,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   wrong ways -- a bare unpack error, a channel count the array never had, or a
   broadcast failure at the assignment -- and `_cv_type` names the pairs it takes
   from the table beside it.
+- A filter is recorded by what it was rather than by which class did it:
+  `KernelConfig.kind` is a declared `"median"` / `"gaussian"` / `"identity"`,
+  where the record used to carry the `_target_` import path -- which made two
+  runs that filtered identically compare unequal as soon as the code moved.
+  `describe_filter_kernel` reads it off the built config rather than the
+  config node, so a config `instantiate` would reject fails before a document
+  records it.
 - `preprocess_phase` writes the range document again, under
   `target.save_ranges` / `target.range_file`. `RangeDocument` is a side branch
   with a lifetime: it hands each sequence a `SequenceRangeMeter`, and folds what
@@ -79,7 +86,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a re-run into the same output directory cannot fold an earlier run's answers
   in with its own.
 - `SideBranch` in `iivs_cardio/common/pipeline.py`, what a stage factory holds:
-  something that hands a named sequence a hook. Being a context manager is
+  something that hands a sequence a hook. Each one asks for the narrowest
+  view it can work from -- a range document takes anything with a `name`, so
+  it never learns what a phase folder is -- and the container's declared type
+  is what they are checked against. Being a context manager is
   optional and is what tells the two apart -- a frame writer commits itself per
   sequence, where a range document only finishes once every sequence has, and
   `StageFactory.running` brackets the ones that need it exactly as `Stage.run`

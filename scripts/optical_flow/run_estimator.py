@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from iivs_cardio.data.transforms.filtering.kernel import FilterKernel
     from iivs_cardio.data.transforms.normalization import FrameNormalizer
     from iivs_cardio.optical_flow.estimators import (
-        EstimatorParams,
+        EstimatorConfig,
         OpticalFlowEstimator,
     )
 
@@ -59,7 +59,7 @@ def process_sequences(
     samples: Sequence[DataSequence[NDArray[np.float32]]],
     kernel: FilterKernel | None,
     normalizer: FrameNormalizer,
-    estimator_params: EstimatorParams,
+    estimator_params: EstimatorConfig,
     device: DeviceLike = "cpu",
 ) -> None:
     device = Device.resolve(device)

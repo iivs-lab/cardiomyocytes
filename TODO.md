@@ -239,7 +239,7 @@ force          4     3, 4, 5 → acceleration 4
 **gaussian**은 per-axis `sigma`+`truncate`(반지름 = `int(truncate*sigma+0.5)`, scipy 규칙)
 이고 분리가능하며, 실제로 걸린 가중치로 나눠 전체 3D 정규화 결과와 정확히 일치한다.
 
-`MedianParams`/`GaussianParams`가 있어 설정이나 캐시 사이드카가 살아 있는 객체 없이 설정을
+`MedianConfig`/`GaussianConfig`가 있어 설정이나 캐시 사이드카가 살아 있는 객체 없이 설정을
 나른다.
 
 **median은 프레임을 띠로 나눠 계산한다.** 한 픽셀의 중앙값은 자기 이웃만 읽으므로 띠 단위로
@@ -421,7 +421,7 @@ force          4     3, 4, 5 → acceleration 4
 
   - **어떤 추정기도 프로세스 경계를 넘지 못한다.** 전부 자기 `cv2` 객체에서 pickle에
     실패한다. 워커는 **레시피**(params·device·경로)를 받아 자기 것을 만들어야 한다.
-    `FarnebackParams`·`MedianKernel`·`FrameNormalizer`는 pickle되지만, 정규화기는 가변
+    `FarnebackConfig`·`MedianKernel`·`FrameNormalizer`는 pickle되지만, 정규화기는 가변
     상태를 들고 `FilteredSequence`는 따뜻한 버퍼를 들고 있으므로 둘 다 보내지 말 것.
   - **풀 `initializer`가 워커를 싸게 만든다** — 시퀀스마다가 아니라 워커마다 추정기 하나.
   - **긴 것부터 정렬하고 동적으로 분배할 것.** 길이 균형 정적 분할과 긴 것부터의

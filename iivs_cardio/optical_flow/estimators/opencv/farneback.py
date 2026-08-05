@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("Farneback", "FarnebackParams")
+__all__ = ("Farneback", "FarnebackConfig")
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, override
@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, override
 import cv2
 from kaparoo.utils.optional import unwrap_or_factory
 
-from iivs_cardio.optical_flow.estimators.base import EstimatorParams
+from iivs_cardio.optical_flow.estimators.base import EstimatorConfig
 from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVEstimator
 
 if TYPE_CHECKING:
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class FarnebackParams(EstimatorParams):
+class FarnebackConfig(EstimatorConfig):
     num_levels: int = 3
     pyr_scale: float = 0.5
     fast_pyramids: bool = False
@@ -35,36 +35,36 @@ class FarnebackParams(EstimatorParams):
 class Farneback(OpenCVEstimator):
     def __init__(
         self,
-        params: FarnebackParams | None = None,
+        config: FarnebackConfig | None = None,
         *,
         device: DeviceLike = "cpu",
     ) -> None:
-        self.params = unwrap_or_factory(params, FarnebackParams)
+        self.config = unwrap_or_factory(config, FarnebackConfig)
         super().__init__(device)
 
     @override
     def _create_algorithm(self) -> OpenCVAlgorithm:
-        params = self.params
+        config = self.config
 
         if self.is_cuda:
             return cv2.cuda.FarnebackOpticalFlow.create(
-                numLevels=params.num_levels,
-                pyrScale=params.pyr_scale,
-                fastPyramids=params.fast_pyramids,
-                winSize=params.win_size,
-                numIters=params.num_iters,
-                polyN=params.poly_n,
-                polySigma=params.poly_sigma,
-                flags=params.flags,
+                numLevels=config.num_levels,
+                pyrScale=config.pyr_scale,
+                fastPyramids=config.fast_pyramids,
+                winSize=config.win_size,
+                numIters=config.num_iters,
+                polyN=config.poly_n,
+                polySigma=config.poly_sigma,
+                flags=config.flags,
             )
 
         return cv2.FarnebackOpticalFlow.create(
-            numLevels=params.num_levels,
-            pyrScale=params.pyr_scale,
-            fastPyramids=params.fast_pyramids,
-            winSize=params.win_size,
-            numIters=params.num_iters,
-            polyN=params.poly_n,
-            polySigma=params.poly_sigma,
-            flags=params.flags,
+            numLevels=config.num_levels,
+            pyrScale=config.pyr_scale,
+            fastPyramids=config.fast_pyramids,
+            winSize=config.win_size,
+            numIters=config.num_iters,
+            polyN=config.poly_n,
+            polySigma=config.poly_sigma,
+            flags=config.flags,
         )
