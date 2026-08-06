@@ -10,6 +10,7 @@ from iivs.dhm.data.phase import PhaseFileFolder
 from kaparoo.filesystem import stringify_path
 from kaparoo.utils.timer import Timer
 
+from iivs_cardio.common.logging import log_indented
 from iivs_cardio.common.pipeline import Reporting, SequenceStage, SideBranch
 from iivs_cardio.data.transforms.filtering import FilteredSequence
 
@@ -21,9 +22,6 @@ if TYPE_CHECKING:
 
     from iivs_cardio.common.device import Device
     from iivs_cardio.data.transforms.filtering.kernel import FilterKernel
-
-
-_INDENT = "  "
 
 
 class PhaseFilteredSequence(FilteredSequence[PhaseFileFolder, "Path"]):
@@ -73,15 +71,13 @@ class PhaseStageFactory:
         hooks = [branch.get_hook(sequence) for branch in self._branches]
         return SequenceStage(sequence).register_hooks(*hooks)
 
-    def _log(self, message: str, *args: object, head: bool = False) -> None:
-        if not head:
-            message = f"{_INDENT}{message}"
-        self._logger.info(message, *args)
+    def _log(self, message: str, *args: object, nested: bool = True) -> None:
+        log_indented(self._logger, message, *args, depth=int(nested))
 
     def run_stage(self, index: int, device: Device) -> None:
         sequence = self._sequences[index]
 
-        self._log("%s", sequence.name, head=True)
+        self._log("%s", sequence.name, nested=False)
         self._log("filtering %d frames on %s", len(sequence), device)
 
         with Timer("s") as timer:
@@ -103,7 +99,7 @@ class PhaseStageFactory:
             yield self
 
         for line in _reports(self._branches):
-            self._log("%s", line, head=True)
+            self._log("%s", line, nested=False)
 
 
 def _reports(candidates: Iterable[object]) -> Iterator[str]:

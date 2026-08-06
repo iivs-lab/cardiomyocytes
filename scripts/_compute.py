@@ -22,6 +22,7 @@ from mpire import WorkerPool
 from tqdm import trange
 
 from iivs_cardio.common.device import Device
+from iivs_cardio.common.logging import log_indented
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -92,7 +93,6 @@ class IncompleteRunError(RuntimeError):
 class WorkerLogFolder:
     STEM: ClassVar[str] = "worker"
 
-    # hydra's own job format, so a worker's file reads like the parent's.
     _FORMAT: ClassVar[str] = "[%(asctime)s][%(name)s][%(levelname)s] - %(message)s"
 
     def __init__(self, root: StrPath) -> None:
@@ -248,4 +248,6 @@ def log_insights(insights: dict[str, Any], name: str = "run") -> None:
 
     rows = zip(insights["n_completed_tasks"], insights["working_time"], strict=True)
     for worker_id, (completed, working) in enumerate(rows):
-        logger.info("  worker %d: %d done, %s working", worker_id, completed, working)
+        log_indented(
+            logger, "worker %d: %d done, %s working", worker_id, completed, working
+        )

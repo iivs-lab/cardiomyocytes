@@ -4,6 +4,7 @@ from iivs_cardio.common.device import (
     DeviceKind,
     DeviceLike,
 )
+from iivs_cardio.common.logging import log_indented
 from iivs_cardio.common.pipeline import (
     Hook,
     SequenceStage,
@@ -28,4 +29,5 @@ __all__ = (
     "StageFactory",
     "Step",
     "finite_range",
+    "log_indented",
 )
