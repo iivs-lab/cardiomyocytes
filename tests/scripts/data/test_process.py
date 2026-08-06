@@ -14,12 +14,13 @@ from iivs.dhm.data.phase import (
     save_phase_bin,
 )
 
-from iivs_cardio.data.pipeline import PhaseStageFactory
+from iivs_cardio.data.pipeline import FrameTree, PhaseStageFactory, RangeDocument
 from scripts._compute import ComputeConfig, IncompleteRunError, run_all
 from scripts.data._filtering import parse_filter_config
 from scripts.data._process import (
     SourceConfig,
     TargetConfig,
+    build_branches,
     build_phase_stages,
     build_sequences,
     search_sources,
@@ -315,3 +316,78 @@ def test_a_branch_with_nothing_to_say_adds_no_line(phase_tree, caplog):
     quiet = lines(None)
     assert all(message.strip() for message in quiet)
     assert not any("None" in message for message in quiet)
+
+
+# ------------------------------ the side branches ------------------------- #
+
+
+def _branches(tmp_path, *, roster=("TL_00",), subpath=None, step=1, **target):
+    source = SourceConfig(root="/dataset", subpath=subpath, frame_step=step)
+    config = TargetConfig(root=str(tmp_path), **target)
+
+    return build_branches(
+        source,
+        config,
+        parse_filter_config(None),
+        list(roster),
+        output_root=tmp_path,
+    )
+
+
+@pytest.mark.parametrize(
+    ("target", "kinds"),
+    (
+        ({"save_ranges": True}, [RangeDocument]),
+        ({"save_frames": True, "save_ranges": False}, [FrameTree]),
+        ({"save_frames": True, "save_ranges": True}, [FrameTree, RangeDocument]),
+    ),
+)
+def test_a_target_asks_for_the_branches_it_names(tmp_path, target, kinds):
+    branches = _branches(tmp_path, **target)
+
+    assert [type(branch) for branch in branches] == kinds
+
+
+def test_the_settings_carry_what_would_change_the_numbers(tmp_path):
+    # What a later run compares to decide whether this document still describes
+    # it, so it has to hold everything that changes the frames a sequence reads.
+    (document,) = _branches(tmp_path, subpath="Phase/Float/Other", step=3)
+
+    assert document.settings["source"] == {
+        "subpath": "Phase/Float/Other",
+        "frame_step": 3,
+    }
+    assert document.settings["filter"]["kind"] == "identity"
+
+
+def test_an_unset_subpath_is_recorded_as_the_one_that_was_read(tmp_path):
+    # `None` means the Koala default rather than "no subpath", and a document
+    # saying `null` could not be compared against a run that named it outright.
+    (document,) = _branches(tmp_path, subpath=None)
+
+    assert document.settings["source"]["subpath"] == PHASE_FLOAT_BIN
+
+
+def test_the_selection_stays_out_of_the_settings(tmp_path):
+    # `include` / `exclude` change which sequences a run covers, not what any
+    # sequence's numbers mean -- and `coverage` already reports that. Recording
+    # them here would refuse reuse to a run that narrowed its selection.
+    source = SourceConfig(root="/dataset", include=["TL_00"], exclude=["TL_09"])
+    config = TargetConfig(root=str(tmp_path), save_ranges=True)
+
+    (document,) = build_branches(
+        source, config, parse_filter_config(None), ["TL_00"], output_root=tmp_path
+    )
+
+    assert set(document.settings["source"]) == {"subpath", "frame_step"}
+
+
+def test_the_roster_reaches_the_document_that_reports_on_it(tmp_path):
+    (document,) = _branches(tmp_path, roster=("TL_00", "TL_01", "TL_02"))
+
+    assert document.expected == ("TL_00", "TL_01", "TL_02")
+
+
+def test_branches_are_refused_before_any_of_them_is_built(tmp_path):
+    with pytest.raises(ValueError, match=r"nothing to do"):
+        _branches(tmp_path, save_frames=False, save_ranges=False)

@@ -3,6 +3,7 @@ from __future__ import annotations
 __all__ = (
     "SourceConfig",
     "TargetConfig",
+    "build_branches",
     "build_phase_stages",
     "build_sequences",
     "search_sources",
@@ -172,7 +173,7 @@ def build_branches(
     source_config: SourceConfig,
     target_config: TargetConfig,
     kernel_config: KernelConfig,
-    sequences: Sequence[PhaseFilteredSequence],
+    expected: Sequence[str],
     *,
     output_root: StrPath | None = None,
 ) -> list[SideBranch[PhaseFilteredSequence, Tensor, Path]]:
@@ -183,16 +184,17 @@ def build_branches(
     branches = []
 
     root = unwrap_or_factory(output_root, output_directory)
+    subpath = _subpath(source_config)
     overwrite = target_config.overwrite
 
     if target_config.save_frames:
-        branches.append(FrameTree(root, _subpath(source_config), overwrite=overwrite))
+        branches.append(FrameTree(root, subpath, overwrite=overwrite))
 
     if target_config.save_ranges:
         path = Path(root, target_config.range_file)
 
         settings = {
-            "source": {"frame_step": source_config.frame_step},
+            "source": {"subpath": subpath, "frame_step": source_config.frame_step},
             "filter": describe_filter_kernel(kernel_config),
         }
 
@@ -200,7 +202,7 @@ def build_branches(
             RangeDocument(
                 path,
                 source_config.root,
-                [sequence.name for sequence in sequences],
+                expected,
                 settings,
                 overwrite=overwrite,
             )
@@ -229,7 +231,7 @@ def build_phase_stages(
             source_config,
             target_config,
             kernel_config,
-            sequences,
+            [sequence.name for sequence in sequences],
             output_root=output_root,
         )
 
