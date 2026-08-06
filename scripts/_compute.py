@@ -122,10 +122,6 @@ def pin_threads(max_workers: int) -> None:
 
 class IncompleteRunError(RuntimeError):
     def __init__(self, failed: Mapping[str, str], total: int) -> None:
-        # Keyed by name rather than by index: an index means nothing without the
-        # factory that produced it, and it moves the moment a selection narrows,
-        # where a name is what a retry hands back as `source.include`. The log
-        # carries the same pairs a line apiece, so the message only counts.
         self.failed = dict(failed)
         self.total = total
         super().__init__(f"{len(self.failed)} of {total} failed")
@@ -163,8 +159,6 @@ class WorkerLogFolder:
 
 @dataclass(frozen=True, slots=True)
 class SharedContext:
-    """What every worker needs and no task changes, handed over once."""
-
     devices: tuple[Device, ...]
     stages: StageFactory
     name: str
@@ -172,26 +166,25 @@ class SharedContext:
     log_level: int = logging.INFO
 
 
-def _init_worker(worker_id: int, shared: SharedContext) -> None:
-    if shared.log_folder is not None:
-        shared.log_folder.configure_worker(
-            worker_id, len(shared.devices), shared.log_level
-        )
+def _init_worker(worker_id: int, context: SharedContext) -> None:
+    if context.log_folder is not None:
+        num_workers = len(context.devices)
+        context.log_folder.configure_worker(worker_id, num_workers, context.log_level)
 
 
 def _run_on_worker(
-    worker_id: int, shared: SharedContext, index: int
+    worker_id: int, context: SharedContext, index: int
 ) -> tuple[int, str] | None:
-    devices = shared.devices
+    devices = context.devices
     device = devices[worker_id]
     device.activate()
     pin_threads(len(devices))
 
     try:
-        stages = shared.stages
+        stages = context.stages
         stages.run_stage(index, device)
     except Exception as error:
-        logging.getLogger(shared.name).exception("%s failed", stages.get_name(index))
+        logging.getLogger(context.name).exception("%s failed", stages.get_name(index))
         return index, f"{type(error).__name__}: {error}"
 
     return None
@@ -253,7 +246,7 @@ def run_all(
                 failed = _watch(outcomes, stages, logger, num_stages)
 
                 if config.log_insights:
-                    log_insights(pool.get_insights(), name)
+                    log_insights(pool.get_insights(), name, unit=unit)
 
     completed = num_stages - len(failed)
     logger.info("%d of %d done in %.1fs", completed, num_stages, timer.elapsed)
@@ -284,18 +277,22 @@ def _watch(
     return failed
 
 
-def log_insights(insights: dict[str, Any], name: str = "run") -> None:
+def log_insights(insights: dict[str, Any], name: str, *, unit: str = "it") -> None:
     logger = logging.getLogger(name)
 
-    logger.info(
-        "insights: %s total, %.1f%% working, %.1f%% waiting",
-        insights["total_time"],
-        insights["working_ratio"] * 100,
-        insights["waiting_ratio"] * 100,
-    )
+    if not insights:
+        logger.warning("nothing to report: the pool collected no insights")
+        return
 
+    subsets = ("working", "waiting", "starting/stopping")
+    shares = ", ".join(f"%.1f%% {subset}" for subset in subsets)
+    summary = f"workers spent %s: {shares}"
+    total_time = insights["total_time"]
+    working = insights["working_ratio"] * 100
+    waiting = insights["waiting_ratio"] * 100
+    logger.info(summary, total_time, working, waiting, 100 - working - waiting)
+
+    per_worker = "worker %d completed %d %s in %s"
     rows = zip(insights["n_completed_tasks"], insights["working_time"], strict=True)
-    for worker_id, (completed, working) in enumerate(rows):
-        log_indented(
-            logger, "worker %d: %d done, %s working", worker_id, completed, working
-        )
+    for worker_id, (completed, spent) in enumerate(rows):
+        log_indented(logger, per_worker, worker_id, completed, unit, spent)

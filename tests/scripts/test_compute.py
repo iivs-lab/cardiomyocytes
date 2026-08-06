@@ -11,6 +11,7 @@ from scripts._compute import (
     IncompleteRunError,
     WorkerLogFolder,
     log_compute_config,
+    log_insights,
     plan_devices,
     run_all,
 )
@@ -287,3 +288,61 @@ def test_a_device_that_cannot_be_resolved_is_still_logged(caplog):
 
     with pytest.raises(ValueError, match=r"invalid device spec"):
         plan_devices(ComputeConfig(device="tpu"))
+
+
+# ------------------------------- the insights ----------------------------- #
+
+
+_INSIGHTS = {
+    "total_time": "0:00:10",
+    "working_ratio": 0.5,
+    "waiting_ratio": 0.2,
+    "n_completed_tasks": [3, 1],
+    "working_time": ["0:00:03.5", "0:00:01.5"],
+}
+
+
+def test_the_shares_reported_account_for_the_whole(caplog):
+    # `mpire` splits a worker's life five ways and the ratios are of their sum,
+    # so naming two of them leaves a reader asking where the rest went -- 98% of
+    # it, on a run short enough for process start-up to dominate.
+    with caplog.at_level(logging.INFO):
+        log_insights(_INSIGHTS, "run", unit="seq")
+
+    (summary, *_) = [record.getMessage() for record in caplog.records]
+
+    assert summary == (
+        "workers spent 0:00:10: 50.0% working, 20.0% waiting, 30.0% starting/stopping"
+    )
+
+
+def test_each_worker_says_what_it_finished_and_in_what(caplog):
+    with caplog.at_level(logging.INFO):
+        log_insights(_INSIGHTS, "run", unit="seq")
+
+    logged = [record.getMessage() for record in caplog.records]
+
+    assert logged[1:] == [
+        "  worker 0 completed 3 seq in 0:00:03.5",
+        "  worker 1 completed 1 seq in 0:00:01.5",
+    ]
+
+
+def test_a_pool_that_collected_nothing_says_so_rather_than_raising(caplog):
+    # `get_insights()` answers `{}` when a pool was told to collect none, and
+    # reading its keys would be a `KeyError` at the end of a finished run.
+    with caplog.at_level(logging.INFO):
+        log_insights({}, "run")
+
+    assert [record.getMessage() for record in caplog.records] == [
+        "nothing to report: the pool collected no insights"
+    ]
+
+
+def test_the_report_is_filed_under_the_name_it_is_given(caplog):
+    # No default: `run_all` always knows the stage's name, and a default would
+    # only ever apply where a caller forgot -- filing the run's lines elsewhere.
+    with caplog.at_level(logging.INFO):
+        log_insights(_INSIGHTS, "reconstruct")
+
+    assert {record.name for record in caplog.records} == {"reconstruct"}
