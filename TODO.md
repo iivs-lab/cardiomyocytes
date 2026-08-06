@@ -244,11 +244,13 @@ force          4     3, 4, 5 → acceleration 4
 
 ## 기계는 이미 대부분 있다
 
-`RangeDocument.collected()`는 `parts/` 아래 `.json`을 **전부** 접는다 — 그 시퀀스가 이번
-실행에서 돌았는지 묻지 않는다. 재사용을 막고 있는 것은 `__enter__`의 무조건 청소 한 곳뿐이다.
+`RangeDocument.to_range()`는 `<문서>.parts/` 아래 `.json`을 **전부** 접는다 — 그 시퀀스가
+이번 실행에서 돌았는지 묻지 않는다. 재사용을 막고 있는 것은 `__enter__`의 무조건 청소
+한 곳뿐이다.
 
-유효성 판정의 절반도 이미 있다. `RangeDocument.skipped()`가 `명단 − 접힌 것`을 계산하는데,
-지워진 시퀀스의 파트를 치우는 데 필요한 것이 그 역방향(`접힌 것 − 명단`)이다.
+유효성 판정의 절반도 이미 있다. `RangeDocument.get_coverage()`가 `명단 − 접힌 것`을
+`Coverage.skipped`로 계산하는데, 지워진 시퀀스의 파트를 치우는 데 필요한 것이 그
+역방향(`접힌 것 − 명단`)이다.
 
 ## 어려운 곳은 둘이다
 
@@ -261,7 +263,7 @@ force          4     3, 4, 5 → acceleration 4
 - **소스 대조** — 파일 개수·크기·mtime. 내용 해시는 정확하지만 소스를 전부 읽으므로
   아끼려던 비용을 그대로 문다.
 
-가운데 둘의 조합이 현실적이다. 걸리는 것 하나: **파트에는 provenance가 없고 문서에만 있다.**
+가운데 둘의 조합이 현실적이다. 걸리는 것 하나: **파트에는 `settings`가 없고 문서에만 있다.**
 문서가 없거나 못 쓴 상태로 파트만 남으면 판정 근거가 사라지므로, 파트에 최소한을 심을지
 정해야 한다.
 
@@ -303,11 +305,9 @@ force          4     3, 4, 5 → acceleration 4
 1 of 5 done (1 failed, 3 reused) in 0.4s     둘 다
 ```
 
-**`skipped`라는 단어는 이미 다른 뜻으로 쓰이고 있다.** `IncompleteRunError.skipped`가
-*실패한 것*을 담고, `RangeDocument.skipped()`는 *파트를 남기지 않은 것*을 뜻한다. 세 번째
-상태에 같은 단어를 쓰면 앞의 둘이 거짓말이 되므로, 같이 고칠 것 —
-`IncompleteRunError.skipped` → `failed`가 정확하다. 세 번째 상태는 건너뛴 *이유*를 말하는
-`reused`가 `skipped`보다 낫다.
+**`skipped`라는 단어를 세 번째 상태에 쓰지 말 것.** `Coverage.skipped`가 이미 *파트를
+남기지 않은 것*을 뜻하므로, 같은 단어를 재사용에 쓰면 그쪽이 거짓말이 된다. 건너뛴 *이유*를
+말하는 `reused`가 낫다. 짝이었던 `IncompleteRunError.skipped` → `failed`는 이미 고쳤다.
 
 `reused`라는 이름은 §「재사용된 시퀀스는 `skipped`가 아니라 `covered`다」에서 문서 쪽과
 함께 정해졌다. 다만 건너뜀이 한 통인지 두 통인지는 아직 정해지지 않았다. **재사용**(기존 산출물이 유효하니
@@ -341,7 +341,7 @@ target.range_file=value_range_retry source.include=[plate_A/2026-03-11/TL_01_wel
   틀리지는 않지만, 파트는 이미 지워진 뒤다.
 - **`hydra.run.dir`을 실행마다 따로.** 기본이 `${target.root}`라 잡 디렉터리를 공유하면
   `.hydra/overrides.yaml`이 덮여, 어느 `include`가 트리의 어느 부분을 만들었는지 기록이
-  사라진다. `clear_worker_logs`도 앞 실행의 워커 로그를 지운다. 프레임은 `target.root`로
+  사라진다. `WorkerLogFolder.clear()`도 앞 실행의 워커 로그를 지운다. 프레임은 `target.root`로
   가므로 잡 디렉터리를 갈라도 캐시는 하나로 모인다.
 
 **glob은 안 되고 정확한 이름만 된다.** `select` 자체는 `{kind: glob, pattern: ...}`을
@@ -349,10 +349,10 @@ target.range_file=value_range_retry source.include=[plate_A/2026-03-11/TL_01_wel
 용도가 "새로 들어온 것만"이면 이름을 나열하는 편이 정확하고, `str` 하나로 `.txt` / `.json`
 목록 파일 경로를 줄 수도 있다(`select`가 파일 스펙을 지원한다).
 
-**병합 스크립트는 싸다.** `_sequence_from_dict`로 각 문서의 `dataset.sequences`를 읽어
-`DatasetRange`로 다시 접고 `save_range_document`로 쓰면 된다. 확인할 것 둘: 문서마다 실린
-`provenance`가 일치하는지(필터·`frame_step`이 다른 문서를 섞으면 안 된다), 그리고
-`coverage`를 데이터셋 전체 명단 대비로 다시 계산할 것.
+**병합 스크립트는 싸다.** `SequenceRange.from_dict`로 각 문서의 `dataset.sequences`를 읽어
+`DatasetRange`로 다시 접고 `save_range_document`로 쓰면 된다. 확인할 것 셋: 문서마다 실린
+`settings`가 일치하는지(필터·`frame_step`이 다른 문서를 섞으면 안 된다), `dataset.source`가
+같은 루트인지, 그리고 `coverage`를 데이터셋 전체 명단 대비로 다시 계산할 것.
 
 **우회로가 못 푸는 것은 삭제다.** 어떤 실행도 "이 시퀀스가 사라졌다"를 알지 못하므로, 낡은
 캐시 폴더와 낡은 문서의 항목이 남아 병합본에 섞인다.
@@ -686,7 +686,7 @@ for stale in self.list_parts():
 필터링하고 이어서 추정하면 시간 순으로 읽힌다. `mode="a"`인 것은 `worker_lifespan`이 워커를
 은퇴시키고 같은 id로 새로 띄우기 때문이고, 지우는 책임은 잡마다 한 번 드라이버에 있다.
 
-부모 파일에는 설정·판정·결산이, 워커 파일에는 시퀀스 블록이 남는다. `report_insights`도
+부모 파일에는 설정·판정·결산이, 워커 파일에는 시퀀스 블록이 남는다. `log_insights`도
 그 로거로 간다.
 
 - **프레임별 `DEBUG`는 (2)와 함께 짓기로 미뤘다.** 전처리에서 프레임마다 말할 수 있는 것은
@@ -714,10 +714,10 @@ for stale in self.list_parts():
 
 워커는 실패를 **예외가 아니라 결과로** 돌려준다(`(index, 사유)` 문자열). `mpire`가 작업의
 예외를 부모에서 다시 던지고 풀을 무너뜨리므로, 그대로 두면 이미 끝난 시퀀스가 전부 사라진다.
-실행이 다 끝난 뒤 `IncompleteRunError`가 `skipped`(무엇이, 왜)와 `total`을 통째로 들고
+실행이 다 끝난 뒤 `IncompleteRunError`가 `failed`(무엇이, 왜)와 `total`을 통째로 들고
 오른다 — 메시지 한 줄로 눌러 담으면 재시도할 인덱스를 잃는다.
 
-**부분 실행은 문서가 스스로 말한다.** `coverage`가 `{covered, total, skipped}`로 `dataset`
+**부분 실행은 문서가 스스로 말한다.** `coverage`가 `{total, covered, skipped}`로 `dataset`
 바로 앞에 실린다 — 경계 숫자를 읽으러 온 사람이 지나칠 수 없는 자리다. 완전한 실행에서도
 항상 쓰므로 키의 부재를 "완전함"으로 읽을 수 없고, 명단을 못 받은 문서는 아예 쓰지 않는다.
 `skipped`는 전달받는 것이 아니라 **명단과 디스크의 차**로 구한다: 예외로 죽었든, 워커가
@@ -730,7 +730,7 @@ for stale in self.list_parts():
 여기서 쓰는 것이 다음 단계가 읽을 캐시라, 통과시킨 NaN은 나중에 만나는 실행이 출처를 추적할
 수 없다. iivs-lib은 비유한 값을 읽고 쓰는 것을 허용하므로 이 거절은 이 프로젝트의 몫이다.
 
-- **`overwrite=false` 재실행은 재개가 아니라 깨진 상태다.** 이미 있는 시퀀스는 `stage_for`가
+- **`overwrite=false` 재실행은 재개가 아니라 깨진 상태다.** 이미 있는 시퀀스는 `get_stage`가
   `KoalaFrameWriter`를 만들 때 `FileExistsError`로 실패한다 — 필터링 전이라 계산이 낭비되지는
   않는다. 그런데 `RangeDocument.__enter__`가 파트를 이미 전부 지운 뒤이고, `save()`는
   `value_range.json`이 있어 또 실패하므로 **낡은 문서가 그대로 남아 디스크와 모순된다.**
@@ -742,4 +742,4 @@ for stale in self.list_parts():
   "무엇이 왜 실패했는가"가 아니라 파일 존재 오류 하나뿐이 된다.
 
 - **`filtering N frames`를 일이 실패할 수 있기 전에 찍는다.** `run_stage`이 그 줄을 찍고 나서
-  `stage_for`를 부르므로, 훅 생성이 실패하면 한 장도 거르지 않고 "거르는 중"이라고 남는다.
+  `get_stage`를 부르므로, 훅 생성이 실패하면 한 장도 거르지 않고 "거르는 중"이라고 남는다.
