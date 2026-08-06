@@ -149,7 +149,7 @@ def test_the_sequences_one_worker_takes_share_its_file(tmp_path):
 
 @pytest.mark.usefixtures("restored_root_logger")
 def test_a_worker_that_restarts_keeps_what_it_already_wrote(tmp_path):
-    # `worker_lifespan` retires a worker and starts a fresh one under the same
+    # `lifespan` retires a worker and starts a fresh one under the same
     # id, so truncating would take everything the retired one wrote with it.
     for line in ("before", "after"):
         WorkerLogFolder(tmp_path).configure_worker(0, 2, logging.INFO)
@@ -190,7 +190,7 @@ def test_insights_nobody_will_collect_are_said_out_loud(
     # `mpire` gathers them, so a run with no pool gathers nothing -- and asking
     # for a measurement that never arrives should not look like a quiet result.
     config = ComputeConfig(
-        device="cpu", workers=workers, progress_bar=False, insights=True
+        device="cpu", workers=workers, progress_bar=False, log_insights=True
     )
 
     with caplog.at_level(logging.WARNING):

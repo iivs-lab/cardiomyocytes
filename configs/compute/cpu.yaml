@@ -1,5 +1,5 @@
 device: cpu
 workers: 0 # 0 stays in this process, N workers, null one per core
 progress_bar: true
-insights: false # per-worker timings, printed once a pool finishes
-worker_lifespan: null # tasks before a worker is replaced; null keeps it for the run
+log_insights: false # how busy each worker was, logged once a pool finishes
+lifespan: null # tasks before a worker is replaced; null keeps it for the run

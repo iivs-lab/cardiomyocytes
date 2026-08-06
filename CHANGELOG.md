@@ -65,7 +65,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Logging, under the stage's name rather than the module's. A worker opens
   `<job>/worker<id>.log` for itself in `worker_init` -- several processes
   appending to one file interleave, and on Windows tear -- and appends, since
-  `worker_lifespan` retires a worker and starts a fresh one under the same id.
+  `compute.lifespan` retires a worker and starts a fresh one under the same id.
   One file per worker rather than per stage, so a job that filters and then
   estimates reads in order. The parent's own file keeps the configuration, the
   per-item verdicts and the summary; `report_insights` goes there too, and says
@@ -84,7 +84,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   from the roster against the parts on disk rather than passed in, since a
   sequence is missing whether it raised, died with its worker, or never ran.
 - `mpire` and `tqdm` in the `scripts` group, and `compute.progress_bar` /
-  `compute.insights` / `compute.worker_lifespan` to drive the pool.
+  `compute.log_insights` / `compute.lifespan` to drive the pool.
 - `pin_threads`, holding each worker to `torch`'s default thread count divided
   by the worker count. Every process otherwise sizes its pool to the whole
   machine and they contend: measured on 64 cores, sixteen unpinned workers ran

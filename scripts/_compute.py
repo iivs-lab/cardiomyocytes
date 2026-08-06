@@ -42,9 +42,9 @@ class ComputeConfig:
     device: str = "cpu"
     workers: int | None = None
     gpu_ids: list[int] | None = None
+    lifespan: int | None = None
+    log_insights: bool = False
     progress_bar: bool = True
-    insights: bool = False
-    worker_lifespan: int | None = None
 
 
 def plan_devices(config: ComputeConfig) -> tuple[Device, ...]:
@@ -170,7 +170,7 @@ def run_all(
     log_level = logging.getLogger().getEffectiveLevel()
     shared = _Shared(devices, stages, name, log_folder, log_level)
 
-    if config.insights and one_worker:
+    if config.log_insights and one_worker:
         logger.warning("insights: not collected, since a lone worker runs no pool")
 
     show_progress = config.progress_bar and num_stages > 1
@@ -192,20 +192,20 @@ def run_all(
                 n_jobs=num_workers,
                 shared_objects=shared,
                 pass_worker_id=True,
-                enable_insights=config.insights,
+                enable_insights=config.log_insights,
             ) as pool:
                 outcomes = pool.imap(
                     _run_on_worker,
                     range(num_stages),
                     chunk_size=1,
                     worker_init=_init_worker,
-                    worker_lifespan=config.worker_lifespan,
+                    worker_lifespan=config.lifespan,
                     progress_bar=config.progress_bar,
                     progress_bar_options=pbar_options,
                 )
                 failed = _watch(outcomes, stages, logger, num_stages)
 
-                if config.insights:
+                if config.log_insights:
                     log_insights(pool.get_insights(), name)
 
     completed = num_stages - len(failed)
