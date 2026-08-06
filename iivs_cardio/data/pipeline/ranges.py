@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 __all__ = (
+    "DOCUMENT_EXT",
     "CompositeRange",
     "Coverage",
     "DatasetRange",
@@ -46,15 +47,10 @@ DOCUMENT_EXT = ".json"
 
 
 def _entry[T](
-    document: Mapping[str, Any], key: str, kind: type[T] | tuple[type[T], ...]
+    document: Mapping[str, Any],
+    key: str,
+    kind: type[T] | tuple[type[T], ...],
 ) -> T:
-    """The `key` of a range document, refused by name when it cannot be read.
-
-    One rejection for both halves -- absent and wrong type -- since a document
-    read back off disk is data either way and neither half makes it a range
-    document. That merge is why the raise is a `ValueError`: `TypeError` would
-    misreport the absent one.
-    """
     value = document.get(key)
     if not isinstance(value, kind):
         msg = f"malformed range document: {key!r} is {value!r}"
@@ -278,10 +274,10 @@ class RangeDocument:
     def __init__(
         self,
         path: Path,
+        source: str,
+        expected: Sequence[str],
         settings: Mapping[str, object] | None = None,
         *,
-        expected: Sequence[str],
-        source: str,
         overwrite: bool = False,
     ) -> None:
         if not expected:
@@ -291,10 +287,11 @@ class RangeDocument:
         self.path = ensure_file_extension(path, DOCUMENT_EXT, add=True)
         self.parts_root = self.path.with_suffix(self.PARTS_SUFFIX)
 
-        self.settings = settings
-        self.expected = tuple(dict.fromkeys(expected))
         self.source = source
+        self.expected = tuple(dict.fromkeys(expected))
+        self.settings = settings
         self.overwrite = overwrite
+
         self._saved: DatasetRange | None = None
 
     def get_hook(self, source: Named) -> SequenceRangeMeter:

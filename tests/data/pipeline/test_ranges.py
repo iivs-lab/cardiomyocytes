@@ -414,7 +414,10 @@ def test_a_document_names_the_sequences_that_left_nothing(tmp_path):
 def test_coverage_sits_ahead_of_the_numbers_it_qualifies(tmp_path):
     # A reader who takes the bounds and stops has to have passed this on the way.
     with RangeDocument(
-        tmp_path / "range", {"filter": "identity"}, expected=["a"], source="plate_A"
+        tmp_path / "range",
+        settings={"filter": "identity"},
+        expected=["a"],
+        source="plate_A",
     ):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
 

@@ -199,9 +199,9 @@ def build_branches(
         branches.append(
             RangeDocument(
                 path,
+                source_config.root,
+                [sequence.name for sequence in sequences],
                 settings,
-                expected=[sequence.name for sequence in sequences],
-                source=source_config.root,
                 overwrite=overwrite,
             )
         )

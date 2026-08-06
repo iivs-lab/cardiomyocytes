@@ -1,4 +1,5 @@
 __all__ = (
+    "DOCUMENT_EXT",
     "CompositeRange",
     "DatasetRange",
     "FrameRange",
@@ -15,6 +16,7 @@ __all__ = (
 
 from iivs_cardio.data.pipeline.frames import FrameTree
 from iivs_cardio.data.pipeline.ranges import (
+    DOCUMENT_EXT,
     CompositeRange,
     DatasetRange,
     FrameRange,
