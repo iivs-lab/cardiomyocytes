@@ -5,6 +5,7 @@ __all__ = (
     "IncompleteRunError",
     "SharedContext",
     "WorkerLogFolder",
+    "log_compute_config",
     "log_insights",
     "pin_threads",
     "plan_devices",
@@ -27,6 +28,7 @@ from iivs_cardio.common.logging import log_indented
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
+    from logging import Logger
     from pathlib import Path
 
     from kaparoo.filesystem.types import StrPath
@@ -46,6 +48,41 @@ class ComputeConfig:
     lifespan: int | None = None
     log_insights: bool = False
     progress_bar: bool = True
+
+
+def _workers(config: ComputeConfig, *, is_cuda: bool) -> str:
+    if is_cuda:
+        if not config.gpu_ids:
+            return "one worker per visible gpu"
+
+        return f"one worker per gpu ({', '.join(map(str, config.gpu_ids))})"
+
+    if config.workers is None:
+        return "one worker per core"
+
+    if config.workers <= 1:
+        return "one worker, in this process"
+
+    return f"{config.workers} workers"
+
+
+def log_compute_config(config: ComputeConfig, logger: Logger) -> None:
+    try:
+        is_cuda = Device.resolve(config.device).is_cuda
+    except ValueError:
+        log_indented(logger, "compute: %s", config.device, depth=0)
+    else:
+        where = _workers(config, is_cuda=is_cuda)
+        log_indented(logger, "compute: %s, %s", config.device, where, depth=0)
+
+    if config.lifespan is not None:
+        log_indented(logger, "replacing a worker after %d tasks", config.lifespan)
+
+    if config.log_insights:
+        log_indented(logger, "reporting how busy each worker was")
+
+    if not config.progress_bar:
+        log_indented(logger, "showing no progress bar")
 
 
 def plan_devices(config: ComputeConfig) -> tuple[Device, ...]:
@@ -166,6 +203,8 @@ def run_all(
 ) -> None:
     name = stages.name
     logger = logging.getLogger(name)
+
+    log_compute_config(config, logger)
 
     num_stages = len(stages)
     devices = plan_devices(config)[:num_stages]

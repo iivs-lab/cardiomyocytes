@@ -10,6 +10,8 @@ from scripts._compute import (
     ComputeConfig,
     IncompleteRunError,
     WorkerLogFolder,
+    log_compute_config,
+    plan_devices,
     run_all,
 )
 
@@ -215,3 +217,73 @@ def test_a_worker_file_is_padded_to_the_pool_it_belongs_to(tmp_path, workers, ex
     # size this project has already run at. The width follows the highest id
     # rather than the count, so ten workers -- ids 0 to 9 -- still take one.
     assert WorkerLogFolder(tmp_path).path_for(0, workers).name == expected
+
+
+# ---------------------------- the configuration log ----------------------- #
+
+
+def _logged(caplog, **config):
+    with caplog.at_level(logging.INFO):
+        log_compute_config(ComputeConfig(**config), logging.getLogger("run"))
+
+    return [record.getMessage() for record in caplog.records]
+
+
+@pytest.mark.parametrize(
+    ("config", "head"),
+    (
+        ({}, "compute: cpu, one worker per core"),
+        ({"workers": 0}, "compute: cpu, one worker, in this process"),
+        ({"workers": 4}, "compute: cpu, 4 workers"),
+        ({"device": "cuda"}, "compute: cuda, one worker per visible gpu"),
+        (
+            {"device": "cuda", "gpu_ids": []},
+            "compute: cuda, one worker per visible gpu",
+        ),
+        (
+            {"device": "cuda", "gpu_ids": [0, 2]},
+            "compute: cuda, one worker per gpu (0, 2)",
+        ),
+    ),
+)
+def test_the_head_says_the_device_and_how_many_workers_it_will_raise(
+    caplog, config, head
+):
+    # One worker per device either way -- `plan_devices` answers in devices and
+    # `run_all` takes a worker per device -- so a GPU run is as much a pool as a
+    # CPU one. Only which field sets the count differs.
+    assert _logged(caplog, **config)[0] == head
+
+
+def test_a_default_run_says_nothing_beyond_its_head(caplog):
+    # `run_all` reports the plan it resolved, so a configuration that moved
+    # nothing else has nothing to add.
+    assert _logged(caplog) == ["compute: cpu, one worker per core"]
+
+
+@pytest.mark.parametrize(
+    ("config", "said"),
+    (
+        ({"lifespan": 8}, "  replacing a worker after 8 tasks"),
+        ({"log_insights": True}, "  reporting how busy each worker was"),
+        ({"progress_bar": False}, "  showing no progress bar"),
+    ),
+)
+def test_a_setting_a_run_moved_gets_a_line(caplog, config, said):
+    assert said in _logged(caplog, **config)
+
+
+@pytest.mark.parametrize("config", ({"lifespan": None}, {"log_insights": False}))
+def test_a_setting_left_alone_gets_none(caplog, config):
+    # Silence is the default, which `run_all` then answers for itself.
+    assert _logged(caplog, **config) == ["compute: cpu, one worker per core"]
+
+
+def test_a_device_that_cannot_be_resolved_is_still_logged(caplog):
+    # Refusing it here would cost the block that shows what was refused, so the
+    # spec is taken verbatim, without a worker count it cannot know, and
+    # `plan_devices` is left to turn it down.
+    assert _logged(caplog, device="tpu") == ["compute: tpu"]
+
+    with pytest.raises(ValueError, match=r"invalid device spec"):
+        plan_devices(ComputeConfig(device="tpu"))
