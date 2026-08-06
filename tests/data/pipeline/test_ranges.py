@@ -430,6 +430,31 @@ def test_a_document_with_no_sequence_to_cover_is_refused(tmp_path):
         RangeDocument(tmp_path / "range", expected=[], source="plate_A")
 
 
+def test_a_roster_naming_one_sequence_twice_counts_it_once(tmp_path):
+    # `covered` reads the parts back as a set, and a name can leave only one
+    # part, so a repeated name would hold `covered` below `total` for a run that
+    # measured everything -- and report the sequence as skipped besides.
+    with RangeDocument(
+        tmp_path / "range", expected=["a", "b", "a"], source="plate_A"
+    ) as document:
+        assert document.expected == ("a", "b")
+
+        _scan(_meter(tmp_path, "a"), (0.0, 1.0))
+        _scan(_meter(tmp_path, "b"), (2.0, 3.0))
+
+    assert _saved(tmp_path)["coverage"] == {"total": 2, "covered": 2, "skipped": []}
+
+
+def test_the_roster_keeps_the_order_it_was_first_given_in(tmp_path):
+    # `skipped` is reported in roster order, so the survivor of a repeat has to
+    # be the first sighting rather than the last.
+    document = RangeDocument(
+        tmp_path / "range", expected=["b", "a", "b", "c"], source="plate_A"
+    )
+
+    assert document.expected == ("b", "a", "c")
+
+
 def test_every_document_carries_its_coverage(tmp_path):
     # Always written, never omitted: an absent block would leave a reader
     # guessing whether it means complete or unknown.

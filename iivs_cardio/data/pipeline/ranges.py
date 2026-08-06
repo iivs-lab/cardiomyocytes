@@ -292,7 +292,7 @@ class RangeDocument:
         self.parts_root = self.path.with_suffix(self.PARTS_SUFFIX)
 
         self.settings = settings
-        self.expected = tuple(expected)
+        self.expected = tuple(dict.fromkeys(expected))
         self.source = source
         self.overwrite = overwrite
         self._saved: DatasetRange | None = None
