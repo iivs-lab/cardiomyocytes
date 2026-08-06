@@ -27,7 +27,7 @@ from iivs_cardio.common.device import Device
 from iivs_cardio.common.logging import log_indented
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable, Mapping
     from logging import Logger
     from pathlib import Path
 
@@ -121,11 +121,14 @@ def pin_threads(max_workers: int) -> None:
 
 
 class IncompleteRunError(RuntimeError):
-    def __init__(self, failed: Sequence[tuple[int, str]], total: int) -> None:
-        self.failed = tuple(failed)
+    def __init__(self, failed: Mapping[str, str], total: int) -> None:
+        # Keyed by name rather than by index: an index means nothing without the
+        # factory that produced it, and it moves the moment a selection narrows,
+        # where a name is what a retry hands back as `source.include`. The log
+        # carries the same pairs a line apiece, so the message only counts.
+        self.failed = dict(failed)
         self.total = total
-
-        super().__init__(f"{len(self.failed)} of {total} items failed")
+        super().__init__(f"{len(self.failed)} of {total} failed")
 
 
 class WorkerLogFolder:
@@ -256,10 +259,11 @@ def run_all(
     logger.info("%d of %d done in %.1fs", completed, num_stages, timer.elapsed)
 
     if failed:
-        for index, why in failed:
-            logger.error("%s: %s", stages.get_name(index), why)
+        named = {stages.get_name(index): why for index, why in failed}
+        for name, why in named.items():
+            logger.error("%s: %s", name, why)
 
-        raise IncompleteRunError(failed, num_stages)
+        raise IncompleteRunError(named, num_stages)
 
 
 def _watch(

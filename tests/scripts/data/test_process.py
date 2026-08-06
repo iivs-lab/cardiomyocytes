@@ -264,11 +264,11 @@ def test_a_sequence_holding_a_non_finite_frame_costs_only_that_sequence(
     )
     dest = tmp_path / "out"
 
-    with pytest.raises(IncompleteRunError, match=r"1 of 3 items failed") as failure:
+    with pytest.raises(IncompleteRunError, match=r"1 of 3 failed") as failure:
         _scan(phase_tree, dest, 0, save_frames=True, save_ranges=True)
 
-    ((index, why),) = failure.value.failed
-    assert index == 1
+    ((name, why),) = failure.value.failed.items()
+    assert name == "TL_01"
     assert "non-finite value in" in why
 
     # The other two are whole -- frames committed, ranges folded -- and the one

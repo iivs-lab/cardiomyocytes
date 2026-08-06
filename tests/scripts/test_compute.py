@@ -81,7 +81,7 @@ def test_one_item_failing_does_not_take_the_rest_with_it(tmp_path, workers):
     # of finished sequences, at dataset scale.
     dest = tmp_path / "done"
 
-    with pytest.raises(IncompleteRunError, match=r"1 of 4 items failed"):
+    with pytest.raises(IncompleteRunError, match=r"1 of 4 failed"):
         run_all(_Stages(4, dest, explode_at=[1]), _compute(workers))
 
     assert _done(dest) == [0, 2, 3]
@@ -96,12 +96,12 @@ def test_what_failed_stays_whole_rather_than_folded_into_the_message(tmp_path, w
     with pytest.raises(IncompleteRunError) as failure:
         run_all(_Stages(4, dest, explode_at=[0, 3]), _compute(workers))
 
-    assert str(failure.value) == "2 of 4 items failed"
+    assert str(failure.value) == "2 of 4 failed"
     assert failure.value.total == 4
-    assert failure.value.failed == (
-        (0, "ValueError: item 0 gave up"),
-        (3, "ValueError: item 3 gave up"),
-    )
+    assert failure.value.failed == {
+        "item0": "ValueError: item 0 gave up",
+        "item3": "ValueError: item 3 gave up",
+    }
 
 
 def test_the_run_is_bracketed_before_anything_says_it_failed(tmp_path):
@@ -117,7 +117,7 @@ def test_the_run_is_bracketed_before_anything_says_it_failed(tmp_path):
             yield self
             closed.append(len(_done(self._dest)))
 
-    with pytest.raises(IncompleteRunError, match=r"1 of 3 items failed"):
+    with pytest.raises(IncompleteRunError, match=r"1 of 3 failed"):
         run_all(_Gathering(3, dest, explode_at=[2]), _compute(0))
 
     assert closed == [2]
