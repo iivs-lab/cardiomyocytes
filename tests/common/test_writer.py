@@ -167,3 +167,28 @@ def test_a_writer_ignores_what_a_step_carries_beside_its_value(tmp_path: Path) -
         writer.write(Step(0, "a", "some_other_name.txt"))
 
     assert _names(dest) == ["00000_frame.txt"]
+
+
+def test_a_writer_reports_what_it_committed(tmp_path):
+    # The count rather than the destination: a count below the sequence's length
+    # is what says frames were skipped, and nothing else in a log says it.
+    writer = KoalaFrameWriter(tmp_path / "out", _save_text, stem="frame", ext="txt")
+
+    assert writer.report() is None  # nothing written, so nothing to say
+
+    with writer:
+        writer.write(Step(0, "a"))
+        writer.write(Step(1, "b"))
+
+    assert writer.report() == "wrote 2 frames"
+
+
+def test_a_writer_counts_what_it_wrote_not_what_it_was_offered(tmp_path):
+    # A step with no value is skipped rather than written, so the two differ.
+    writer = KoalaFrameWriter(tmp_path / "out", _save_text, stem="frame", ext="txt")
+    with writer:
+        writer.write(Step(0, "a"))
+        writer.write(Step(1, None))
+
+    assert writer.report() == "wrote 1 frame"
+    assert _names(tmp_path / "out") == ["00000_frame.txt"]

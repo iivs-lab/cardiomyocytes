@@ -2,31 +2,37 @@ from __future__ import annotations
 
 __all__ = (
     "ComputeConfig",
+    "IncompleteRunError",
+    "WorkerLogFolder",
+    "log_insights",
     "pin_threads",
     "plan_devices",
-    "report_insights",
     "run_all",
 )
 
+import logging
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import torch
-from kaparoo.utils.optional import unwrap_or_default
+from kaparoo.filesystem import ensure_dir_exists
+from kaparoo.utils import Timer, unwrap_or_default
 from mpire import WorkerPool
 from tqdm import trange
 
 from iivs_cardio.common.device import Device
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable, Sequence
+    from pathlib import Path
+
+    from kaparoo.filesystem.types import StrPath
+
     from iivs_cardio.common.pipeline import StageFactory
 
-DEFAULT_WORKERS = os.cpu_count() or 1
+DEFAULT_WORKERS = unwrap_or_default(os.cpu_count(), 1)
 
-# Read before anything pins, so a share divides what torch would have taken on
-# its own. A spawned worker re-imports this module and so reads its own default,
-# which tracks physical cores rather than the logical count above.
 _UNPINNED_THREADS = torch.get_num_threads()
 
 
@@ -41,20 +47,6 @@ class ComputeConfig:
 
 
 def plan_devices(config: ComputeConfig) -> tuple[Device, ...]:
-    """One device per worker, in the order the workers will claim them.
-
-    A single entry means this process does the work itself, so "sequential / many
-    processes / many GPUs" is one length check downstream rather than three cases.
-
-    Each device reads one knob and ignores the other's, so setting the other's is
-    refused rather than dropped: a `workers` a CUDA run cannot honour is a wall
-    clock several times what the caller planned for, with nothing saying why.
-
-    Raises:
-        ValueError: If a knob belongs to the other device -- `workers` under
-            CUDA, `gpu_ids` under CPU -- or the worker count is negative, or
-            CUDA is asked for and the driver reports no device.
-    """
     if not Device.resolve(config.device).is_cuda:
         if config.gpu_ids is not None:
             msg = "`gpu_ids` has no effect on cpu: drop it, or set `compute=cuda`"
@@ -74,7 +66,6 @@ def plan_devices(config: ComputeConfig) -> tuple[Device, ...]:
     if not config.gpu_ids:
         devices = Device.visible_cuda()
         if not devices:
-            # `compute=cpu` names the hydra config group, not this parameter.
             msg = "no CUDA device is visible: set `compute=cpu`, or check the driver"
             raise ValueError(msg)
 
@@ -83,108 +74,178 @@ def plan_devices(config: ComputeConfig) -> tuple[Device, ...]:
     return Device.resolve_all(f"cuda:{index}" for index in config.gpu_ids)
 
 
-def pin_threads(workers: int) -> None:
-    """Hold this worker to its share of the machine's intra-op threads.
-
-    torch sizes its thread pool to the machine in every process, so workers each
-    claiming all of it contend rather than parallelise. Measured on 64 cores,
-    sixteen unpinned workers ran 2.7x slower than no pool at all, while
-    sixty-four pinned to one thread each beat the sequential path by 1.35x.
-
-    A lone worker is left alone: it has the machine to itself, and the same
-    measurement puts one unpinned process ahead of every pinned pool it tried
-    below sixty-four workers. Only that widest point is measured -- the share
-    between is this policy, not a result -- and it moves torch alone, so a stage
-    that leaves torch for numpy is not covered.
-
-    Args:
-        workers: How many processes are sharing this machine.
-    """
-    if workers <= 1:
+def pin_threads(max_workers: int) -> None:
+    if max_workers <= 1:
         return
 
-    torch.set_num_threads(max(1, _UNPINNED_THREADS // workers))
+    torch.set_num_threads(max(1, _UNPINNED_THREADS // max_workers))
+
+
+class IncompleteRunError(RuntimeError):
+    def __init__(self, failed: Sequence[tuple[int, str]], total: int) -> None:
+        self.failed = tuple(failed)
+        self.total = total
+
+        super().__init__(f"{len(self.failed)} of {total} items failed")
+
+
+class WorkerLogFolder:
+    STEM: ClassVar[str] = "worker"
+
+    # hydra's own job format, so a worker's file reads like the parent's.
+    _FORMAT: ClassVar[str] = "[%(asctime)s][%(name)s][%(levelname)s] - %(message)s"
+
+    def __init__(self, root: StrPath) -> None:
+        self.root = ensure_dir_exists(root)
+
+    def path_for(self, worker_id: int, num_workers: int) -> Path:
+        width = len(str(num_workers - 1))
+        return self.root / f"{self.STEM}{worker_id:0{width}d}.log"
+
+    def clear(self) -> None:
+        for stale in self.root.glob(f"{self.STEM}*.log"):
+            stale.unlink()
+
+    def configure_worker(self, worker_id: int, num_workers: int, level: int) -> None:
+        log_file = self.path_for(worker_id, num_workers)
+
+        handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
+        handler.setFormatter(logging.Formatter(self._FORMAT))
+
+        logger = logging.getLogger()
+        logger.handlers.clear()
+        logger.addHandler(handler)
+        logger.setLevel(level)
+
+
+@dataclass(frozen=True, slots=True)
+class _Shared:
+    devices: tuple[Device, ...]
+    stages: StageFactory
+    name: str
+    log_folder: WorkerLogFolder | None
+    log_level: int
+
+
+def _init_worker(worker_id: int, shared: _Shared) -> None:
+    if shared.log_folder is not None:
+        shared.log_folder.configure_worker(
+            worker_id, len(shared.devices), shared.log_level
+        )
 
 
 def _run_on_worker(
-    worker_id: int, shared: tuple[tuple[Device, ...], StageFactory], index: int
-) -> None:
-    devices, stages = shared
-
+    worker_id: int, shared: _Shared, index: int
+) -> tuple[int, str] | None:
+    devices = shared.devices
     device = devices[worker_id]
     device.activate()
     pin_threads(len(devices))
 
-    stages.run_one(index, device)
+    try:
+        stages = shared.stages
+        stages.run_stage(index, device)
+    except Exception as error:
+        logging.getLogger(shared.name).exception("%s failed", stages.get_name(index))
+        return index, f"{type(error).__name__}: {error}"
+
+    return None
 
 
 def run_all(
     stages: StageFactory,
     config: ComputeConfig,
     *,
-    desc: str = "running",
     unit: str = "it",
+    log_folder: WorkerLogFolder | None = None,
 ) -> None:
-    """Run everything `stages` offers, sequentially or across a worker pool.
+    name = stages.name
+    logger = logging.getLogger(name)
 
-    The lone path goes through the same call the pool does, with worker `0` being
-    this process: `plan_devices` answers one device for it, so the two differ in
-    where the loop lives rather than in what an item gets.
-
-    Args:
-        stages: What to run, and what to hold open around the run.
-        config: Which devices to divide the work across, and how to report it.
-        desc: What the progress bar calls this run.
-        unit: What the progress bar calls one item of it.
-    """
     num_stages = len(stages)
-
     devices = plan_devices(config)[:num_stages]
-    shared = (devices, stages)
-    pbar_options = {"desc": desc, "unit": unit}
+    num_workers = len(devices)
+    one_worker = num_workers == 1
 
-    with stages.running():
-        if (num_workers := len(devices)) == 1:
-            indices = trange(
-                num_stages, disable=not config.progress_bar, **pbar_options
-            )
-            for index in indices:
-                _run_on_worker(0, shared, index)
-            return
+    log_level = logging.getLogger().getEffectiveLevel()
+    shared = _Shared(devices, stages, name, log_folder, log_level)
 
-        with WorkerPool(
-            n_jobs=num_workers,
-            shared_objects=shared,
-            pass_worker_id=True,
-            enable_insights=config.insights,
-        ) as pool:
-            pool.map(
-                _run_on_worker,
-                range(num_stages),
-                chunk_size=1,
-                worker_lifespan=config.worker_lifespan,
-                progress_bar=config.progress_bar,
-                progress_bar_options=pbar_options,
-            )
+    if config.insights and one_worker:
+        logger.warning("insights: not collected, since a lone worker runs no pool")
+
+    show_progress = config.progress_bar and num_stages > 1
+    pbar_options = {"desc": name, "unit": unit}
+
+    stages_str = f"{num_stages} {unit}"
+    workers_str = f"{num_workers} 'worker'{'' if one_worker else 's'}"
+    devices_str = ", ".join(str(device) for device in dict.fromkeys(devices))
+
+    logger.info("running %s across %s on %s", stages_str, workers_str, devices_str)
+
+    with Timer("s") as timer, stages.running():
+        if one_worker:
+            indices = trange(num_stages, disable=not show_progress, **pbar_options)
+            outcomes = (_run_on_worker(0, shared, index) for index in indices)
+            failed = _watch(outcomes, stages, logger, num_stages)
+        else:
+            with WorkerPool(
+                n_jobs=num_workers,
+                shared_objects=shared,
+                pass_worker_id=True,
+                enable_insights=config.insights,
+            ) as pool:
+                outcomes = pool.imap(
+                    _run_on_worker,
+                    range(num_stages),
+                    chunk_size=1,
+                    worker_init=_init_worker,
+                    worker_lifespan=config.worker_lifespan,
+                    progress_bar=config.progress_bar,
+                    progress_bar_options=pbar_options,
+                )
+                failed = _watch(outcomes, stages, logger, num_stages)
+
+                if config.insights:
+                    log_insights(pool.get_insights(), name)
+
+    completed = num_stages - len(failed)
+    logger.info("%d of %d done in %.1fs", completed, num_stages, timer.elapsed)
+
+    if failed:
+        for index, why in failed:
+            logger.error("%s: %s", stages.get_name(index), why)
+
+        raise IncompleteRunError(failed, num_stages)
 
 
-def report_insights(insights: dict[str, Any]) -> None:
-    """Print what each worker spent its time on, as `mpire` measured it.
+def _watch(
+    outcomes: Iterable[tuple[int, str] | None],
+    stages: StageFactory,
+    logger: logging.Logger,
+    total: int,
+) -> list[tuple[int, str]]:
+    failed: list[tuple[int, str]] = []
 
-    Written to stdout, which hydra captures into the job's own log, so a long run
-    leaves behind the timings that say *why* it took what it took -- a sweep that
-    finishes silently can only be re-run to find out.
+    for index, outcome in enumerate(outcomes):
+        if outcome is not None:
+            failed.append(outcome)
 
-    Args:
-        insights: What `WorkerPool.get_insights` returned. Its per-worker entries
-            are lists indexed by worker id, and its times are preformatted
-            strings rather than numbers.
-    """
-    print(
-        f"insights: {insights['total_time']} total, "
-        f"{insights['working_ratio']:.1%} working, "
-        f"{insights['waiting_ratio']:.1%} waiting"
+        verdict = "done" if outcome is None else "failed"
+        logger.info("%s %s (%d/%d)", stages.get_name(index), verdict, index + 1, total)
+
+    return failed
+
+
+def log_insights(insights: dict[str, Any], name: str = "run") -> None:
+    logger = logging.getLogger(name)
+
+    logger.info(
+        "insights: %s total, %.1f%% working, %.1f%% waiting",
+        insights["total_time"],
+        insights["working_ratio"] * 100,
+        insights["waiting_ratio"] * 100,
     )
+
     rows = zip(insights["n_completed_tasks"], insights["working_time"], strict=True)
     for worker_id, (completed, working) in enumerate(rows):
-        print(f"  worker {worker_id}: {completed} sequences, {working} working")
+        logger.info("  worker %d: %d done, %s working", worker_id, completed, working)

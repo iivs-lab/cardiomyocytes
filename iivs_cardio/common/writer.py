@@ -20,14 +20,14 @@ if TYPE_CHECKING:
 class KoalaFrameWriter[T]:
     def __init__(
         self,
-        dest: StrPath,
+        root: StrPath,
         save: Callable[[Path, T], object],
         *,
         stem: str,
         ext: str,
         overwrite: bool = False,
     ) -> None:
-        self._staged = StagedDirectory(dest, overwrite=overwrite, make_parents=True)
+        self._root = StagedDirectory(root, overwrite=overwrite, make_parents=True)
         self._save = save
         self._stem = stem
         self._ext = ext
@@ -42,11 +42,19 @@ class KoalaFrameWriter[T]:
             raise ValueError(msg)
 
         name = koala_frame_name(step.index, stem=self._stem, ext=self._ext)
-        self._save(self._staged.workdir / name, step.value)
+        self._save(self._root.workdir / name, step.value)
         self._written = step.index
 
     def __call__(self, step: Step[T, Any]) -> None:
         self.write(step)
+
+    def report(self) -> str | None:
+        if self._written < 0:
+            return None
+
+        count = self._written + 1
+
+        return f"wrote {count} frame{'s' if count != 1 else ''}"
 
     def __enter__(self) -> Self:
         return self
@@ -58,12 +66,12 @@ class KoalaFrameWriter[T]:
         traceback: TracebackType | None,
     ) -> None:
         if exc_type is not None:
-            self._staged.abort()
+            self._root.abort()
             return
 
         if self._written < 0:
-            self._staged.abort()
-            msg = f"no frame was written: nothing to commit at {self._staged.path}"
+            self._root.abort()
+            msg = f"no frame was written: nothing to commit at {self._root.path}"
             raise ValueError(msg)
 
-        self._staged.commit()
+        self._root.commit()

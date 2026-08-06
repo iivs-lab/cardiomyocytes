@@ -1,0 +1,317 @@
+from __future__ import annotations
+
+import json
+import logging
+from pathlib import Path
+
+import numpy as np
+import pytest
+from iivs.dhm.data.koala import PHASE_FLOAT_BIN
+from iivs.dhm.data.phase import (
+    PhaseBinFolder,
+    PhaseUnit,
+    read_phase_bin_header,
+    save_phase_bin,
+)
+
+from iivs_cardio.data.pipeline import PhaseStageFactory
+from scripts._compute import ComputeConfig, IncompleteRunError, run_all
+from scripts.data._filtering import parse_filter_config
+from scripts.data._process import (
+    SourceConfig,
+    TargetConfig,
+    build_phase_stages,
+    build_sequences,
+    search_sources,
+)
+from tests.scripts.conftest import (
+    FRAMES,
+    HEIGHT_SCALE,
+    PIXEL_SIZE,
+    SEQUENCES,
+)
+
+STAGE = "preprocess"
+
+
+def _scan(
+    phase_tree: Path,
+    dest: Path,
+    workers: int,
+    *,
+    save_frames: bool = True,
+    save_ranges: bool = False,
+) -> None:
+    source = SourceConfig(root=str(phase_tree))
+    compute = ComputeConfig(device="cpu", workers=workers, progress_bar=False)
+    config = TargetConfig(
+        root=str(dest), save_frames=save_frames, save_ranges=save_ranges
+    )
+
+    run_all(build_phase_stages(source, config, name=STAGE, output_root=dest), compute)
+
+
+def _document(dest: Path) -> dict:
+    return json.loads((dest / "value_range.json").read_text(encoding="utf-8"))
+
+
+def _written(dest: Path) -> dict[str, list[float]]:
+    """Every frame written under `dest`, keyed by the sequence it belongs to."""
+    out: dict[str, list[float]] = {}
+    for folder in sorted(dest.rglob(PHASE_FLOAT_BIN)):
+        read = PhaseBinFolder(folder)
+        key = folder.relative_to(dest).as_posix()
+        out[key] = [float(np.asarray(read[index]).sum()) for index in range(len(read))]
+
+    return out
+
+
+def test_sources_are_found_under_the_root(phase_tree):
+    # The one that fails silently: a search that finds nothing leaves every other
+    # check green, since there is then no sequence to get anything wrong with.
+    sources = search_sources(SourceConfig(root=str(phase_tree)))
+
+    assert len(sources) == SEQUENCES
+
+
+def test_a_root_holding_nothing_and_an_empty_selection_are_told_apart(
+    phase_tree, tmp_path
+):
+    # The two are fixed differently, so they must not arrive as one message. A
+    # root that does not exist at all fails earlier still, inside the search.
+    empty = tmp_path / "empty"
+    empty.mkdir()
+
+    with pytest.raises(ValueError, match=r"no time-lapse holds"):
+        search_sources(SourceConfig(root=str(empty)))
+
+    with pytest.raises(ValueError, match=r"include/exclude left none"):
+        search_sources(
+            SourceConfig(
+                root=str(phase_tree),
+                exclude=[f"TL_{s:02d}" for s in range(SEQUENCES)],
+            )
+        )
+
+
+def test_a_sequence_knows_what_it_is_called_in_its_dataset(phase_tree):
+    # Derived from the folder it was opened over, so a side branch reading the
+    # name cannot land somewhere the frames did not come from.
+    sequences = build_sequences(
+        SourceConfig(root=str(phase_tree)), parse_filter_config(None)
+    )
+
+    assert [sequence.name for sequence in sequences] == [
+        f"TL_{index:02d}" for index in range(SEQUENCES)
+    ]
+
+
+def test_a_target_asking_for_nothing_is_refused(phase_tree, tmp_path):
+    # Both branches off is a config that configures nothing, which is a mistake
+    # rather than a way to say "just read" -- that is `target_config=None`.
+    source = SourceConfig(root=str(phase_tree))
+    target = TargetConfig(root=str(tmp_path), save_frames=False, save_ranges=False)
+
+    with pytest.raises(ValueError, match=r"nothing to do"):
+        build_phase_stages(source, target, name=STAGE)
+
+
+def test_a_factory_offers_one_stage_per_sequence(phase_tree):
+    stages = build_phase_stages(SourceConfig(root=str(phase_tree)), name=STAGE)
+
+    assert len(stages) == SEQUENCES
+
+
+def test_a_run_without_a_target_writes_nothing(phase_tree, tmp_path):
+    # `target_config=None` is how a run that only reads -- a cached source, or a
+    # timing pass -- says it wants no side branch.
+    dest = tmp_path / "out"
+    compute = ComputeConfig(device="cpu", workers=0, progress_bar=False)
+
+    run_all(build_phase_stages(SourceConfig(root=str(phase_tree)), name=STAGE), compute)
+
+    assert not dest.exists()
+
+
+def test_the_pool_reports_what_the_lone_path_does(phase_tree, tmp_path):
+    # The range branch gathers through files a worker leaves behind, so the two
+    # paths agree only if what crosses the process boundary is complete.
+    _scan(phase_tree, tmp_path / "lone", 0, save_frames=False, save_ranges=True)
+    _scan(phase_tree, tmp_path / "pooled", 2, save_frames=False, save_ranges=True)
+
+    lone = _document(tmp_path / "lone")
+    assert [s["source"] for s in lone["dataset"]["sequences"]] == [
+        f"TL_{index:02d}" for index in range(SEQUENCES)
+    ]
+    assert all(len(s["frames"]) == FRAMES for s in lone["dataset"]["sequences"])
+    assert _document(tmp_path / "pooled")["dataset"] == lone["dataset"]
+
+
+def test_the_parts_a_run_gathered_stay_beside_the_document(phase_tree, tmp_path):
+    dest = tmp_path / "out"
+
+    _scan(phase_tree, dest, 2, save_frames=False, save_ranges=True)
+
+    assert sorted(p.name for p in (dest / "value_range.parts").iterdir()) == [
+        f"TL_{index:02d}.json" for index in range(SEQUENCES)
+    ]
+
+
+def test_the_pool_writes_what_the_lone_path_does(phase_tree, tmp_path):
+    # Covers the whole worker path in one assertion. `mpire` hands its workers a
+    # positional signature that no type checker sees, so the pool can go wrong
+    # while every other check stays green.
+    _scan(phase_tree, tmp_path / "lone", 0)
+    _scan(phase_tree, tmp_path / "pooled", 2)
+
+    lone = _written(tmp_path / "lone")
+    assert len(lone) == SEQUENCES
+    assert all(len(frames) == FRAMES for frames in lone.values())
+    assert _written(tmp_path / "pooled") == lone
+
+
+def test_the_written_tree_mirrors_the_source(phase_tree, tmp_path):
+    # A frame tree crosses to the workers as a recipe, so the folders have to
+    # land under its root -- with nothing coming back to say they did.
+    dest = tmp_path / "out"
+
+    _scan(phase_tree, dest, 2)
+
+    for sequence in range(SEQUENCES):
+        written = PhaseBinFolder(dest / f"TL_{sequence:02d}" / PHASE_FLOAT_BIN)
+        assert len(written) == FRAMES
+
+
+def test_the_written_frames_are_always_in_radians(phase_tree, tmp_path):
+    # A metric reads optical path difference out of phase, so the cache a run
+    # leaves carries one unit -- and the header still holds `height_scale` for
+    # whoever wants metres back.
+    dest = tmp_path / "out"
+
+    _scan(phase_tree, dest, 0)
+
+    header = read_phase_bin_header(dest / "TL_00" / PHASE_FLOAT_BIN / "00000_phase.bin")
+    assert header.unit is PhaseUnit.RADIANS
+
+
+def test_the_job_names_the_stage_every_line_is_filed_under(
+    phase_tree, tmp_path, caplog
+):
+    # Nothing here is preprocessing by nature -- the same filtered-phase run is
+    # postprocessing behind a hologram reconstruction -- so the name is the job's
+    # to give, and every line of the run has to follow it: the configuration, the
+    # driver's own summary, the per-sequence block, and the side branches.
+    stage = "reconstruct"
+    source = SourceConfig(root=str(phase_tree))
+    target = TargetConfig(root=str(tmp_path), save_frames=True, save_ranges=True)
+    compute = ComputeConfig(device="cpu", workers=0, progress_bar=False)
+
+    with caplog.at_level(logging.INFO):
+        stages = build_phase_stages(source, target, name=stage, output_root=tmp_path)
+        run_all(stages, compute)
+
+    assert stages.name == stage
+    assert {record.name for record in caplog.records} == {stage}
+
+    messages = [record.getMessage().strip() for record in caplog.records]
+    assert any(message.startswith("source: ") for message in messages)
+    assert messages.count(f"wrote {FRAMES} frames") == SEQUENCES
+    assert sum(message.startswith("measured [") for message in messages) == SEQUENCES
+    assert any(
+        message.startswith(f"wrote value_range.json from {SEQUENCES} sequences")
+        for message in messages
+    )
+
+
+def test_a_sequence_holding_a_non_finite_frame_costs_only_that_sequence(
+    phase_tree, tmp_path
+):
+    # The formats this project reads store a NaN happily, so a bad acquisition
+    # arrives looking like any other. Refusing it must not cost the run: at a
+    # dataset's scale the sequences already finished are hours of work.
+    save_phase_bin(
+        phase_tree / "TL_01" / PHASE_FLOAT_BIN / "00002_phase.bin",
+        np.full((4, 5), np.nan, dtype=np.float32),
+        pixel_size=PIXEL_SIZE,
+        height_scale=HEIGHT_SCALE,
+        overwrite=True,
+        on_nonfinite="ignore",  # the whole point: nothing upstream objects
+    )
+    dest = tmp_path / "out"
+
+    with pytest.raises(IncompleteRunError, match=r"1 of 3 items failed") as failure:
+        _scan(phase_tree, dest, 0, save_frames=True, save_ranges=True)
+
+    ((index, why),) = failure.value.failed
+    assert index == 1
+    assert "non-finite value in" in why
+
+    # The other two are whole -- frames committed, ranges folded -- and the one
+    # that failed left no half-written folder behind.
+    subpath = Path(PHASE_FLOAT_BIN).as_posix()
+    assert sorted(_written(dest)) == [f"TL_{s:02d}/{subpath}" for s in (0, 2)]
+    assert [s["source"] for s in _document(dest)["dataset"]["sequences"]] == [
+        "TL_00",
+        "TL_02",
+    ]
+
+    # And the document says so: bounds folded over two of three sequences are
+    # not the dataset's, and the consumer that sets a policy from them is the
+    # one who would never find out.
+    assert _document(dest)["coverage"] == {
+        "covered": 2,
+        "total": 3,
+        "skipped": ["TL_01"],
+    }
+
+
+class _Hook:
+    """A side branch's hook that may have nothing to say when it is over."""
+
+    def __init__(self, line: str | None) -> None:
+        self._line = line
+
+    def __call__(self, step) -> None:
+        return None
+
+    def report(self) -> str | None:
+        return self._line
+
+
+class _Branch:
+    """A side branch that reports the same thing its hooks do."""
+
+    def __init__(self, line: str | None) -> None:
+        self._line = line
+
+    def get_hook(self, source) -> _Hook:
+        return _Hook(self._line)
+
+    def report(self) -> str | None:
+        return self._line
+
+
+def test_a_branch_with_nothing_to_say_adds_no_line(phase_tree, caplog):
+    # `report()` answering `None` is the contract for a branch that committed
+    # nothing, and the block has to leave it out rather than log an empty line.
+    # Both scopes are covered here: a hook reports per sequence, a branch once.
+    def lines(said: str | None) -> list[str]:
+        stages = PhaseStageFactory(
+            build_sequences(
+                SourceConfig(root=str(phase_tree)), parse_filter_config(None)
+            ),
+            _Branch(said),
+            name=STAGE,
+        )
+        caplog.clear()
+        with caplog.at_level(logging.INFO):
+            run_all(stages, ComputeConfig(device="cpu", workers=0, progress_bar=False))
+
+        return [record.getMessage() for record in caplog.records]
+
+    spoken = lines("spoke")
+    assert sum(message.strip() == "spoke" for message in spoken) == SEQUENCES + 1
+
+    quiet = lines(None)
+    assert all(message.strip() for message in quiet)
+    assert not any("None" in message for message in quiet)

@@ -120,15 +120,19 @@ def test_an_empty_sequence_is_rejected(tmp_path):
         _write(tmp_path / "Bin", [])
 
 
-def test_a_nonfinite_frame_is_written_without_complaint(tmp_path, recwarn):
-    # `on_nonfinite` defaults to "ignore" here: a filter dropping an out-of-range
-    # neighbour can produce NaN, and the range document reports it.
+@pytest.mark.parametrize("bad", (np.nan, np.inf, -np.inf))
+def test_a_nonfinite_frame_is_refused_rather_than_cached(tmp_path, bad):
+    # What this writes is the cache the next stage reads, and the format itself
+    # stores a NaN happily -- so a value let through here is one the run that
+    # meets it has no way to trace back. The folder is left uncommitted.
+    dest = tmp_path / "Bin"
     frame = _frames(1)[0]
-    frame[0, 0] = np.nan
+    frame[0, 0] = bad
 
-    _write(tmp_path / "Bin", [frame])
+    with pytest.raises(ValueError, match="finite"):
+        _write(dest, [frame])
 
-    assert not recwarn.list
+    assert not dest.exists()
 
 
 def test_an_absent_step_writes_nothing(tmp_path):

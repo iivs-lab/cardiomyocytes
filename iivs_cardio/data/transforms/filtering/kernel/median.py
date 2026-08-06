@@ -167,7 +167,6 @@ class MedianKernel(FilterKernel):
         else:
             ordered = gathered.sort(dim=0).values
 
-        # NaNs order last, so the valid samples occupy `[0, valid)`.
         valid = (~gathered.isnan()).sum(dim=0)
         pair = ordered.gather(0, torch.stack(((valid - 1) // 2, valid // 2)))
 

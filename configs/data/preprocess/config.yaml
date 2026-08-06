@@ -10,7 +10,6 @@ source:
   subpath: null # a sequence's path in its time-lapse; null takes Lyncée Tec Koala's Phase/Float/Bin
   include: null # a file of subpaths, or the subpaths as a list; null takes all
   exclude: null # same, for sequences to skip
-  phase_unit: null # unit to read values in; null keeps each file's stored one
   frame_step: 1
 
 target:
@@ -18,7 +17,7 @@ target:
   overwrite: false
   save_frames: false # the filtered frames as a .bin tree, laid out like the source
   save_ranges: true # one JSON of the dataset, sequence, and frame ranges
-  range_file: phase_range # `.json` is added if absent
+  range_file: value_range # `.json` is added if absent
 
 filter: null # set by the defaults above; null scans raw frames
 

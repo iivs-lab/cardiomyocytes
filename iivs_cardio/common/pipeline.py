@@ -1,11 +1,20 @@
 from __future__ import annotations
 
-__all__ = ("Hook", "SequenceStage", "SideBranch", "Stage", "StageFactory", "Step")
+__all__ = (
+    "Hook",
+    "Reporting",
+    "SequenceStage",
+    "SideBranch",
+    "Stage",
+    "StageFactory",
+    "Step",
+)
 
+import logging
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, Self
+from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -13,6 +22,9 @@ if TYPE_CHECKING:
     from kaparoo.data import DataSequence
 
     from iivs_cardio.common.device import Device
+
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,13 +52,23 @@ type Hook[T, E = None] = Callable[[Step[T, E]], None]
 
 
 class SideBranch[S, T, E = None](Protocol):
-    def hook_for(self, source: S, /) -> Hook[T, E]: ...
+    def get_hook(self, source: S, /) -> Hook[T, E]: ...
+
+
+@runtime_checkable
+class Reporting(Protocol):
+    def report(self) -> str | None: ...
 
 
 class StageFactory(Protocol):
+    @property
+    def name(self) -> str: ...
+
     def __len__(self) -> int: ...
 
-    def run_one(self, index: int, device: Device, /) -> None: ...
+    def get_name(self, index: int, /) -> str: ...
+
+    def run_stage(self, index: int, device: Device, /) -> None: ...
 
     def running(self) -> AbstractContextManager[Any]: ...
 
@@ -68,6 +90,10 @@ class Stage[T, E = None](ABC):
     @property
     def sources(self) -> tuple[Stage[Any, Any], ...]:
         return self._sources
+
+    @property
+    def hooks(self) -> tuple[Hook[T, E], ...]:
+        return tuple(self._hooks)
 
     def register_hooks(self, *hooks: Hook[T, E]) -> Self:
         self._hooks.extend(hooks)
@@ -109,6 +135,7 @@ class Stage[T, E = None](ABC):
 
     def _notify(self, step: Step[T, E]) -> None:
         if step.index in self._notified:
+            _logger.debug("step %d refilled (window %d)", step.index, self._window)
             return
 
         self._notified.add(step.index)

@@ -299,3 +299,51 @@ def test_changing_the_device_drops_the_buffered_window():
     _ = sequence[1]
 
     assert source.reads > reads
+
+
+# ------------------------------ non-finite input -------------------------- #
+
+
+@pytest.mark.parametrize("bad", (np.nan, np.inf, -np.inf))
+def test_a_non_finite_source_frame_is_refused_on_the_way_in(bad):
+    # Nothing downstream has an answer for one: it survives every arithmetic
+    # step to come, and the formats this project reads store one happily.
+    frames = _frames(5)
+    frames[2, 1, 3] = bad
+
+    filtered = FilteredSequence(_Frames(frames), IdentityKernel())
+
+    with pytest.raises(ValueError, match=r"non-finite value in 20"):
+        filtered.get_item(2)
+
+
+def test_the_refusal_names_the_frame_by_the_source_s_own_metadata():
+    # An index alone does not locate the file to repair, and the stride between
+    # the view and its source means the view's index is not the source's either.
+    frames = _frames(6)
+    frames[4] = np.nan
+
+    filtered = FilteredSequence(_Frames(frames), IdentityKernel(), step=2)
+
+    # view 2 is source 4, whose metadata is 40 -- neither of the other numbers.
+    with pytest.raises(ValueError, match=r"non-finite value in 40"):
+        filtered.get_item(2)
+
+
+def test_a_neighbour_is_refused_even_when_the_target_itself_is_clean():
+    # A temporal kernel reads past its target, so a frame nobody asked for still
+    # reaches the arithmetic -- and one NaN there spreads across the output.
+    frames = _frames(5)
+    frames[3] = np.nan
+
+    filtered = FilteredSequence(_Frames(frames), MedianKernel((0, 0, 1)))
+
+    with pytest.raises(ValueError, match=r"non-finite value in 30"):
+        filtered.get_item(2)
+
+
+def test_a_clean_sequence_is_untouched_by_the_check():
+    frames = _frames(4)
+    filtered = FilteredSequence(_Frames(frames), IdentityKernel())
+
+    assert torch.equal(filtered.get_item(1), torch.from_numpy(frames[1]))
