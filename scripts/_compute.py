@@ -3,6 +3,7 @@ from __future__ import annotations
 __all__ = (
     "ComputeConfig",
     "IncompleteRunError",
+    "SharedContext",
     "WorkerLogFolder",
     "log_insights",
     "pin_threads",
@@ -106,7 +107,9 @@ class WorkerLogFolder:
         for stale in self.root.glob(f"{self.STEM}*.log"):
             stale.unlink()
 
-    def configure_worker(self, worker_id: int, num_workers: int, level: int) -> None:
+    def configure_worker(
+        self, worker_id: int, num_workers: int, level: int = logging.INFO
+    ) -> None:
         log_file = self.path_for(worker_id, num_workers)
 
         handler = logging.FileHandler(log_file, mode="a", encoding="utf-8")
@@ -119,15 +122,17 @@ class WorkerLogFolder:
 
 
 @dataclass(frozen=True, slots=True)
-class _Shared:
+class SharedContext:
+    """What every worker needs and no task changes, handed over once."""
+
     devices: tuple[Device, ...]
     stages: StageFactory
     name: str
     log_folder: WorkerLogFolder | None
-    log_level: int
+    log_level: int = logging.INFO
 
 
-def _init_worker(worker_id: int, shared: _Shared) -> None:
+def _init_worker(worker_id: int, shared: SharedContext) -> None:
     if shared.log_folder is not None:
         shared.log_folder.configure_worker(
             worker_id, len(shared.devices), shared.log_level
@@ -135,7 +140,7 @@ def _init_worker(worker_id: int, shared: _Shared) -> None:
 
 
 def _run_on_worker(
-    worker_id: int, shared: _Shared, index: int
+    worker_id: int, shared: SharedContext, index: int
 ) -> tuple[int, str] | None:
     devices = shared.devices
     device = devices[worker_id]
@@ -167,8 +172,8 @@ def run_all(
     num_workers = len(devices)
     one_worker = num_workers == 1
 
-    log_level = logging.getLogger().getEffectiveLevel()
-    shared = _Shared(devices, stages, name, log_folder, log_level)
+    log_level = logger.getEffectiveLevel()
+    context = SharedContext(devices, stages, name, log_folder, log_level)
 
     if config.log_insights and one_worker:
         logger.warning("insights: not collected, since a lone worker runs no pool")
@@ -185,12 +190,12 @@ def run_all(
     with Timer("s") as timer, stages.running():
         if one_worker:
             indices = trange(num_stages, disable=not show_progress, **pbar_options)
-            outcomes = (_run_on_worker(0, shared, index) for index in indices)
+            outcomes = (_run_on_worker(0, context, index) for index in indices)
             failed = _watch(outcomes, stages, logger, num_stages)
         else:
             with WorkerPool(
                 n_jobs=num_workers,
-                shared_objects=shared,
+                shared_objects=context,
                 pass_worker_id=True,
                 enable_insights=config.log_insights,
             ) as pool:
