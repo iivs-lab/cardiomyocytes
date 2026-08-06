@@ -6,22 +6,28 @@ __all__ = (
     "build_branches",
     "build_phase_stages",
     "build_sequences",
+    "log_configs",
+    "log_filter_config",
+    "log_source_config",
+    "log_target_config",
     "search_sources",
 )
 
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import PhaseFileFolder, PhaseUnit, search_phase_bin_folders
-from kaparoo.filesystem import stringify_path
+from kaparoo.filesystem import ensure_file_extension, stringify_path
 from kaparoo.filesystem.search import select
 from kaparoo.utils.optional import unwrap_or_default, unwrap_or_factory
 from omegaconf import MISSING
 
+from iivs_cardio.common.logging import log_indented
 from iivs_cardio.data.pipeline import (
+    DOCUMENT_EXT,
     FrameTree,
     PhaseFilteredSequence,
     PhaseStageFactory,
@@ -31,7 +37,7 @@ from scripts._hydra import output_directory
 from scripts.data._filtering import describe_filter_kernel, parse_filter_config
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Sequence
     from logging import Logger
 
     from kaparoo.filesystem.types import StrPath
@@ -60,9 +66,94 @@ class TargetConfig:
     range_file: str = "value_range"
 
 
+SELECTION_LIMIT = 5
+SELECTION_FILES = (".json", ".txt")
+
+
 def _subpath(source_config: SourceConfig) -> str:
-    """Which folder of a time-lapse a run reads, defaulted once."""
     return unwrap_or_default(source_config.subpath, PHASE_FLOAT_BIN)
+
+
+def _log_selection(logger: Logger, verb: str, value: list[str] | str) -> None:
+    if isinstance(value, str):
+        if value.endswith(SELECTION_FILES):
+            log_indented(logger, "%s as listed in %s", verb, value)
+        else:
+            log_indented(logger, "%s %s", verb, value)
+        return
+
+    if (count := len(value)) > SELECTION_LIMIT:
+        log_indented(
+            logger,
+            "%s %d, listed in .hydra/{config,overrides}.yaml",
+            verb,
+            count,
+        )
+        return
+
+    log_indented(logger, "%s:", verb)
+    for item in value:
+        log_indented(logger, "%s", item, depth=2)
+
+
+def log_source_config(source_config: SourceConfig, logger: Logger) -> None:
+    log_indented(logger, "source: %s", source_config.root, depth=0)
+
+    log_indented(logger, "reading <sequence>/%s", _subpath(source_config))
+
+    if (step := source_config.frame_step) > 1:
+        kept = ", ".join(str(index * step) for index in range(3))
+        log_indented(logger, "reading frames %s, ...", kept)
+
+    if source_config.include:
+        _log_selection(logger, "including", source_config.include)
+
+    if source_config.exclude:
+        _log_selection(logger, "excluding", source_config.exclude)
+
+
+def log_filter_config(kernel_config: KernelConfig, logger: Logger) -> None:
+    described = describe_filter_kernel(kernel_config)
+    kind = described.pop("kind")
+    settings = ", ".join(f"{key}={value}" for key, value in described.items())
+    settings = f" ({settings})" if settings else ""
+    log_indented(logger, "filter: %s kernel%s", kind, settings, depth=0)
+
+
+def log_target_config(
+    target_config: TargetConfig, logger: Logger, *, subpath: str | None = None
+) -> None:
+    log_indented(logger, "target: %s", target_config.root, depth=0)
+
+    if target_config.save_frames:
+        layout = f"<sequence>/{subpath}" if subpath else "<sequence>/*"
+        log_indented(logger, "writing the filtered frames to %s", layout)
+
+    if target_config.save_ranges:
+        name = ensure_file_extension(target_config.range_file, DOCUMENT_EXT, add=True)
+        log_indented(logger, "writing the value ranges to %s", name)
+
+    if not (target_config.save_frames or target_config.save_ranges):
+        log_indented(logger, "writing nothing")
+
+    if target_config.overwrite:
+        log_indented(logger, "replacing what is already there")
+
+
+def log_configs(
+    source_config: SourceConfig,
+    target_config: TargetConfig | None,
+    kernel_config: KernelConfig,
+    *,
+    name: str,
+) -> None:
+    logger = logging.getLogger(name)
+
+    log_source_config(source_config, logger)
+    log_filter_config(kernel_config, logger)
+
+    if target_config is not None:
+        log_target_config(target_config, logger, subpath=_subpath(source_config))
 
 
 def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
@@ -94,9 +185,9 @@ def build_sequences(
     source_config: SourceConfig, kernel_config: KernelConfig
 ) -> list[PhaseFilteredSequence]:
     sources = search_sources(source_config)
+    subpath = _subpath(source_config)
 
     kernel = kernel_config.build()
-    subpath = _subpath(source_config)
 
     def build_sequence(source: PhaseFileFolder) -> PhaseFilteredSequence:
         return PhaseFilteredSequence(
@@ -108,65 +199,6 @@ def build_sequences(
         )
 
     return [build_sequence(source) for source in sources]
-
-
-def _log_source_config(source_config: SourceConfig, logger: Logger) -> None:
-    logger.info("source configuration:")
-    logger.info("  root: %s", source_config.root)
-    logger.info("  subpath: %s", _subpath(source_config))
-    logger.info("  frame step: %d", source_config.frame_step)
-
-    def log_listed(name: str, value: list[str] | str | None) -> None:
-        if value is None:
-            return
-
-        if isinstance(value, str):
-            logger.info("  %s: %s", name, value)
-
-        logger.info("  %s:", name)
-        for item in value:
-            logger.info("    %s", item)
-
-    log_listed("include", source_config.include)
-    log_listed("exclude", source_config.exclude)
-
-
-def _log_filter_config(filtering_info: Mapping[str, Any], logger: Logger) -> None:
-    logger.info("filter: %s", filtering_info["kind"])
-
-    settings = ", ".join(
-        f"{key}={value}" for key, value in filtering_info.items() if key != "kind"
-    )
-    logger.info(
-        "source: filtered with the %s kernel%s",
-        filtering_info["kind"],
-        f" ({settings})" if settings else "",
-    )
-
-
-def _log_target_config(target_config: TargetConfig, logger: Logger) -> None:
-    logger.info("target configuration:")
-    logger.info("  root: %s", target_config.root)
-    logger.info("  overwrite: %s", target_config.overwrite)
-    logger.info("  save frames: %s", target_config.save_frames)
-    logger.info("  save ranges: %s", target_config.save_ranges)
-    logger.info("  range file: %s", target_config.range_file)
-
-
-def _log_configs(
-    source_config: SourceConfig,
-    target_config: TargetConfig | None,
-    kernel_config: KernelConfig,
-    *,
-    name: str,
-) -> None:
-    logger = logging.getLogger(name)
-
-    _log_source_config(source_config, logger)
-    _log_filter_config(describe_filter_kernel(kernel_config), logger)
-
-    if target_config is not None:
-        _log_target_config(target_config, logger)
 
 
 def build_branches(
@@ -192,20 +224,14 @@ def build_branches(
 
     if target_config.save_ranges:
         path = Path(root, target_config.range_file)
-
+        source = source_config.root
         settings = {
             "source": {"subpath": subpath, "frame_step": source_config.frame_step},
             "filter": describe_filter_kernel(kernel_config),
         }
 
         branches.append(
-            RangeDocument(
-                path,
-                source_config.root,
-                expected,
-                settings,
-                overwrite=overwrite,
-            )
+            RangeDocument(path, source, expected, settings, overwrite=overwrite)
         )
 
     return branches
@@ -221,7 +247,7 @@ def build_phase_stages(
 ) -> PhaseStageFactory:
     kernel_config = parse_filter_config(filter_config)
 
-    _log_configs(source_config, target_config, kernel_config, name=name)
+    log_configs(source_config, target_config, kernel_config, name=name)
 
     sequences = build_sequences(source_config, kernel_config)
     branches = []

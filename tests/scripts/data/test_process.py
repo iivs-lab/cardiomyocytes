@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from hydra import compose, initialize_config_dir
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import (
     PhaseBinFolder,
@@ -18,13 +19,16 @@ from iivs_cardio.data.pipeline import FrameTree, PhaseStageFactory, RangeDocumen
 from scripts._compute import ComputeConfig, IncompleteRunError, run_all
 from scripts.data._filtering import parse_filter_config
 from scripts.data._process import (
+    SELECTION_LIMIT,
     SourceConfig,
     TargetConfig,
     build_branches,
     build_phase_stages,
     build_sequences,
+    log_configs,
     search_sources,
 )
+from scripts.data.preprocess import CONFIG_NAME, CONFIG_PATH
 from tests.scripts.conftest import (
     FRAMES,
     HEIGHT_SCALE,
@@ -224,6 +228,26 @@ def test_the_job_names_the_stage_every_line_is_filed_under(
     )
 
 
+def test_a_sequence_leads_its_own_block(phase_tree, tmp_path, caplog):
+    # The name is the head and its lines hang under it, so a reader skimming the
+    # left margin sees one entry per sequence rather than one flat list. Pinned
+    # because the nesting is a default a call site can lose without failing.
+    source = SourceConfig(root=str(phase_tree))
+    target = TargetConfig(root=str(tmp_path), save_frames=False, save_ranges=True)
+    compute = ComputeConfig(device="cpu", workers=0, progress_bar=False)
+
+    with caplog.at_level(logging.INFO):
+        stages = build_phase_stages(source, target, name=STAGE, output_root=tmp_path)
+        run_all(stages, compute)
+
+    logged = [record.getMessage() for record in caplog.records]
+    head = logged.index("TL_00")
+
+    assert logged[head + 1].startswith("  filtering ")
+    assert logged[head + 2].startswith("  measured ")
+    assert logged[head + 3].startswith("  done in ")
+
+
 def test_a_sequence_holding_a_non_finite_frame_costs_only_that_sequence(
     phase_tree, tmp_path
 ):
@@ -391,3 +415,188 @@ def test_the_roster_reaches_the_document_that_reports_on_it(tmp_path):
 def test_branches_are_refused_before_any_of_them_is_built(tmp_path):
     with pytest.raises(ValueError, match=r"nothing to do"):
         _branches(tmp_path, save_frames=False, save_ranges=False)
+
+
+# ---------------------------- the configuration log ----------------------- #
+
+
+def _logged(caplog, source, target=None, kernel=None):
+    with caplog.at_level(logging.INFO):
+        log_configs(source, target, kernel or parse_filter_config(None), name=STAGE)
+
+    return [record.getMessage() for record in caplog.records]
+
+
+def test_each_block_is_tagged_by_what_it_configures(caplog):
+    # A tag apiece rather than a verb, so a reader looking for one of the three
+    # finds it by name -- and the run's own lines below are never mistaken for
+    # configuration.
+    logged = _logged(caplog, SourceConfig(root="/dataset"), TargetConfig(root="/out"))
+    heads = [line for line in logged if not line.startswith("  ")]
+
+    assert heads == [
+        "source: /dataset",
+        "filter: identity kernel",
+        "target: /out",
+    ]
+
+
+def test_the_subpath_is_shown_as_the_shape_it_is(caplog):
+    # Shown rather than described: prose about which of the two nests inside the
+    # other kept being read backwards, where the path template cannot be.
+    logged = _logged(caplog, SourceConfig(root="/dataset", subpath="Phase/Other"))
+
+    assert "  reading <sequence>/Phase/Other" in logged
+
+
+@pytest.mark.parametrize(
+    ("step", "said"),
+    (
+        (1, None),
+        (2, "  reading frames 0, 2, 4, ..."),
+        (3, "  reading frames 0, 3, 6, ..."),
+        (21, "  reading frames 0, 21, 42, ..."),
+    ),
+)
+def test_the_stride_is_said_only_when_it_drops_frames(caplog, step, said):
+    # The indices carry the stride and settle where the count starts, which the
+    # stride on its own leaves open.
+    logged = _logged(caplog, SourceConfig(root="/dataset", frame_step=step))
+    stride = [line for line in logged if line.startswith("  reading frames")]
+
+    assert stride == ([] if said is None else [said])
+
+
+def test_a_selection_naming_a_file_points_at_the_file(caplog):
+    # A path is a promise about a file, where a name is the answer itself, so
+    # the two cannot read the same.
+    logged = _logged(caplog, SourceConfig(root="/d", include="/cfg/keep.json"))
+
+    assert "  including as listed in /cfg/keep.json" in logged
+
+
+def test_a_selection_naming_one_thing_says_it_outright(caplog):
+    logged = _logged(caplog, SourceConfig(root="/d", exclude="TL_09"))
+
+    assert "  excluding TL_09" in logged
+
+
+def test_a_short_selection_is_listed_one_to_a_line(caplog):
+    logged = _logged(caplog, SourceConfig(root="/d", exclude=["TL_07", "TL_09"]))
+    head = logged.index("  excluding:")
+
+    assert logged[head + 1 : head + 3] == ["    TL_07", "    TL_09"]
+
+
+def test_a_long_selection_points_at_the_config_instead(caplog):
+    # Listing it would bury the lines around it, and the job's own `.hydra` holds
+    # it exactly: `config.yaml` always, as part of the composed config, and
+    # `overrides.yaml` too when the command line is what set it. A sweep gives
+    # every job its own pair, so the paths hold there as well.
+    names = [f"TL_{index:02d}" for index in range(SELECTION_LIMIT + 1)]
+
+    logged = _logged(caplog, SourceConfig(root="/d", exclude=names))
+
+    assert f"  excluding {len(names)}, listed in .hydra/{{config,overrides}}.yaml" in (
+        logged
+    )
+    assert "    TL_00" not in logged
+
+
+@pytest.mark.parametrize("selection", (None, []))
+def test_a_selection_that_narrows_nothing_is_left_out(caplog, selection):
+    # An absent line reads as "all of it", which is what an unset selection is.
+    logged = _logged(caplog, SourceConfig(root="/dataset", include=selection))
+
+    assert not [line for line in logged if "including" in line]
+
+
+def test_the_filter_fits_on_one_line(caplog):
+    # `kind` leads the line, so repeating it among the settings said it twice.
+    with initialize_config_dir(config_dir=CONFIG_PATH, version_base=None):
+        composed = compose(
+            config_name=CONFIG_NAME,
+            overrides=["data/transforms/filtering@filter=median_cuboid_2x2x1"],
+        )
+
+    logged = _logged(
+        caplog,
+        SourceConfig(root="/dataset"),
+        kernel=parse_filter_config(composed.filter),
+    )
+
+    assert "filter: median kernel (radius=[2, 2, 1], shape=cuboid)" in logged
+    assert not [line for line in logged if "kind=" in line]
+
+
+def test_a_kernel_with_nothing_to_set_says_only_what_it_is(caplog):
+    logged = _logged(caplog, SourceConfig(root="/dataset"))
+
+    assert "filter: identity kernel" in logged
+
+
+@pytest.mark.parametrize(
+    ("target", "written"),
+    (
+        ({}, ["  writing the value ranges to value_range.json"]),
+        (
+            {"save_frames": True},
+            [
+                "  writing the filtered frames to <sequence>/Phase/Float/Bin",
+                "  writing the value ranges to value_range.json",
+            ],
+        ),
+        (
+            {"save_frames": True, "save_ranges": False},
+            ["  writing the filtered frames to <sequence>/Phase/Float/Bin"],
+        ),
+        ({"save_ranges": False}, ["  writing nothing"]),
+        (
+            {"range_file": "phase_range"},
+            ["  writing the value ranges to phase_range.json"],
+        ),
+    ),
+)
+def test_a_target_says_what_it_writes_and_where(caplog, target, written):
+    # A line apiece, since one naming both would read as though the frames went
+    # into the document too. The extension belongs to the document, so the log
+    # names the file that will be there rather than the stem a run configured.
+    logged = _logged(
+        caplog, SourceConfig(root="/d"), TargetConfig(root="/out", **target)
+    )
+
+    assert [line for line in logged if line.startswith("  writing")] == written
+
+
+def test_the_written_frames_take_the_shape_the_source_was_read_in(caplog):
+    # The mirroring shown rather than claimed: the two lines carry the same
+    # template, close enough to read against each other, and a target that
+    # stopped following the source's subpath would show up as a mismatch.
+    logged = _logged(
+        caplog,
+        SourceConfig(root="/dataset", subpath="Phase/Other"),
+        TargetConfig(root="/out", save_frames=True),
+    )
+
+    assert "  reading <sequence>/Phase/Other" in logged
+    assert "  writing the filtered frames to <sequence>/Phase/Other" in logged
+
+
+def test_a_run_allowed_to_replace_says_so(caplog):
+    # Only the permissive state is said, refusing being the default. Worth
+    # revisiting when a third answer lands -- reuse whatever is still valid --
+    # since silence can separate two states but not three.
+    allowed = _logged(
+        caplog, SourceConfig(root="/d"), TargetConfig(root="/o", overwrite=True)
+    )
+    assert "  replacing what is already there" in allowed
+
+    caplog.clear()
+    refused = _logged(caplog, SourceConfig(root="/d"), TargetConfig(root="/o"))
+    assert not [line for line in refused if "replace" in line]
+
+
+def test_a_run_without_a_target_says_nothing_about_writing(caplog):
+    logged = _logged(caplog, SourceConfig(root="/dataset"))
+
+    assert not any(line.startswith("target") for line in logged)
