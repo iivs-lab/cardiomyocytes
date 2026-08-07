@@ -64,7 +64,7 @@ def _done(dest: Path) -> list[int]:
 
 
 def _compute(workers: int) -> ComputeConfig:
-    return ComputeConfig(device="cpu", workers=workers, progress_bar=False)
+    return ComputeConfig(device="cpu", workers=workers, show_progress=False)
 
 
 @pytest.mark.parametrize("workers", (0, 2))
@@ -153,7 +153,7 @@ def test_the_sequences_one_worker_takes_share_its_file(tmp_path):
 
 @pytest.mark.usefixtures("restored_root_logger")
 def test_a_worker_that_restarts_keeps_what_it_already_wrote(tmp_path):
-    # `lifespan` retires a worker and starts a fresh one under the same
+    # `tasks_per_worker` retires a worker and starts a fresh one under the same
     # id, so truncating would take everything the retired one wrote with it.
     for line in ("before", "after"):
         WorkerLogFolder(tmp_path).configure_worker(0, 2, logging.INFO)
@@ -194,7 +194,7 @@ def test_insights_nobody_will_collect_are_said_out_loud(
     # `mpire` gathers them, so a run with no pool gathers nothing -- and asking
     # for a measurement that never arrives should not look like a quiet result.
     config = ComputeConfig(
-        device="cpu", workers=workers, progress_bar=False, log_insights=True
+        device="cpu", workers=workers, show_progress=False, measure_workers=True
     )
 
     with caplog.at_level(logging.WARNING):
@@ -280,16 +280,18 @@ def test_a_default_run_says_nothing_beyond_its_head(caplog):
 @pytest.mark.parametrize(
     ("config", "said"),
     (
-        ({"lifespan": 8}, "  replacing a worker after 8 tasks"),
-        ({"log_insights": True}, "  reporting how busy each worker was"),
-        ({"progress_bar": False}, "  showing no progress bar"),
+        ({"tasks_per_worker": 8}, "  replacing a worker after 8 tasks"),
+        ({"measure_workers": True}, "  reporting how busy each worker was"),
+        ({"show_progress": False}, "  showing no progress bar"),
     ),
 )
 def test_a_setting_a_run_moved_gets_a_line(caplog, config, said):
     assert said in _logged(caplog, **config)
 
 
-@pytest.mark.parametrize("config", ({"lifespan": None}, {"log_insights": False}))
+@pytest.mark.parametrize(
+    "config", ({"tasks_per_worker": None}, {"measure_workers": False})
+)
 def test_a_setting_left_alone_gets_none(caplog, config):
     # Silence is the default, which `run_all` then answers for itself.
     assert _logged(caplog, **config) == ["compute: cpu"]

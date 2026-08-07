@@ -44,9 +44,9 @@ _UNPINNED_THREADS = torch.get_num_threads()
 class ComputeConfig:
     device: str = "cpu"
     workers: int | list[int] | None = None
-    lifespan: int | None = None
-    log_insights: bool = False
-    progress_bar: bool = True
+    tasks_per_worker: int | None = None
+    show_progress: bool = True
+    measure_workers: bool = False
 
 
 class IncompleteRunError(RuntimeError):
@@ -98,13 +98,15 @@ class SharedContext:
 def log_compute_config(config: ComputeConfig, logger: Logger) -> None:
     log_indented(logger, "compute: %s", config.device, depth=0)
 
-    if config.lifespan is not None:
-        log_indented(logger, "replacing a worker after %d tasks", config.lifespan)
+    if config.tasks_per_worker is not None:
+        log_indented(
+            logger, "replacing a worker after %d tasks", config.tasks_per_worker
+        )
 
-    if config.log_insights:
+    if config.measure_workers:
         log_indented(logger, "reporting how busy each worker was")
 
-    if not config.progress_bar:
+    if not config.show_progress:
         log_indented(logger, "showing no progress bar")
 
 
@@ -228,10 +230,10 @@ def run_all(
     log_level = logger.getEffectiveLevel()
     context = SharedContext(devices, stages, name, log_folder, log_level)
 
-    if config.log_insights and one_worker:
-        logger.warning("insights: not collected, since a lone worker runs no pool")
+    if config.measure_workers and one_worker:
+        logger.warning("not measuring workers: a lone worker runs no pool")
 
-    show_progress = config.progress_bar and num_stages > 1
+    show_progress = config.show_progress and num_stages > 1
     pbar_options = {"desc": name, "unit": unit}
 
     stages_str = f"{num_stages} {unit}"
@@ -250,20 +252,20 @@ def run_all(
                 n_jobs=num_workers,
                 shared_objects=context,
                 pass_worker_id=True,
-                enable_insights=config.log_insights,
+                enable_insights=config.measure_workers,
             ) as pool:
                 outcomes = pool.imap(
                     _run_on_worker,
                     range(num_stages),
                     chunk_size=1,
                     worker_init=_init_worker,
-                    worker_lifespan=config.lifespan,
-                    progress_bar=config.progress_bar,
+                    worker_lifespan=config.tasks_per_worker,
+                    progress_bar=show_progress,
                     progress_bar_options=pbar_options,
                 )
                 failed = _watch(outcomes, stages, logger, num_stages)
 
-                if config.log_insights:
+                if config.measure_workers:
                     log_insights(pool.get_insights(), name, unit=unit)
 
     completed = num_stages - len(failed)

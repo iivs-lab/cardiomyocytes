@@ -1,5 +1,5 @@
 device: cuda
 workers: [0] # one worker per gpu id, null every visible device
-progress_bar: true
-log_insights: false # how busy each worker was, logged once a pool finishes
-lifespan: null # tasks before a worker is replaced; null keeps it for the run
+tasks_per_worker: null # tasks before a worker is replaced; null keeps it for the run
+show_progress: true
+measure_workers: false # how busy each worker was, logged once a pool finishes

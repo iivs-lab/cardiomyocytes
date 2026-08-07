@@ -48,7 +48,7 @@ def _scan(
     save_ranges: bool = False,
 ) -> None:
     source = SourceConfig(root=str(phase_tree))
-    compute = ComputeConfig(device="cpu", workers=workers, progress_bar=False)
+    compute = ComputeConfig(device="cpu", workers=workers, show_progress=False)
     config = TargetConfig(
         root=str(dest), save_frames=save_frames, save_ranges=save_ranges
     )
@@ -146,7 +146,7 @@ def test_a_run_without_a_target_writes_nothing(phase_tree, tmp_path):
     # what keeps it empty is the missing target rather than a missing place.
     dest = tmp_path / "out"
     source = SourceConfig(root=str(phase_tree))
-    compute = ComputeConfig(device="cpu", workers=0, progress_bar=False)
+    compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
     run_all(build_phase_stages(source, name=STAGE, output_root=dest), compute)
 
@@ -224,7 +224,7 @@ def test_the_job_names_the_stage_every_line_is_filed_under(
     stage = "reconstruct"
     source = SourceConfig(root=str(phase_tree))
     target = TargetConfig(root=str(tmp_path), save_frames=True, save_ranges=True)
-    compute = ComputeConfig(device="cpu", workers=0, progress_bar=False)
+    compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
     with caplog.at_level(logging.INFO):
         stages = build_phase_stages(source, target, name=stage, output_root=tmp_path)
@@ -249,7 +249,7 @@ def test_a_sequence_leads_its_own_block(phase_tree, tmp_path, caplog):
     # because the nesting is a default a call site can lose without failing.
     source = SourceConfig(root=str(phase_tree))
     target = TargetConfig(root=str(tmp_path), save_frames=False, save_ranges=True)
-    compute = ComputeConfig(device="cpu", workers=0, progress_bar=False)
+    compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
     with caplog.at_level(logging.INFO):
         stages = build_phase_stages(source, target, name=STAGE, output_root=tmp_path)
@@ -345,7 +345,7 @@ def test_a_branch_with_nothing_to_say_adds_no_line(phase_tree, caplog):
         )
         caplog.clear()
         with caplog.at_level(logging.INFO):
-            run_all(stages, ComputeConfig(device="cpu", workers=0, progress_bar=False))
+            run_all(stages, ComputeConfig(device="cpu", workers=0, show_progress=False))
 
         return [record.getMessage() for record in caplog.records]
 
