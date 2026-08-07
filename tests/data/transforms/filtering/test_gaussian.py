@@ -126,6 +126,18 @@ def test_gaussian_rejects_a_non_positive_truncate():
 # -------------------------------- weights --------------------------------- #
 
 
+def test_weights_hands_back_a_copy_rather_than_the_kernel_s_own():
+    # Moving to a device the weights are already on does not copy, so the caller
+    # was handed the kernel's tensor and an assignment through it reshaped every
+    # frame the kernel went on to filter.
+    kernel = GaussianKernel((1, 1, 1))
+    before = kernel.weights(0).clone()
+
+    kernel.weights(0)[0] = 99.0
+
+    assert torch.equal(kernel.weights(0), before)
+
+
 def test_weights_are_symmetric_and_sum_to_one():
     weights = GaussianKernel((1.0, 1.0, 1.0), truncate=2.0).weights(0)
 

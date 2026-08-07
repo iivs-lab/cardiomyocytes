@@ -172,13 +172,13 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
 
         device = self.device.as_torch
 
-        missing = [i for i in indices if i not in self._buffer]
-        for i, frame in zip(missing, self._source.get_items(missing), strict=True):
-            if not np.isfinite(frame).all():
-                msg = f"non-finite value in {self._source.get_meta(i)}"
-                raise ValueError(msg)
+        if missing := [i for i in indices if i not in self._buffer]:
+            for i, frame in zip(missing, self._source.get_items(missing), strict=True):
+                if not np.isfinite(frame).all():
+                    msg = f"non-finite value in {self._source.get_meta(i)}"
+                    raise ValueError(msg)
 
-            self._buffer[i] = torch.from_numpy(frame).to(device, torch.float32)
+                self._buffer[i] = torch.from_numpy(frame).to(device, torch.float32)
 
         if len(indices) == 1:
             return self._buffer[indices[0]].unsqueeze(0)

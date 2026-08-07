@@ -94,10 +94,12 @@ class GaussianKernel(FilterKernel):
         """The `2r + 1` normalized weights along `axis` (`0`=x, `1`=y, `2`=z).
 
         A disabled axis (`sigma` `0`) yields the single weight `[1.0]`, so it
-        contributes a pass-through. Precomputed on the CPU; moved to `device` on
-        each call, which is cheap against the convolution it feeds.
+        contributes a pass-through. Precomputed on the CPU and copied on each
+        call, which is cheap against the convolution it feeds and is what keeps
+        a caller's assignment out of the kernel: moving to a device the weights
+        are already on does not copy on its own.
         """
-        return self._weights[axis].to(device)
+        return self._weights[axis].to(device, copy=True)
 
     def _build_weights(self, axis: int) -> Tensor:
         """The normalized 1D Gaussian for `axis`, or `[1.0]` when it is disabled."""

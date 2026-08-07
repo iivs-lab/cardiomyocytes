@@ -286,6 +286,32 @@ def test_reassigning_the_same_device_keeps_the_buffered_window():
     assert source.reads == reads
 
 
+class _Strict(_Frames):
+    """A source that refuses the empty read a fully buffered window would make."""
+
+    @override
+    def get_items(self, indices):
+        if not list(indices):
+            msg = "asked for no frames at all"
+            raise AssertionError(msg)
+
+        return super().get_items(indices)
+
+
+def test_a_window_already_held_asks_the_source_for_nothing():
+    # The last window of a walk is entirely buffered, so the read that follows
+    # it has nothing to fetch -- and the source was still called, with an empty
+    # list. Harmless for a folder, and not something a source should have to
+    # expect.
+    source = _Strict(_frames(4))
+    sequence = FilteredSequence(source, MedianKernel((0, 0, 1)))
+
+    for index in range(len(sequence)):
+        _ = sequence[index]
+
+    assert source.reads == len(sequence)
+
+
 def test_releasing_drops_the_buffered_window():
     # The window is whatever the last read needed, and nothing else lets go of
     # it -- a driver holding every sequence of a dataset for the whole run holds

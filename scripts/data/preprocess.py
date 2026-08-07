@@ -44,7 +44,6 @@ def main(cfg: DictConfig) -> None:
         raise ValueError(msg)
 
     log_folder = WorkerLogFolder(output_directory())
-    log_folder.clear()
 
     stages = build_phase_stages(
         source_config,
@@ -54,6 +53,7 @@ def main(cfg: DictConfig) -> None:
         name=STAGE,
     )
 
+    log_folder.clear()
     run_all(stages, compute_config, unit="seq", log_folder=log_folder)
 
 
