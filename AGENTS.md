@@ -101,6 +101,14 @@ rather than applying them by hand. What it cannot check:
 - Standalone runnable scripts carry PEP 723 inline metadata (the
   `# /// script` block). `uv` manages it (`uv add --script`); add or edit
   it by hand only when explicitly asked.
+- `__all__`, where a module has one, comes first, after
+  `from __future__ import annotations` and any comment above it. That
+  holds in `__init__.py` too, where it precedes the re-exports.
+- Mark an override with `typing.override`, including one that implements
+  an `abstractmethod`. A self-evident dunder (`__len__`, `__str__`) does
+  not need it.
+- Keep comments to one line, or a few words beside the code. Three is the
+  outside limit; anything longer is a docstring or a commit message.
 
 ### Docstrings
 
@@ -139,6 +147,21 @@ and contracts, not mechanism*:
 - Reference identifiers in backticks (`my_method`, `param`,
   `MyClass.method`). Literal option values get backticks too (`"merge"`,
   `"error"`), as identifiers do.
+- A class's `Attributes:` lists every attribute a caller sees, inherited
+  ones included, described for the class it is on. Reading `SequenceRange`
+  must not send anyone to `ValueRange` first.
+- Fill the line limit rather than wrapping early, but never at the cost of
+  an awkward break. Keep the body short: a summary plus what a caller
+  cannot infer, and no walk through the implementation.
+- **No module-level docstring** unless one is asked for, and none under a
+  constant or a type alias. Those take a `#` comment above the statement.
+- **No em dash** (two hyphens) anywhere in a docstring or a comment.
+  Recast the sentence instead: a colon, a comma, or two sentences.
+- **No measurements.** A docstring carries the contract ("cheap enough to
+  repeat per item"), never the number that established it. Numbers, and
+  the conditions they were taken under, belong in the commit message.
+- Nothing from outside the codebase: not `TODO.md`, not `CHANGELOG.md`,
+  not a result from a particular machine or run.
 
 ## Commit convention
 
