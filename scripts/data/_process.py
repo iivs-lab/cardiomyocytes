@@ -132,7 +132,7 @@ class TargetConfig(TreeConfig):
     range_file: str = "value_range"
 
 
-def _validate_target(
+def _validate_output(
     source_config: SourceConfig, target_config: TargetConfig, output_root: StrPath
 ) -> None:
     """Raise unless the target names an output this run can safely write.
@@ -165,18 +165,18 @@ def _validate_target(
         return
 
     source_root = Path(source_config.root).resolve()
-    write_root = Path(output_root).resolve()
-    if not write_root.is_relative_to(source_root):
+    output_root = Path(output_root).resolve()
+    if not output_root.is_relative_to(source_root):
         return
 
-    read_at = PurePath(source_config.resolve_subpath())
-    write_at = PurePath(target_config.resolve_subpath(read_at.as_posix()))
-    if not (read_at.is_relative_to(write_at) or write_at.is_relative_to(read_at)):
+    subpath = PurePath(source_config.resolve_subpath())
+    written_at = PurePath(target_config.resolve_subpath(subpath.as_posix()))
+    if not (subpath.is_relative_to(written_at) or written_at.is_relative_to(subpath)):
         return
 
-    landing = f"{write_root.as_posix()}/*/{write_at.as_posix()}"
+    where = f"{output_root.as_posix()}/*/{written_at.as_posix()}"
     fix = "`target.subpath` beside it, or `target.root` outside the source"
-    msg = f"frames would land on the source at {landing}: set {fix}"
+    msg = f"frames would land on the source at {where}: set {fix}"
     raise ValueError(msg)
 
 
@@ -377,7 +377,7 @@ def build_branches(
             than a way to ask for a run that only reads, or if the frames it
             writes would land on the source they are read from.
     """
-    _validate_target(source_config, target_config, output_root)
+    _validate_output(source_config, target_config, output_root)
 
     branches = []
 
@@ -438,7 +438,7 @@ def build_phase_stages(
     log_configs(source_config, target_config, kernel_config, name=name)
 
     if target_config is not None:
-        _validate_target(source_config, target_config, output_root)
+        _validate_output(source_config, target_config, output_root)
 
     sequences = build_sequences(source_config, kernel_config)
     branches = []
