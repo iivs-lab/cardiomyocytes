@@ -124,6 +124,11 @@ class KoalaFrameWriter[T]:
     ) -> None:
         """Move the folder into place, unless nothing was written or it failed.
 
+        A move that fails takes the staged folder with it. It sits beside the
+        destination under a hidden name, so leaving it there puts a `.tmp` in
+        the output tree for a sequence that has none of its frames -- and the
+        only other hand on it dies with the process.
+
         Raises:
             ValueError: If the sequence ended without a single frame, since
                 there is then nothing to move and an empty folder would read as
@@ -138,5 +143,10 @@ class KoalaFrameWriter[T]:
             msg = f"no frame was written: nothing to commit at {self._root.path}"
             raise ValueError(msg)
 
-        self._root.commit()
+        try:
+            self._root.commit()
+        except BaseException:
+            self._abort()
+            raise
+
         self._committed = True

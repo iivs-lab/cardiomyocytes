@@ -575,6 +575,82 @@ def test_a_finished_sequence_lets_go_of_its_window(phase_tree, monkeypatch, bran
     assert released == ["let go"]
 
 
+class _Unclosable:
+    """A branch that gathers across the run and cannot commit at the end."""
+
+    def get_hook(self, source) -> _Hook:
+        return _Hook(None)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        if exc_type is None:
+            msg = "the branch could not commit"
+            raise OSError(msg)
+
+
+class _Watching:
+    """A branch that records what it was told the run ended with."""
+
+    def __init__(self) -> None:
+        self.closed_with: list[object] = []
+
+    def get_hook(self, source) -> _Hook:
+        return _Hook(None)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        self.closed_with.append(exc_type)
+
+
+def _factory(phase_tree, *branches):
+    sequences, _ = build_sequences(
+        SourceConfig(root=str(phase_tree)), parse_filter_config(None)
+    )
+
+    return PhaseStageFactory(sequences, *branches, name=STAGE)
+
+
+def _run_nothing(stages) -> None:
+    """Open the branches and close them, in a single statement."""
+    with stages.running():
+        pass
+
+
+def _give_up(stages) -> None:
+    """Open the branches and give up inside, in a single statement."""
+    with stages.running():
+        msg = "the run gave up"
+        raise RuntimeError(msg)
+
+
+def test_one_branch_that_cannot_commit_does_not_silence_the_others(phase_tree, caplog):
+    # The branches are siblings, the same as the hooks of one sequence a level
+    # down, and one `ExitStack` over them handed each whatever the last raised.
+    # What committed still says so: a branch that committed nothing reports
+    # nothing anyway, so the line is only ever about work that landed.
+    stages = _factory(phase_tree, _Unclosable(), _Branch("spoke"))
+
+    with caplog.at_level(logging.INFO), pytest.raises(OSError, match="not commit"):
+        _run_nothing(stages)
+
+    assert "spoke" in [record.getMessage().strip() for record in caplog.records]
+
+
+def test_a_run_that_gave_up_reaches_every_branch(phase_tree):
+    # The other direction: what the run itself ended with does go to all of
+    # them, since that is the outcome they bracket.
+    watching = _Watching()
+
+    with pytest.raises(RuntimeError, match="the run gave up"):
+        _give_up(_factory(phase_tree, watching))
+
+    assert watching.closed_with == [RuntimeError]
+
+
 def test_a_branch_with_nothing_to_say_adds_no_line(phase_tree, caplog):
     # `report()` answering `None` is the contract for a branch that committed
     # nothing, and the block has to leave it out rather than log an empty line.

@@ -3,15 +3,20 @@ from __future__ import annotations
 __all__ = ("PhaseFilteredSequence", "PhaseStageFactory")
 
 import logging
-from contextlib import AbstractContextManager, ExitStack, contextmanager
-from typing import TYPE_CHECKING, Self
+from contextlib import AbstractContextManager, contextmanager
+from typing import TYPE_CHECKING, Any, Self
 
 from iivs.dhm.data.phase import PhaseFileFolder
 from kaparoo.filesystem import stringify_path
 from kaparoo.utils.timer import Timer
 
 from iivs_cardio.common.logging import log_indented
-from iivs_cardio.common.pipeline import Reporting, SequenceStage, SideBranch
+from iivs_cardio.common.pipeline import (
+    Reporting,
+    SequenceStage,
+    SideBranch,
+    close_together,
+)
 from iivs_cardio.data.transforms.filtering import FilteredSequence
 
 if TYPE_CHECKING:
@@ -148,16 +153,31 @@ class PhaseStageFactory:
         A branch that gathers across the dataset commits when this closes, and
         says what it committed afterwards. One whose work ends with the
         sequence it watched needs nothing here.
+
+        The branches are siblings, so each is closed against the run's own
+        outcome and never against another's -- the same rule the hooks of one
+        sequence are closed by, a level down. What committed still says so even
+        when a sibling could not, since a branch that committed nothing reports
+        nothing anyway.
         """
-        with ExitStack() as stack:
+        opened: list[AbstractContextManager[Any]] = []
+
+        try:
             for branch in self._branches:
                 if isinstance(branch, AbstractContextManager):
-                    stack.enter_context(branch)
+                    branch.__enter__()
+                    opened.append(branch)
 
             yield self
+        except BaseException as error:
+            close_together(opened, error)
+            raise
 
-        for line in _reports(self._branches):
-            self._log("%s", line, nested=False)
+        try:
+            close_together(opened, None)
+        finally:
+            for line in _reports(self._branches):
+                self._log("%s", line, nested=False)
 
 
 def _reports(candidates: Iterable[object]) -> Iterator[str]:

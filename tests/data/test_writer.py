@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+from kaparoo.filesystem import StagedDirectory
 
 from iivs_cardio.common.pipeline import Step
 from iivs_cardio.data.writer import KoalaFrameWriter
@@ -177,6 +178,31 @@ def test_a_failure_stops_climbing_at_what_it_did_not_empty(tmp_path: Path) -> No
 
     assert not (sequence / "Phase").exists()
     assert _names(sequence) == ["notes.txt"]
+
+
+def test_a_move_that_fails_leaves_no_staging_behind(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # The staged folder sits beside the destination under a hidden name, so a
+    # move that fails left a `.tmp` in the output tree for a sequence with none
+    # of its frames. The finalizer is the only other hand on it, and it dies
+    # with the process -- so a run killed here left it for good. The writer is
+    # kept alive here for that reason: let it fall out of scope and the
+    # finalizer clears up, which is the very thing a killed run cannot do.
+    def refuse(self: StagedDirectory) -> None:
+        msg = "rename failed"
+        raise OSError(msg)
+
+    out = tmp_path / "out"
+    out.mkdir()
+    monkeypatch.setattr(StagedDirectory, "commit", refuse)
+    writer = KoalaFrameWriter(out / "Bin", _save_text, stem="frame", ext="txt")
+
+    with pytest.raises(OSError, match="rename failed"):
+        _drive(writer, [Step(0, "a")])
+
+    assert list(out.iterdir()) == []
+    assert writer.report() is None
 
 
 def test_a_failure_leaves_an_existing_folder_untouched(tmp_path: Path) -> None:

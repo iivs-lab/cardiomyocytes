@@ -8,6 +8,7 @@ __all__ = (
     "Stage",
     "StageFactory",
     "Step",
+    "close_together",
 )
 
 import logging
@@ -122,23 +123,28 @@ class StageFactory(Protocol):
     def running(self) -> AbstractContextManager[Any]: ...
 
 
-def _close_hooks(
-    hooks: list[AbstractContextManager[Any]], error: BaseException | None
+def close_together(
+    opened: list[AbstractContextManager[Any]], error: BaseException | None
 ) -> None:
-    """Close every hook in `hooks`, in reverse, each told only about `error`.
+    """Close everything in `opened`, in reverse, each told only about `error`.
+
+    For siblings rather than for a nesting: they bracket one thing and write
+    separate outputs, so one that cannot commit must not tell the rest their
+    work failed. An `ExitStack` does the opposite, feeding each callback
+    whatever the last one raised, which is right for a nested `with`.
 
     Args:
-        hooks: the hooks to close, in the order they were opened.
-        error: what the walk they bracket ended with, or `None` if it finished.
+        opened: what to close, in the order it was opened.
+        error: what the block they bracket ended with, or `None` if it finished.
 
     Raises:
-        BaseException: What closing raised, once every hook has been closed
+        BaseException: What closing raised, once everything has been closed
             rather than at the one that raised it. Only the first is carried,
             since a second means the destination itself has gone.
     """
     failure: BaseException | None = None
 
-    for hook in reversed(hooks):
+    for hook in reversed(opened):
         try:
             if error is None:
                 hook.__exit__(None, None, None)
@@ -317,10 +323,10 @@ class Stage[T, E = None](ABC):
             for _ in self:
                 pass
         except BaseException as error:
-            _close_hooks(opened, error)
+            close_together(opened, error)
             raise
 
-        _close_hooks(opened, None)
+        close_together(opened, None)
 
 
 class SequenceStage[T, M](Stage[T, M]):
