@@ -469,6 +469,23 @@ def test_a_part_filed_under_the_wrong_sequence_is_refused_by_name(tmp_path):
         ).to_range()
 
 
+def test_a_document_that_could_not_be_written_reports_nothing(tmp_path):
+    # What was folded was remembered before the file reached disk, so a refused
+    # write still said "wrote range.json from 1 sequence: [...]" -- a line about
+    # a document that is not there, and about bounds nobody can read back.
+    document = RangeDocument(
+        tmp_path / "range", sequence_names=["a"], source="plate_A", overwrite=False
+    )
+    _scan(_meter(tmp_path, "a"), (0.0, 1.0))
+    (tmp_path / "range.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        document.save()
+
+    assert document.report() is None
+    assert (tmp_path / "range.json").read_text(encoding="utf-8") == "{}"
+
+
 def test_a_document_says_how_much_of_the_source_the_run_took(tmp_path):
     # The one a retry produced: `include` narrows the roster, so a run over one
     # of four covered all it was given and the block read as complete. Nothing

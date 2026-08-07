@@ -56,6 +56,7 @@ class KoalaFrameWriter[T]:
         self._stem = stem
         self._ext = ext
         self._written = -1
+        self._committed = False
 
     def write(self, step: Step[T, Any]) -> None:
         """Write the frame in `step`, numbered by the index it came from.
@@ -79,8 +80,13 @@ class KoalaFrameWriter[T]:
         self.write(step)
 
     def report(self) -> str | None:
-        """Return one line naming how many frames were written, or `None`."""
-        if self._written < 0:
+        """Return one line naming how many frames landed, or `None` before any.
+
+        Frames are staged and moved into place together, so there is nothing to
+        report until that move: a sequence that was interrupted or gave up has
+        no folder to point at, however many frames it had staged by then.
+        """
+        if not self._committed:
             return None
 
         count = self._written + 1
@@ -113,3 +119,4 @@ class KoalaFrameWriter[T]:
             raise ValueError(msg)
 
         self._root.commit()
+        self._committed = True

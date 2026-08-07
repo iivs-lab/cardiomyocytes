@@ -585,6 +585,10 @@ class RangeDocument:
     def save(self) -> Path:
         """Fold the parts and write the document, coverage included.
 
+        What was folded is remembered once the file is on disk and not before,
+        so a write that failed leaves this branch with nothing to report rather
+        than a line about a document that is not there.
+
         Returns:
             The path actually written, extension included.
 
@@ -594,15 +598,17 @@ class RangeDocument:
                 not told it may replace it.
         """
         dataset = self.to_range()
-        self._saved = dataset
 
-        return save_range_document(
+        written = save_range_document(
             self.path,
             dataset,
             settings=self.settings,
             coverage=self.get_coverage(dataset),
             overwrite=self.overwrite,
         )
+        self._saved = dataset
+
+        return written
 
     def report(self) -> str | None:
         """Return one line naming what was written, or `None` before it was.

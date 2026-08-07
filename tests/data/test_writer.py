@@ -39,6 +39,22 @@ def _write_all(
             writer.write(step)
 
 
+def _drive(writer: KoalaFrameWriter[str], steps: Iterable[Step[str]]) -> None:
+    """The same, for a writer the caller keeps a hold of to ask afterwards."""
+    with writer:
+        for step in steps:
+            writer.write(step)
+
+
+def _refuse_the_third(path: Path, frame: str) -> None:
+    """A save that works twice and gives up part way, with frames already down."""
+    if path.name.startswith("00002"):
+        msg = "the disk gave up"
+        raise RuntimeError(msg)
+
+    _save_text(path, frame)
+
+
 def _names(folder: Path) -> list[str]:
     return sorted(path.name for path in folder.iterdir())
 
@@ -181,6 +197,22 @@ def test_a_writer_reports_what_it_committed(tmp_path):
         writer.write(Step(1, "b"))
 
     assert writer.report() == "wrote 2 frames"
+
+
+def test_a_writer_that_gave_up_reports_nothing(tmp_path):
+    # The count was read off what had been staged, which survives the abort, so
+    # a sequence that lost its folder still said "wrote 2 frames". A branch with
+    # nothing committed reports `None` -- that is the contract the block relies
+    # on to leave the line out rather than print an empty one.
+    dest = tmp_path / "out"
+    writer = KoalaFrameWriter(dest, _refuse_the_third, stem="frame", ext="txt")
+    steps = [Step(0, "a"), Step(1, "b"), Step(2, "c")]
+
+    with pytest.raises(RuntimeError, match="the disk gave up"):
+        _drive(writer, steps)
+
+    assert not dest.exists()
+    assert writer.report() is None
 
 
 def test_a_writer_counts_what_it_wrote_not_what_it_was_offered(tmp_path):
