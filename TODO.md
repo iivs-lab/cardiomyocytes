@@ -830,15 +830,33 @@ median 필터는 이 오염에 대한 정확한 대응이고, 창 안 절반 미
   문자열이 들어간 이유도 그것이다 — 선언된 키였으므로 하이드라가 조용히 받아들였다.
   `configs/filter/`로 옮겨 해소했다.
 
-  **어디에 둘지는 「누가 쓰는가」가 정한다.**
+  **축이 둘이고, 서로 다른 것을 정한다.**
 
-  - 모든 단계가 쓰는 그룹은 `configs/<이름>/` 최상위. 지금은 `compute`와 `filter`가 그렇다
-    ((2)도 `FilteredSequence`를 쓰고, 「정규화는 필터링 이후」 결정이 그 순서다).
-  - 한 단계만 쓰는 그룹은 **그 진입 설정 폴더 안**에 두고, 그 폴더를 `config_path`로 삼는다.
-    공용 그룹은 `hydra.searchpath: [file://${oc.env:CONFIGS_ROOT}]`로 계속 보인다. 셋 다
-    실측 확인했다 — `filter=identity`, `compute=cuda`, `${oc.env:...}` 보간.
-  - 진입 설정(`config.yaml`) 자체는 단계 경로 그대로 둔다. 그것은 `config_name`으로
-    지정하는 것이지 오버라이드하는 그룹이 아니다.
+  *키가 평평한가* — 오버라이드가 안전한지를 정한다. 키를 중첩시키면 **점 표기가 값
+  오버라이드로 열려** 같은 함정이 되살아난다. `configs/data/filter/`로 두고 실측한 결과:
+
+  ```
+  data/filter=identity  -> IdentityConfig        슬래시는 그룹 선택
+  data.filter=identity  -> 'identity'  (str)     점은 값 오버라이드
+  data.filter=nope      -> 'nope'      (str)     오타조차 통과한다
+  ```
+
+  지금 형태(`filter=nope`)는 하이드라가 즉시 「선택지 없음」과 11개 나열로 거부한다.
+  **슬래시와 점이 다른 뜻인데 사람 눈에는 같아 보이므로**, 그룹의 키는 평평하게 둔다.
+
+  *누가 쓰는가* — 어디에 **둘 수 있는지**를 정한다. 모든 단계가 쓰면 `configs/<이름>/`
+  최상위(지금 `compute`와 `filter`가 그렇다 — (2)도 `FilteredSequence`를 쓰고, 「정규화는
+  필터링 이후」 결정이 그 순서다). 한 단계만 쓰면 **그 진입 설정 폴더 안**에 두고 그 폴더를
+  `config_path`로 삼는다 — 그러면 키는 여전히 평평하고, 공용 그룹은
+  `hydra.searchpath: [file://${oc.env:CONFIGS_ROOT}]`로 계속 보인다. 셋 다 실측 확인했다.
+
+  두 축은 충돌하지 않는다. 진입 설정(`config.yaml`) 자체는 단계 경로 그대로 둔다 — 그것은
+  `config_name`으로 지정하는 것이지 오버라이드하는 그룹이 아니다.
+
+  **분류를 폴더로 반복하지 않는다.** `filter`는 분류상 `data`의 것이지만(`iivs_cardio/data/
+  transforms/filtering/`), 설정 그룹 폴더는 분류표가 아니라 **CLI 이름공간**이다. 분류는 이미
+  패키지 경로와 각 YAML의 `_target_`에 두 번 적혀 있고, 폴더로 세 번째를 적는 대가가 위의
+  점 표기 함정이다.
 
   **평평하게 몰지 않는 이유.** 진입점이 하나인 학습 프로젝트는 `configs/model/`을 평평하게
   두지만 여기는 (1)·(2)·(3)에 학습까지 진입점이 여럿이라 `model`·`data`의 뜻이 서로 다르다.
