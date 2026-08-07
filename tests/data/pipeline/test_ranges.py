@@ -9,6 +9,7 @@ import torch
 
 from iivs_cardio.common.pipeline import SequenceStage, Step
 from iivs_cardio.data.pipeline.ranges import (
+    Coverage,
     DatasetRange,
     FrameRange,
     RangeDocument,
@@ -440,6 +441,34 @@ def test_a_document_names_the_sequences_that_left_nothing(tmp_path):
         "total": 3,
         "skipped": ["b", "c"],
     }
+
+
+def test_a_part_filed_under_the_wrong_sequence_is_refused_by_name(tmp_path):
+    # The path says which sequence a part belongs to and the body says it again;
+    # nothing compared them, so a part sorted under one name and counted under
+    # another produced "covered everything, skipped one" -- a document that
+    # contradicts itself in a way no number in it points at.
+    with RangeDocument(tmp_path / "range", sequence_names=["a", "b"], source="plate_A"):
+        _scan(_meter(tmp_path, "a"), (0.0, 1.0))
+        _scan(_meter(tmp_path, "b"), (0.0, 5.0))
+
+    part = tmp_path / "range.parts" / "b.json"
+    document = json.loads(part.read_text(encoding="utf-8"))
+    document["source"] = "a"
+    part.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"part 'b' holds 'a'"):
+        RangeDocument(
+            tmp_path / "range", sequence_names=["a", "b"], source="plate_A"
+        ).to_range()
+
+
+def test_a_coverage_that_does_not_add_up_cannot_be_built(tmp_path):
+    # `covered` was counted off disk while `total` and `skipped` came from the
+    # roster, so the three could disagree. The type refuses the arithmetic now,
+    # which is what keeps a future caller from writing one.
+    with pytest.raises(ValueError, match=r"coverage does not add up"):
+        Coverage(total=2, covered=3, skipped=("b",))
 
 
 def test_coverage_sits_ahead_of_the_numbers_it_qualifies(tmp_path):

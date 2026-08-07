@@ -352,11 +352,22 @@ class Coverage:
         total: how many sequences the run was given to cover.
         covered: how many of them the document has a range for.
         skipped: the names it does not, in the order they were given.
+
+    Raises:
+        ValueError: If what was covered and what was skipped do not add up to
+            the total, which is a coverage no run can have had.
     """
 
     total: int
     covered: int
     skipped: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        """Refuse a coverage that contradicts itself."""
+        if self.covered + len(self.skipped) != self.total:
+            counted = f"{self.covered} + {len(self.skipped)}"
+            msg = f"coverage does not add up: {counted} is not {self.total}"
+            raise ValueError(msg)
 
     def to_dict(self) -> dict[str, Any]:
         """Return the coverage as plain data, ready to be written as JSON."""
@@ -491,15 +502,27 @@ class RangeDocument:
     def to_range(self) -> DatasetRange:
         """Fold every part on disk into one range for the dataset.
 
+        A part is filed under the sequence it belongs to and says so again
+        inside, and the two must agree. Nothing else compares them, so a part
+        that disagrees would be sorted under one name and counted under
+        another, which no number in the finished document would show.
+
         Raises:
-            ValueError: If no part is there, or one of them cannot be read.
+            ValueError: If no part is there, one of them cannot be read, or one
+                is filed under a sequence other than the one it holds.
         """
         sequences = []
 
         for part in self.list_parts():
             with part.open(encoding="utf-8") as file:
                 document = json.load(file)
-                sequences.append(SequenceRange.from_dict(document))
+
+            sequence = SequenceRange.from_dict(document)
+            if (name := self._source_of(part)) != sequence.source:
+                msg = f"part {name!r} holds {sequence.source!r}: run {name!r} again"
+                raise ValueError(msg)
+
+            sequences.append(sequence)
 
         return DatasetRange(self.source, tuple(sequences))
 
@@ -509,11 +532,16 @@ class RangeDocument:
         What is missing is worked out from the two lists rather than reported
         by the run, so a sequence counts as skipped whether it failed, went
         down with its worker, or never started.
-        """
-        covered = {sequence.source for sequence in dataset.sequences}
-        skipped = tuple(name for name in self.sequence_names if name not in covered)
 
-        return Coverage(len(self.sequence_names), len(covered), skipped)
+        Both numbers are read off the roster, so what was covered and what was
+        skipped always add up to it. Counting one from the roster and the other
+        from disk let the two disagree.
+        """
+        folded = {sequence.source for sequence in dataset.sequences}
+        covered = sum(name in folded for name in self.sequence_names)
+        skipped = tuple(name for name in self.sequence_names if name not in folded)
+
+        return Coverage(len(self.sequence_names), covered, skipped)
 
     def save(self) -> Path:
         """Fold the parts and write the document, coverage included.
