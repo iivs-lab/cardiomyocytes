@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from scripts._compute import (
+    DEFAULT_WORKERS,
     ComputeConfig,
     IncompleteRunError,
     WorkerLogFolder,
@@ -220,6 +221,31 @@ def test_a_worker_file_is_padded_to_the_pool_it_belongs_to(tmp_path, workers, ex
     assert WorkerLogFolder(tmp_path).path_for(0, workers).name == expected
 
 
+@pytest.mark.parametrize(
+    ("config", "error", "refused"),
+    (
+        ({"device": "cpu", "workers": [0, 1]}, TypeError, r"on cpu is a count"),
+        ({"device": "cuda", "workers": 2}, TypeError, r"on cuda names gpu ids"),
+        ({"device": "cpu", "workers": -1}, ValueError, r"invalid worker count -1"),
+    ),
+)
+def test_a_worker_setting_the_device_cannot_read_is_refused(config, error, refused):
+    with pytest.raises(error, match=refused):
+        plan_devices(ComputeConfig(**config))
+
+
+@pytest.mark.parametrize(("workers", "count"), ((0, 1), (1, 1), (3, 3)))
+def test_a_cpu_run_plans_one_device_per_worker_and_never_none(workers, count):
+    planned = plan_devices(ComputeConfig(device="cpu", workers=workers))
+
+    assert len(planned) == count
+    assert all(not device.is_cuda for device in planned)
+
+
+def test_an_unset_worker_count_falls_back_to_the_machine():
+    assert len(plan_devices(ComputeConfig(device="cpu"))) == DEFAULT_WORKERS
+
+
 # ---------------------------- the configuration log ----------------------- #
 
 
@@ -236,7 +262,7 @@ def _logged(caplog, **config):
         ({}, "compute: cpu"),
         ({"workers": 4}, "compute: cpu"),
         ({"device": "cuda"}, "compute: cuda"),
-        ({"device": "cuda", "gpu_ids": [0, 2]}, "compute: cuda"),
+        ({"device": "cuda", "workers": [0, 2]}, "compute: cuda"),
     ),
 )
 def test_the_head_says_the_device_and_leaves_the_count_to_the_run(caplog, config, head):

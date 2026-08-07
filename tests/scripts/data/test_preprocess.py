@@ -28,17 +28,17 @@ def test_every_schema_field_is_reachable_from_the_command_line(group, schema):
     assert not missing
 
 
-@pytest.mark.parametrize("group", ("cpu", "cuda"))
-def test_a_compute_group_holds_the_fields_its_path_uses(group):
-    # `workers` drives the CPU path and `gpu_ids` the CUDA one, so each group
-    # carries only its own -- and `plan_devices` now refuses the other's.
-    own = {"cpu": "workers", "cuda": "gpu_ids"}
-    composed = set(_composed(f"compute={group}")["compute"])
+@pytest.mark.parametrize(("group", "workers"), (("cpu", 0), ("cuda", [0])))
+def test_a_compute_group_reaches_every_field_and_shapes_workers_for_its_device(
+    group, workers
+):
+    # One knob whose shape follows the device -- a count on cpu, gpu ids on cuda
+    # -- so the group has to carry the shape `plan_devices` will accept.
+    composed = _composed(f"compute={group}")["compute"]
 
-    shared = {field.name for field in fields(ComputeConfig)} - set(own.values())
-    assert shared <= composed
-    assert own[group] in composed
-    assert own["cuda" if group == "cpu" else "cpu"] not in composed
+    missing = {field.name for field in fields(ComputeConfig)} - set(composed)
+    assert not missing
+    assert composed["workers"] == workers
 
 
 def test_a_key_no_schema_declares_is_refused():

@@ -43,8 +43,7 @@ _UNPINNED_THREADS = torch.get_num_threads()
 @dataclass
 class ComputeConfig:
     device: str = "cpu"
-    workers: int | None = None
-    gpu_ids: list[int] | None = None
+    workers: int | list[int] | None = None
     lifespan: int | None = None
     log_insights: bool = False
     progress_bar: bool = True
@@ -110,23 +109,25 @@ def log_compute_config(config: ComputeConfig, logger: Logger) -> None:
 
 
 def plan_devices(config: ComputeConfig) -> tuple[Device, ...]:
+    workers = config.workers
+
     if not Device.resolve(config.device).is_cuda:
-        if config.gpu_ids is not None:
-            msg = "`gpu_ids` has no effect on cpu: drop it, or set `compute=cuda`"
+        if workers is not None and not isinstance(workers, int):
+            msg = "`workers` on cpu is a count: use `compute=cuda` to name gpu ids"
+            raise TypeError(msg)
+
+        count = unwrap_or_default(workers, DEFAULT_WORKERS)
+        if count < 0:
+            msg = f"invalid worker count {count}: expected 0 or more, or null"
             raise ValueError(msg)
 
-        workers = unwrap_or_default(config.workers, DEFAULT_WORKERS)
-        if workers < 0:
-            msg = f"invalid worker count {workers}: expected 0 or more, or null"
-            raise ValueError(msg)
+        return Device.resolve_all(["cpu"] * max(count, 1))
 
-        return Device.resolve_all(["cpu"] * max(workers, 1))
+    if isinstance(workers, int):
+        msg = f"`workers` on cuda names gpu ids: use [{workers}] rather than {workers}"
+        raise TypeError(msg)
 
-    if config.workers is not None:
-        msg = "`workers` has no effect on cuda: use `gpu_ids` to pick the devices"
-        raise ValueError(msg)
-
-    if not config.gpu_ids:
+    if not workers:
         devices = Device.visible_cuda()
         if not devices:
             msg = "no CUDA device is visible: set `compute=cpu`, or check the driver"
@@ -134,7 +135,7 @@ def plan_devices(config: ComputeConfig) -> tuple[Device, ...]:
 
         return devices
 
-    return Device.resolve_all(f"cuda:{index}" for index in config.gpu_ids)
+    return Device.resolve_all(f"cuda:{index}" for index in workers)
 
 
 def pin_threads(max_workers: int) -> None:
