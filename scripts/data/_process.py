@@ -151,11 +151,10 @@ def _validate_target(
         ValueError: If the target writes nothing, or the frames it writes would
             land on the source they are read from.
     """
-    if not (target_config.save_ranges or target_config.save_frames):
-        msg = "nothing to do: set `target.save_ranges` or `target.save_frames`"
-        raise ValueError(msg)
-
     if not target_config.save_frames:
+        if not target_config.save_ranges:
+            msg = "nothing to do: set `target.save_ranges` or `target.save_frames`"
+            raise ValueError(msg)
         return
 
     source_root = Path(source_config.root).resolve()

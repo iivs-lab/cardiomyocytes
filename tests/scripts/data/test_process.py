@@ -124,6 +124,18 @@ def test_a_sequence_missing_a_frame_is_refused_by_name(phase_tree, tmp_path):
     assert not dest.exists()
 
 
+def test_a_sequence_missing_a_frame_can_be_excluded_rather_than_fixed(phase_tree):
+    # The check sits after the selection, so one bad acquisition does not put a
+    # whole dataset out of reach -- `exclude` is the way round it while the
+    # frames are recovered. Ahead of the selection it would close that off, and
+    # every other test would stay green.
+    (phase_tree / "TL_01" / PHASE_FLOAT_BIN / "00002_phase.bin").unlink()
+
+    sources = search_sources(SourceConfig(root=str(phase_tree), exclude=["TL_01"]))
+
+    assert len(sources) == SEQUENCES - 1
+
+
 def test_a_sequence_knows_what_it_is_called_in_its_dataset(phase_tree):
     # Derived from the folder it was opened over, so a side branch reading the
     # name cannot land somewhere the frames did not come from.
