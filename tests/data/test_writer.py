@@ -143,6 +143,42 @@ def test_a_failure_part_way_leaves_no_folder(tmp_path: Path) -> None:
     assert not dest.exists()
 
 
+def test_a_failure_leaves_no_empty_shell_of_a_sequence_behind(tmp_path: Path) -> None:
+    # Staging needs a parent to sit in, so the whole `<sequence>/Phase/Float`
+    # was made before a single frame was written -- and the abort dropped only
+    # the staged folder. A run over a dataset then left one empty shell per
+    # failed sequence in the output tree, each reading as a sequence that is
+    # there.
+    out = tmp_path / "out"
+    out.mkdir()
+    dest = out / "TL_00" / "Phase" / "Float" / "Bin"
+
+    with pytest.raises(RuntimeError, match="the disk gave up"):
+        _write_all(dest, [Step(0, "a")], save=_refuse)
+
+    assert list(out.iterdir()) == []
+
+
+def test_a_failure_stops_climbing_at_what_it_did_not_empty(tmp_path: Path) -> None:
+    # The climb walks the folders this writer's own opening made, which reaches
+    # up to the sequence. Anything that landed under one of them meanwhile is
+    # not this writer's to take -- a second cache of the same time-lapse, or
+    # whatever else shares the ancestor -- so the climb stops there.
+    out = tmp_path / "out"
+    out.mkdir()
+    sequence = out / "TL_00"
+    writer = KoalaFrameWriter(
+        sequence / "Phase" / "Float" / "Bin", _refuse, stem="frame", ext="txt"
+    )
+    (sequence / "notes.txt").write_text("a neighbour", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="the disk gave up"):
+        _drive(writer, [Step(0, "a")])
+
+    assert not (sequence / "Phase").exists()
+    assert _names(sequence) == ["notes.txt"]
+
+
 def test_a_failure_leaves_an_existing_folder_untouched(tmp_path: Path) -> None:
     dest = tmp_path / "frames"
     dest.mkdir()

@@ -383,6 +383,24 @@ def test_a_document_it_may_not_replace_is_refused_before_anything_is_dropped(tmp
     assert json.loads((tmp_path / "range.json").read_text(encoding="utf-8"))["coverage"]
 
 
+def test_entering_collects_what_an_interrupted_run_only_staged(tmp_path):
+    # A part is staged beside its destination under a hidden `.tmp` name and
+    # moved into place on a clean close, so a worker killed part way leaves one
+    # there. `list_parts` cannot see it, the only other hand on it died with
+    # that process, and the folder it sits in cannot be cleared while it is
+    # there -- so it accumulates, one per interrupted run.
+    staged = tmp_path / "range.parts" / "plate_A" / ".TL_00.json.ctgx5mjr.tmp"
+    staged.parent.mkdir(parents=True)
+    staged.write_text("half a part", encoding="utf-8")
+
+    with RangeDocument(
+        tmp_path / "range", sequence_names=["plate_A/TL_00"], source="plate_A"
+    ):
+        _scan(_meter(tmp_path, "plate_A/TL_00"), (0.0, 1.0))
+
+    assert not staged.exists()
+
+
 def test_entering_drops_the_folders_that_layout_left_too(tmp_path):
     # A mirrored part nests, so clearing the files alone would keep every folder
     # the source ever had -- and a plate dropped from the dataset would go on

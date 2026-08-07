@@ -533,6 +533,19 @@ class RangeDocument:
 
         return sorted(parts, key=self._source_of)
 
+    def _list_staging(self) -> list[Path]:
+        """Return the staging files an interrupted run left among the parts.
+
+        A part is written beside its destination under a hidden name ending in
+        `.tmp` and moved into place on a clean close, so anything of that shape
+        still here belongs to a run that never got to close. Nothing else
+        collects them: they are hidden from `list_parts`, and the only other
+        hand on them dies with the process that staged them.
+        """
+        found = search_files(self.parts_root, name_filter=EndsWith(".tmp"))
+
+        return [path for path in found if path.name.startswith(".")]
+
     def _source_of(self, part: Path) -> str:
         """The sequence a part belongs to, read back from where it sits."""
         return stringify_path(part.with_suffix(""), after=self.parts_root)
@@ -642,8 +655,10 @@ class RangeDocument:
         otherwise pay for the whole dataset and be refused at the end, having
         already dropped the parts an earlier run left behind.
 
-        Folders left empty by the clearing go too, since a sequence dropped
-        from the dataset would otherwise go on looking present in the tree.
+        What an earlier run staged and never committed goes with the parts it
+        left, since nothing else is in a position to collect it. Folders left
+        empty by the clearing go too, since a sequence dropped from the dataset
+        would otherwise go on looking present in the tree.
 
         Raises:
             FileExistsError: If the document is already there and this one was
@@ -653,7 +668,7 @@ class RangeDocument:
 
         ensure_dir_exists(self.parts_root, make=True)
 
-        for stale in self.list_parts():
+        for stale in (*self.list_parts(), *self._list_staging()):
             stale.unlink()
 
         for folder in reversed(search_dirs(self.parts_root)):

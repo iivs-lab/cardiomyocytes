@@ -2,6 +2,7 @@ from __future__ import annotations
 
 __all__ = ("KoalaFrameWriter",)
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
 from iivs.dhm.data.koala import koala_frame_name
@@ -9,7 +10,6 @@ from kaparoo.filesystem import StagedDirectory
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
     from types import TracebackType
 
     from kaparoo.filesystem.types import StrPath
@@ -51,6 +51,7 @@ class KoalaFrameWriter[T]:
         ext: str,
         overwrite: bool = False,
     ) -> None:
+        self._made = [path for path in Path(root).parents if not path.is_dir()]
         self._root = StagedDirectory(root, overwrite=overwrite, make_parents=True)
         self._save = save
         self._stem = stem
@@ -93,6 +94,25 @@ class KoalaFrameWriter[T]:
 
         return f"wrote {count} frame{'s' if count != 1 else ''}"
 
+    def _abort(self) -> None:
+        """Drop the staged folder, and the ones opening it brought into being.
+
+        Staging needs somewhere to sit, so the destination's parents are made
+        before a single frame is written. Leaving them behind would put an
+        empty `<sequence>/...` in the output tree for every sequence that gave
+        up, which reads as a sequence that is there. Only folders that were
+        absent when this writer opened are removed, and the climb stops at the
+        first one that will not come away: a sibling landed there meanwhile, or
+        another worker sharing the ancestor took it first.
+        """
+        self._root.abort()
+
+        for path in self._made:
+            try:
+                path.rmdir()
+            except OSError:
+                return
+
     def __enter__(self) -> Self:
         return self
 
@@ -110,11 +130,11 @@ class KoalaFrameWriter[T]:
                 a finished one.
         """
         if exc_type is not None:
-            self._root.abort()
+            self._abort()
             return
 
         if self._written < 0:
-            self._root.abort()
+            self._abort()
             msg = f"no frame was written: nothing to commit at {self._root.path}"
             raise ValueError(msg)
 
