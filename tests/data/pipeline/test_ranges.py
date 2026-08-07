@@ -362,6 +362,47 @@ def test_entering_drops_what_an_earlier_run_left(tmp_path):
     assert [s["source"] for s in document["dataset"]["sequences"]] == ["a"]
 
 
+def test_entering_leaves_an_empty_folder_it_did_not_empty(tmp_path):
+    # The tree is cleared so a sequence dropped from the dataset stops looking
+    # present, which is about folders this clearing emptied. One that was
+    # already empty is somebody else's -- a place held for a plate still being
+    # copied, most likely -- and taking it is not this run's to do.
+    mine = tmp_path / "range.parts" / "mine"
+    mine.mkdir(parents=True)
+
+    with RangeDocument(tmp_path / "range", sequence_names=["a"], source="plate_A"):
+        _scan(_meter(tmp_path, "a"), (0.0, 1.0))
+
+    assert mine.is_dir()
+
+
+def test_a_meter_will_not_replace_a_part_it_did_not_write(tmp_path):
+    # Its own run empties the folder on the way in, so a part sitting under this
+    # name belongs to something else -- two sequences whose names came out the
+    # same, most likely. Replacing it silently lost one of the two.
+    meter = _meter(tmp_path, "a")
+    (tmp_path / "range.parts" / "a.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        _scan(meter, (0.0, 1.0))
+
+    assert (tmp_path / "range.parts" / "a.json").read_text(encoding="utf-8") == "{}"
+
+
+def test_a_document_is_opened_once(tmp_path):
+    # Opening is what makes the folder this run's, and it clears the folder to
+    # do it -- so a second one would drop the parts the first has gathered.
+    document = RangeDocument(tmp_path / "range", sequence_names=["a"], source="plate_A")
+
+    with document:
+        _scan(_meter(tmp_path, "a"), (0.0, 1.0))
+
+        with pytest.raises(RuntimeError, match=r"opened already"):
+            document.__enter__()
+
+    assert (tmp_path / "range.parts" / "a.json").exists()
+
+
 def test_a_document_it_may_not_replace_is_refused_before_anything_is_dropped(tmp_path):
     # Clearing cannot be undone and the document is only written once every
     # sequence has run, so refusing at the end meant paying for the whole

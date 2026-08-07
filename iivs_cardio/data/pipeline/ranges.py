@@ -278,14 +278,19 @@ class SequenceRangeMeter:
         root: the folder the part is written into, created if it is not there.
         source: what the sequence is called, used both in the record and as the
             name of the file it is written to.
+        overwrite: whether a part already filed under `source` may be replaced.
+            Its own run clears the folder on the way in, so one that is there
+            belongs to something else -- two sequences whose names came out the
+            same, most likely, which is a mistake rather than a second attempt.
     """
 
-    def __init__(self, root: StrPath, source: str) -> None:
+    def __init__(self, root: StrPath, source: str, *, overwrite: bool = False) -> None:
         root = ensure_dir_exists(root, make=True)
         file = f"{source}{DOCUMENT_EXT}"
 
         self._path = root / file
         self._source = source
+        self._overwrite = overwrite
         self._frames: list[FrameRange] = []
         self._cached: SequenceRange | None = None
 
@@ -337,7 +342,12 @@ class SequenceRangeMeter:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        """Write the sequence's part, unless the sequence ended in an error."""
+        """Write the sequence's part, unless the sequence ended in an error.
+
+        Raises:
+            FileExistsError: If a part is already filed under this name and
+                this meter was not told it may replace it.
+        """
         if exc_type is not None:
             return
 
@@ -345,7 +355,7 @@ class SequenceRangeMeter:
 
         with StagedFile(
             self._path,
-            overwrite=True,
+            overwrite=self._overwrite,
             make_parents=True,
             encoding="utf-8",
         ) as file:
@@ -512,6 +522,8 @@ class RangeDocument:
         self.found = unwrap_or_default(found, len(self.sequence_names))
         self.overwrite = overwrite
 
+        self._entered = False
+
         if self.found < len(self.sequence_names):
             selected = len(self.sequence_names)
             msg = f"selected {selected} of the {self.found} `found`: check the caller"
@@ -521,7 +533,9 @@ class RangeDocument:
 
     def get_hook(self, source: Named) -> SequenceRangeMeter:
         """Return the meter that will measure `source`, filed under its name."""
-        return SequenceRangeMeter(self.parts_root, source.name)
+        return SequenceRangeMeter(
+            self.parts_root, source.name, overwrite=self.overwrite
+        )
 
     def list_parts(self) -> list[Path]:
         """Return every part on disk, ordered by the sequence it belongs to."""
@@ -655,24 +669,37 @@ class RangeDocument:
         already dropped the parts an earlier run left behind.
 
         What an earlier run staged and never committed goes with the parts it
-        left, since nothing else is in a position to collect it. Folders left
-        empty by the clearing go too, since a sequence dropped from the dataset
-        would otherwise go on looking present in the tree.
+        left, since nothing else is in a position to collect it. Folders this
+        clearing emptied go too, since a sequence dropped from the dataset would
+        otherwise go on looking present in the tree -- but only those, so a
+        folder someone else left empty here is not this run's to take.
+
+        Opening is what makes the folder this run's, so it happens once: a
+        second one would clear the parts the first has already gathered.
 
         Raises:
             FileExistsError: If the document is already there and this one was
                 not told it may replace it.
+            RuntimeError: If this document has been opened before.
         """
+        if self._entered:
+            msg = f"{self.path.name} was opened already: open it once per run"
+            raise RuntimeError(msg)
+
+        self._entered = True
         reserve_path(self.path, exist_ok=self.overwrite, make_parents=True)
 
         ensure_dir_exists(self.parts_root, make=True)
 
+        emptied = set()
         for stale in (*self.list_parts(), *self._list_staging()):
+            emptied.add(stale.parent)
             stale.unlink()
 
         for folder in reversed(search_dirs(self.parts_root)):
-            if dir_empty(folder):
+            if folder in emptied and dir_empty(folder):
                 folder.rmdir()
+                emptied.add(folder.parent)
 
         return self
 
