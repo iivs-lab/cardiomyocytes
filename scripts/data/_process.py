@@ -276,7 +276,7 @@ def log_configs(
         log_target_config(target_config, logger, subpath=subpath)
 
 
-def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
+def search_sources(config: SourceConfig) -> tuple[list[PhaseFileFolder], int]:
     """Find the sequences a run reads, narrowed by what it was told to take.
 
     Every sequence taken is checked for a missing frame before any of them is
@@ -285,7 +285,10 @@ def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
     back out is numbered without one, so nothing downstream can tell.
 
     Returns:
-        One folder per sequence, each set to give its frames in radians.
+        One folder per sequence, each set to give its frames in radians, and
+        how many the root held before the selection narrowed them. The second
+        is what lets a document say it describes part of a dataset rather than
+        the whole of a smaller one.
 
     Raises:
         ValueError: If the root holds no sequence at all, if the selection
@@ -324,21 +327,22 @@ def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
 
         taken.append(source.with_unit(PhaseUnit.RADIANS))
 
-    return taken
+    return taken, num_folders
 
 
 def build_sequences(
     source_config: SourceConfig, kernel_config: KernelConfig
-) -> list[PhaseFilteredSequence]:
+) -> tuple[list[PhaseFilteredSequence], int]:
     """Build one filtered view per sequence, all sharing a single kernel.
 
     A kernel holds only the shape it reads, never frames, so one serves every
     sequence of the run.
 
     Returns:
-        The sequences, in the order the search found them.
+        The sequences, in the order the search found them, and how many the
+        root held before the selection narrowed them.
     """
-    sources = search_sources(source_config)
+    sources, found = search_sources(source_config)
     subpath = source_config.resolve_subpath()
 
     kernel = kernel_config.build()
@@ -352,7 +356,7 @@ def build_sequences(
             step=source_config.frame_step,
         )
 
-    return [build_sequence(source) for source in sources]
+    return [build_sequence(source) for source in sources], found
 
 
 def build_branches(
@@ -361,6 +365,7 @@ def build_branches(
     kernel_config: KernelConfig,
     output_root: StrPath,
     sequence_names: Sequence[str],
+    found: int | None = None,
 ) -> list[SideBranch[PhaseFilteredSequence, Tensor, Path]]:
     """Build the branches a target describes, in the order they will watch.
 
@@ -370,6 +375,8 @@ def build_branches(
         kernel_config: the filter, recorded for a later run to compare against.
         output_root: where the branches write.
         sequence_names: every sequence the run set out to cover.
+        found: how many the source held before the selection narrowed it, or
+            `None` when nothing narrowed it.
 
     Returns:
         The branches, empty of neither output when the target asks for both.
@@ -399,7 +406,14 @@ def build_branches(
         }
 
         branches.append(
-            RangeDocument(path, source, sequence_names, settings, overwrite=overwrite)
+            RangeDocument(
+                path,
+                source,
+                sequence_names,
+                settings,
+                found=found,
+                overwrite=overwrite,
+            )
         )
 
     return branches
@@ -442,7 +456,7 @@ def build_phase_stages(
     if target_config is not None:
         _validate_output(source_config, target_config, output_root)
 
-    sequences = build_sequences(source_config, kernel_config)
+    sequences, found = build_sequences(source_config, kernel_config)
     branches = []
 
     if target_config is not None:
@@ -452,6 +466,7 @@ def build_phase_stages(
             kernel_config,
             output_root,
             [sequence.name for sequence in sequences],
+            found,
         )
 
     return PhaseStageFactory(sequences, *branches, name=name)

@@ -425,7 +425,12 @@ def test_a_document_told_its_roster_says_what_it_covered(tmp_path):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
         _scan(_meter(tmp_path, "b"), (0.0, 5.0))
 
-    assert _saved(tmp_path)["coverage"] == {"covered": 2, "total": 2, "skipped": []}
+    assert _saved(tmp_path)["coverage"] == {
+        "found": 2,
+        "selected": 2,
+        "covered": 2,
+        "skipped": [],
+    }
 
 
 def test_a_document_names_the_sequences_that_left_nothing(tmp_path):
@@ -437,8 +442,9 @@ def test_a_document_names_the_sequences_that_left_nothing(tmp_path):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
 
     assert _saved(tmp_path)["coverage"] == {
+        "found": 3,
+        "selected": 3,
         "covered": 1,
-        "total": 3,
         "skipped": ["b", "c"],
     }
 
@@ -463,12 +469,60 @@ def test_a_part_filed_under_the_wrong_sequence_is_refused_by_name(tmp_path):
         ).to_range()
 
 
+def test_a_document_says_how_much_of_the_source_the_run_took(tmp_path):
+    # The one a retry produced: `include` narrows the roster, so a run over one
+    # of four covered all it was given and the block read as complete. Nothing
+    # else in the file could tell "a dataset of one" from "one of four" --
+    # `settings` leaves the selection out on purpose, since recording it there
+    # would refuse reuse to a run that narrowed.
+    with RangeDocument(
+        tmp_path / "range", sequence_names=["b"], source="plate_A", found=4
+    ) as document:
+        _scan(_meter(tmp_path, "b"), (0.0, 1.0))
+
+    assert _saved(tmp_path)["coverage"] == {
+        "found": 4,
+        "selected": 1,
+        "covered": 1,
+        "skipped": [],
+    }
+    assert document.report() == (
+        "wrote range.json from 1 sequence, selected from 4: [0, 1]"
+    )
+
+
+def test_a_run_that_narrowed_nothing_says_the_roster_was_all_there_was(tmp_path):
+    # Written whichever way round, so an absent `found` can never be read as
+    # "unknown". A caller that did not narrow says so by not saying anything.
+    with RangeDocument(
+        tmp_path / "range", sequence_names=["a", "b"], source="plate_A"
+    ) as document:
+        _scan(_meter(tmp_path, "a"), (0.0, 1.0))
+        _scan(_meter(tmp_path, "b"), (2.0, 3.0))
+
+    assert _saved(tmp_path)["coverage"]["found"] == 2
+    assert "selected from" not in (document.report() or "")
+
+
+def test_a_roster_larger_than_what_was_found_is_refused(tmp_path):
+    # No selection can leave more than there was, so this is the caller having
+    # passed the wrong number -- and it has to fail where that is still visible
+    # rather than as a coverage nobody can explain.
+    with pytest.raises(ValueError, match=r"selected 2 of the 1"):
+        RangeDocument(
+            tmp_path / "range", sequence_names=["a", "b"], source="plate_A", found=1
+        )
+
+
 def test_a_coverage_that_does_not_add_up_cannot_be_built(tmp_path):
     # `covered` was counted off disk while `total` and `skipped` came from the
     # roster, so the three could disagree. The type refuses the arithmetic now,
     # which is what keeps a future caller from writing one.
     with pytest.raises(ValueError, match=r"coverage does not add up"):
-        Coverage(total=2, covered=3, skipped=("b",))
+        Coverage(found=2, selected=2, covered=3, skipped=("b",))
+
+    with pytest.raises(ValueError, match=r"selected 2 of the 1 found"):
+        Coverage(found=1, selected=2, covered=2, skipped=())
 
 
 def test_coverage_sits_ahead_of_the_numbers_it_qualifies(tmp_path):
@@ -495,8 +549,8 @@ def test_a_document_with_no_sequence_to_cover_is_refused(tmp_path):
 
 def test_a_roster_naming_one_sequence_twice_counts_it_once(tmp_path):
     # `covered` reads the parts back as a set, and a name can leave only one
-    # part, so a repeated name would hold `covered` below `total` for a run that
-    # measured everything -- and report the sequence as skipped besides.
+    # part, so a repeated name would hold `covered` below `selected` for a run
+    # that measured everything -- and report the sequence as skipped besides.
     with RangeDocument(
         tmp_path / "range", sequence_names=["a", "b", "a"], source="plate_A"
     ) as document:
@@ -505,7 +559,12 @@ def test_a_roster_naming_one_sequence_twice_counts_it_once(tmp_path):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
         _scan(_meter(tmp_path, "b"), (2.0, 3.0))
 
-    assert _saved(tmp_path)["coverage"] == {"total": 2, "covered": 2, "skipped": []}
+    assert _saved(tmp_path)["coverage"] == {
+        "found": 2,
+        "selected": 2,
+        "covered": 2,
+        "skipped": [],
+    }
 
 
 def test_the_roster_keeps_the_order_it_was_first_given_in(tmp_path):
@@ -525,7 +584,8 @@ def test_every_document_carries_its_coverage(tmp_path):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
 
     assert _saved(tmp_path)["coverage"] == {
-        "total": 1,
+        "found": 1,
+        "selected": 1,
         "covered": 1,
         "skipped": [],
     }

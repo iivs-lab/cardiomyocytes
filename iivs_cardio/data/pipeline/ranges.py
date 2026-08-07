@@ -30,6 +30,7 @@ from kaparoo.filesystem import (
     stringify_path,
 )
 from kaparoo.filters import EndsWith
+from kaparoo.utils.optional import unwrap_or_default
 
 from iivs_cardio.common.range import finite_range
 
@@ -348,31 +349,48 @@ class SequenceRangeMeter:
 class Coverage:
     """How much of what a run set out to cover it actually did.
 
+    The three numbers narrow in turn, which is what tells a document describing
+    part of a dataset from one describing a smaller dataset: a run told to take
+    one sequence of four covers all of what it was given, and only `found` says
+    the other three were there.
+
     Attributes:
-        total: how many sequences the run was given to cover.
-        covered: how many of them the document has a range for.
+        found: how many sequences the source held before the run's selection
+            narrowed them.
+        selected: how many of those the run was given to cover.
+        covered: how many of the selected the document has a range for.
         skipped: the names it does not, in the order they were given.
 
     Raises:
         ValueError: If what was covered and what was skipped do not add up to
-            the total, which is a coverage no run can have had.
+            what was selected, or more was selected than was found. Both are
+            coverages no run can have had.
     """
 
-    total: int
+    found: int
+    selected: int
     covered: int
     skipped: tuple[str, ...]
 
     def __post_init__(self) -> None:
         """Refuse a coverage that contradicts itself."""
-        if self.covered + len(self.skipped) != self.total:
+        if self.covered + len(self.skipped) != self.selected:
             counted = f"{self.covered} + {len(self.skipped)}"
-            msg = f"coverage does not add up: {counted} is not {self.total}"
+            msg = f"coverage does not add up: {counted} is not {self.selected}"
+            raise ValueError(msg)
+
+        if self.selected > self.found:
+            msg = f"selected {self.selected} of the {self.found} found"
             raise ValueError(msg)
 
     def to_dict(self) -> dict[str, Any]:
         """Return the coverage as plain data, ready to be written as JSON."""
-        skipped = list(self.skipped)
-        return {"total": self.total, "covered": self.covered, "skipped": skipped}
+        return {
+            "found": self.found,
+            "selected": self.selected,
+            "covered": self.covered,
+            "skipped": list(self.skipped),
+        }
 
 
 def save_range_document(
@@ -449,11 +467,15 @@ class RangeDocument:
         sequence_names: every sequence the run set out to cover. Repeats count
             once, and the order is the one `coverage` reports in.
         settings: what a later run would compare against this one.
+        found: how many sequences the source held before the run's selection
+            narrowed them, or `None` when the caller narrowed nothing and the
+            roster is all there was.
         overwrite: whether an existing document may be replaced.
 
     Raises:
         ValueError: If `sequence_names` is empty, since coverage would then have
-            nothing to be measured against.
+            nothing to be measured against, or if `found` is smaller than the
+            roster, which no selection can produce.
     """
 
     PARTS_SUFFIX = ".parts"
@@ -465,6 +487,7 @@ class RangeDocument:
         sequence_names: Sequence[str],
         settings: Mapping[str, object] | None = None,
         *,
+        found: int | None = None,
         overwrite: bool = False,
     ) -> None:
         if not sequence_names:
@@ -477,7 +500,13 @@ class RangeDocument:
         self.source = source
         self.sequence_names = tuple(dict.fromkeys(sequence_names))
         self.settings = settings
+        self.found = unwrap_or_default(found, len(self.sequence_names))
         self.overwrite = overwrite
+
+        if self.found < len(self.sequence_names):
+            selected = len(self.sequence_names)
+            msg = f"selected {selected} of the {self.found} `found`: check the caller"
+            raise ValueError(msg)
 
         self._saved: DatasetRange | None = None
 
@@ -540,8 +569,9 @@ class RangeDocument:
         folded = {sequence.source for sequence in dataset.sequences}
         covered = sum(name in folded for name in self.sequence_names)
         skipped = tuple(name for name in self.sequence_names if name not in folded)
+        selected = len(self.sequence_names)
 
-        return Coverage(len(self.sequence_names), covered, skipped)
+        return Coverage(self.found, selected, covered, skipped)
 
     def save(self) -> Path:
         """Fold the parts and write the document, coverage included.
@@ -568,9 +598,10 @@ class RangeDocument:
     def report(self) -> str | None:
         """Return one line naming what was written, or `None` before it was.
 
-        The line says how many sequences were covered, and out of how many when
-        some are missing, so a document folded over part of a dataset cannot be
-        mistaken for one folded over all of it.
+        The line says how many sequences were covered, out of how many when some
+        are missing, and how many the source held when the run took only part of
+        it. A document folded over part of a dataset cannot then be mistaken for
+        one folded over all of it, whichever of the two narrowed it.
         """
         if self._saved is None:
             return None
@@ -580,8 +611,11 @@ class RangeDocument:
 
         counted = _counted(coverage.covered, "sequence")
         if coverage.skipped:
-            whole = _counted(coverage.total, "sequence")
+            whole = _counted(coverage.selected, "sequence")
             counted = f"{coverage.covered} of {whole}, {len(coverage.skipped)} skipped"
+
+        if coverage.found > coverage.selected:
+            counted = f"{counted}, selected from {coverage.found}"
 
         return f"wrote {self.path.name} from {counted}: {dataset}"
 

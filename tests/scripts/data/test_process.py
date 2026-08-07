@@ -80,9 +80,10 @@ def _written(dest: Path) -> dict[str, list[float]]:
 def test_sources_are_found_under_the_root(phase_tree):
     # The one that fails silently: a search that finds nothing leaves every other
     # check green, since there is then no sequence to get anything wrong with.
-    sources = search_sources(SourceConfig(root=str(phase_tree)))
+    sources, found = search_sources(SourceConfig(root=str(phase_tree)))
 
     assert len(sources) == SEQUENCES
+    assert found == SEQUENCES
 
 
 def test_a_root_holding_nothing_and_an_empty_selection_are_told_apart(
@@ -131,15 +132,38 @@ def test_a_sequence_missing_a_frame_can_be_excluded_rather_than_fixed(phase_tree
     # every other test would stay green.
     (phase_tree / "TL_01" / PHASE_FLOAT_BIN / "00002_phase.bin").unlink()
 
-    sources = search_sources(SourceConfig(root=str(phase_tree), exclude=["TL_01"]))
+    sources, found = search_sources(
+        SourceConfig(root=str(phase_tree), exclude=["TL_01"])
+    )
 
     assert len(sources) == SEQUENCES - 1
+    assert found == SEQUENCES
+
+
+def test_a_narrowed_run_says_how_much_of_the_dataset_it_took(phase_tree, tmp_path):
+    # The retry that produced a document reading as complete: `include` takes one
+    # of three, and the file said "covered 1, skipped none" over a `source` that
+    # names the whole root. The search already counts what the root held, and
+    # that count is what the document was missing.
+    dest = tmp_path / "out"
+    source = SourceConfig(root=str(phase_tree), include=["TL_01"])
+    target = TargetConfig(root=str(dest), save_frames=False, save_ranges=True)
+    compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
+
+    run_all(build_phase_stages(source, target, name=STAGE, output_root=dest), compute)
+
+    assert _document(dest)["coverage"] == {
+        "found": SEQUENCES,
+        "selected": 1,
+        "covered": 1,
+        "skipped": [],
+    }
 
 
 def test_a_sequence_knows_what_it_is_called_in_its_dataset(phase_tree):
     # Derived from the folder it was opened over, so a side branch reading the
     # name cannot land somewhere the frames did not come from.
-    sequences = build_sequences(
+    sequences, _ = build_sequences(
         SourceConfig(root=str(phase_tree)), parse_filter_config(None)
     )
 
@@ -238,7 +262,7 @@ def test_frames_may_be_written_beside_the_ones_they_were_read_from(phase_tree):
     _scan(phase_tree, phase_tree, 0, subpath=FILTERED)
 
     assert _written(phase_tree) == before
-    assert len(search_sources(SourceConfig(root=str(phase_tree)))) == SEQUENCES
+    assert len(search_sources(SourceConfig(root=str(phase_tree)))[0]) == SEQUENCES
     assert len(PhaseBinFolder(phase_tree / "TL_00" / FILTERED)) == FRAMES
 
 
@@ -416,8 +440,9 @@ def test_a_sequence_holding_a_non_finite_frame_costs_only_that_sequence(
     # not the dataset's, and the consumer that sets a policy from them is the
     # one who would never find out.
     assert _document(dest)["coverage"] == {
+        "found": 3,
+        "selected": 3,
         "covered": 2,
-        "total": 3,
         "skipped": ["TL_01"],
     }
 
@@ -456,7 +481,7 @@ def test_a_branch_with_nothing_to_say_adds_no_line(phase_tree, caplog):
         stages = PhaseStageFactory(
             build_sequences(
                 SourceConfig(root=str(phase_tree)), parse_filter_config(None)
-            ),
+            )[0],
             _Branch(said),
             name=STAGE,
         )
