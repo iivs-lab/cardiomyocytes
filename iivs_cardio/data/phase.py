@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from iivs.dhm.data.phase import PhaseBinFolder, PhaseUnit, save_phase_bin
 
-from iivs_cardio.common.writer import KoalaFrameWriter
+from iivs_cardio.data.writer import KoalaFrameWriter
 
 if TYPE_CHECKING:
     from pathlib import Path

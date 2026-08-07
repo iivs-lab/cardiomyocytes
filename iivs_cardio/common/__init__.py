@@ -14,7 +14,6 @@ from iivs_cardio.common.pipeline import (
     Step,
 )
 from iivs_cardio.common.range import finite_range
-from iivs_cardio.common.writer import KoalaFrameWriter
 
 __all__ = (
     "DEVICE_KINDS",
@@ -22,7 +21,6 @@ __all__ = (
     "DeviceKind",
     "DeviceLike",
     "Hook",
-    "KoalaFrameWriter",
     "SequenceStage",
     "SideBranch",
     "Stage",

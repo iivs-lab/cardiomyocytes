@@ -14,8 +14,8 @@ if TYPE_CHECKING:
     from kaparoo.filesystem.types import StrPath
     from torch import Tensor
 
-    from iivs_cardio.common.writer import KoalaFrameWriter
     from iivs_cardio.data.pipeline.stage import PhaseFilteredSequence
+    from iivs_cardio.data.writer import KoalaFrameWriter
 
 
 @dataclass(frozen=True, slots=True)

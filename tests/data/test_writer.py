@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from iivs_cardio.common.pipeline import Step
-from iivs_cardio.common.writer import KoalaFrameWriter
+from iivs_cardio.data.writer import KoalaFrameWriter
 from iivs_cardio.optical_flow.data.folder import OpticalFlowFolder, save_flow_npy
 
 if TYPE_CHECKING:

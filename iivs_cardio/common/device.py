@@ -176,8 +176,8 @@ class Device:
         they disagree with the tensors they are handed -- CuPy would label a
         pointer from device 1 as device 0's. A `cpu` device has nothing to bind.
 
-        Cheap enough to repeat on a hot path: the three calls together measure
-        about 0.7 us, against about 3.4 ms for one 900x900 flow.
+        Cheap enough to repeat per item on a hot path rather than hoisted into
+        worker setup, which a lone in-process run would then have to duplicate.
         """
         if self.index is None:  # cpu, since only a cuda device carries an index
             return
