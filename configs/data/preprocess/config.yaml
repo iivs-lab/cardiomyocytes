@@ -13,7 +13,7 @@ source:
   frame_step: 1
 
 target:
-  root: ??? # where the config snapshot, the log, and the outputs land
+  root: ??? # where the job directory goes; a sweep puts each job under it by number
   subpath: null # a written sequence's frame folder; null follows source.subpath
   overwrite: false
   save_frames: false # the filtered frames as a .bin tree, laid out like the source

@@ -729,11 +729,33 @@ def test_branches_are_refused_where_the_frames_would_land_on_the_source(tmp_path
 # ---------------------------- the configuration log ----------------------- #
 
 
-def _logged(caplog, source, target=None, kernel=None):
+def _logged(caplog, source, target=None, kernel=None, output_root="/out"):
     with caplog.at_level(logging.INFO):
-        log_configs(source, target, kernel or parse_filter_config(None), name=STAGE)
+        log_configs(
+            source,
+            target,
+            kernel or parse_filter_config(None),
+            output_root,
+            name=STAGE,
+        )
 
     return [record.getMessage() for record in caplog.records]
+
+
+def test_the_target_line_says_where_the_run_writes_not_what_placed_it(caplog):
+    # `target.root` places the job's directory and nothing reads it to write
+    # with -- a sweep gives each job one of its own beneath it, so both jobs
+    # logged the same `target:` while writing to `<root>/0` and `<root>/1`. The
+    # line follows the branches, which is the path a reader goes looking in.
+    logged = _logged(
+        caplog,
+        SourceConfig(root="/dataset"),
+        TargetConfig(root="/out"),
+        output_root="/out/0",
+    )
+
+    assert "target: /out/0" in logged
+    assert "target: /out" not in logged
 
 
 def test_each_block_is_tagged_by_what_it_configures(caplog):

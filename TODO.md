@@ -400,10 +400,22 @@ target.range_file=value_range_retry source.include=[plate_A/2026-03-11/TL_01_wel
   전부 지운다. 그리고 `coverage`는 *그 실행의* 명단 기준이라 `1 of 1`로 **"완전"이라고
   말한다** — 절반짜리 문서가 온전해 보인다. `overwrite=false`면 문서 쓰기가 실패해 조용히
   틀리지는 않지만, 파트는 이미 지워진 뒤다.
-- **`hydra.run.dir`을 실행마다 따로.** 기본이 `${target.root}`라 잡 디렉터리를 공유하면
-  `.hydra/overrides.yaml`이 덮여, 어느 `include`가 트리의 어느 부분을 만들었는지 기록이
-  사라진다. `WorkerLogFolder.clear()`도 앞 실행의 워커 로그를 지운다. 프레임은 `target.root`로
-  가므로 잡 디렉터리를 갈라도 캐시는 하나로 모인다.
+- **잡 디렉터리를 가르면 캐시도 갈라진다 — 우회로의 두 규칙이 서로를 무너뜨린다.** 1차는
+  「프레임은 `target.root`로 가므로 잡 디렉터리를 갈라도 캐시는 하나로 모인다」고 적었는데
+  **틀렸다(E1).** `target.root`를 읽는 것은 `hydra.run.dir` 보간뿐이고, 쓰는 것은 전부 잡
+  디렉터리(`output_directory()`)를 받는다. 같은 `target.root`에 `hydra.run.dir`만 갈라 두 번
+  돌린 실측:
+
+  ```
+  cache : 생기지도 않음
+  runA  : TL_00     range_A.json  range_A.parts
+  runB  : plate_B   range_B.json  range_B.parts
+  ```
+
+  가르지 않으면 `.hydra/overrides.yaml`과 워커 로그가 덮이고(어느 `include`가 트리의 어느
+  부분을 만들었는지 기록이 사라진다), 가르면 캐시가 갈라진다. **둘 다 만족하는 설정이 없다.**
+  §1순위(재사용·재시도)를 설계할 때 함께 풀 것 — 그때까지 이 우회로는 범위 문서에만 쓰고,
+  프레임 캐시에는 쓰지 말 것.
 
 **glob은 안 되고 정확한 이름만 된다.** `select` 자체는 `{kind: glob, pattern: ...}`을
 받지만 `SourceConfig.include`의 스키마가 `list[str] | str`이라 omegaconf가 막는다. 다만

@@ -244,16 +244,23 @@ def log_filter_config(kernel_config: KernelConfig, logger: Logger) -> None:
 
 
 def log_target_config(
-    target_config: TargetConfig, logger: Logger, *, subpath: str | None = None
+    target_config: TargetConfig,
+    logger: Logger,
+    output_root: StrPath,
+    *,
+    subpath: str | None = None,
 ) -> None:
     """Log what a run writes and where, naming each output it will produce.
 
     Args:
         target_config: what the run was told to write.
         logger: where the lines go.
+        output_root: where the branches actually write, which is not
+            `target.root`: that setting places the job's directory, and a sweep
+            gives each of its jobs one of its own beneath it.
         subpath: how a written sequence is laid out, when frames are written.
     """
-    log_indented(logger, "target: %s", target_config.root, depth=0)
+    log_indented(logger, "target: %s", output_root, depth=0)
 
     if target_config.save_frames:
         layout = f"<sequence>/{subpath}" if subpath else "<sequence>/*"
@@ -274,6 +281,7 @@ def log_configs(
     source_config: SourceConfig,
     target_config: TargetConfig | None,
     kernel_config: KernelConfig,
+    output_root: StrPath,
     *,
     name: str,
 ) -> None:
@@ -294,7 +302,7 @@ def log_configs(
 
     if target_config is not None:
         subpath = target_config.resolve_subpath(source_config.resolve_subpath())
-        log_target_config(target_config, logger, subpath=subpath)
+        log_target_config(target_config, logger, output_root, subpath=subpath)
 
         if target_config.save_frames and source_config.frame_step > 1:
             fix = "join the value ranges to it by position rather than by name"
@@ -475,7 +483,7 @@ def build_phase_stages(
     """
     kernel_config = parse_filter_config(filter_config)
 
-    log_configs(source_config, target_config, kernel_config, name=name)
+    log_configs(source_config, target_config, kernel_config, output_root, name=name)
 
     if target_config is not None:
         _validate_output(source_config, target_config, output_root)
