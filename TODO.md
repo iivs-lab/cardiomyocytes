@@ -284,7 +284,7 @@ force          4     3, 4, 5 → acceleration 4
   `TreeConfig`에 넣지 않았다 — 그것이 붙는 자리는 「`StagedDirectory`가 시퀀스당 폴더를
   통째로 갈아끼우는 곳」이지 config 일반이 아니다. 다만 판정 자체는
   `(source_root, source_subpath)` 대 `(write_root, target_subpath)` 넷이면 끝나 단계에
-  독립이므로, `_validate_target`의 그 절반은 **클래스 계층과 무관하게 함수로 먼저 올라갈**
+  독립이므로, `_validate_output`의 그 절반은 **클래스 계층과 무관하게 함수로 먼저 올라갈**
   수 있다.
 
 # 1순위 — 캐시와 범위 문서의 재사용

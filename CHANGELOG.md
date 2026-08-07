@@ -49,7 +49,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   on the source is refused before the search: a sequence is committed by
   replacing its folder whole, so writing back to where it was read from
   destroyed the acquisition under a run that logged `N of N done` and exited 0.
-  `FrameTree` carries what every sequence's writer shares
+  Either subpath is refused outright if it could reach outside a sequence's own
+  folder, since a `..` would walk past that comparison and land wherever it
+  pointed. `FrameTree` carries what every sequence's writer shares
   and `PhaseStageFactory` hands out a stage with its hooks already registered,
   so whatever owns a stage never wires that stage's side branches.
 - `preprocess` refuses `target.save_frames` in a `--multirun`. Frames go to
