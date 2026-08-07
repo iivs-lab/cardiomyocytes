@@ -188,6 +188,7 @@ class Stage[T, E = None](ABC):
 
         self._hooks: list[Hook[T, E]] = []
         self._notified: set[int] = set()
+        self._walked = False
 
     @property
     def sources(self) -> tuple[Stage[Any, Any], ...]:
@@ -291,12 +292,25 @@ class Stage[T, E = None](ABC):
         cannot commit must not tell the rest their work failed. A hook cannot
         suppress the walk's failure either: the driver's verdict for the whole
         run is that exception reaching it.
+
+        One walk per stage. Every index a hook has seen is remembered so it sees
+        each exactly once, and that memory is what a second walk would run into:
+        it would open the hooks, fire none of them, and close them again.
+
+        Raises:
+            RuntimeError: If this stage has been walked before.
         """
+        if self._walked:
+            msg = f"{type(self).__name__} has been run: build a stage per walk"
+            raise RuntimeError(msg)
+
+        self._walked = True
         opened: list[AbstractContextManager[Any]] = []
 
         try:
             for hook in self._all_hooks():
-                if isinstance(hook, AbstractContextManager):
+                managed = isinstance(hook, AbstractContextManager)
+                if managed and not any(hook is other for other in opened):
                     hook.__enter__()
                     opened.append(hook)
 

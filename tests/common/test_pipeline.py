@@ -406,6 +406,33 @@ class TestStageRun:
         assert managed.events == ["open", "see0", "abort"]
         assert isinstance(failure.value.__context__, RuntimeError)
 
+    def test_a_hook_on_two_stages_of_one_chain_is_opened_once(self) -> None:
+        # Stages are deduplicated on the way up and hooks were not, so a hook
+        # registered on a stage and on one built over it opened twice and closed
+        # twice. A writer's second close commits a folder it has already moved.
+        managed = _Managed()
+        source = _Fixed("a").register_hooks(managed)
+
+        _Passthrough(source).register_hooks(managed).run()
+
+        assert managed.events.count("open") == 1
+        assert managed.events.count("close") == 1
+
+    def test_a_stage_is_walked_once(self) -> None:
+        # Every index a hook has seen is remembered so it sees each exactly
+        # once, which is also what a second walk runs into: it would open the
+        # hooks, fire none of them, and close them again -- and a writer closed
+        # over nothing gives up with "no frame was written".
+        managed = _Managed()
+        stage = _Fixed("a", "b").register_hooks(managed)
+
+        stage.run()
+
+        with pytest.raises(RuntimeError, match=r"has been run"):
+            stage.run()
+
+        assert managed.events == ["open", "see0", "see1", "close"]
+
     def test_running_the_top_fires_a_hook_further_down(self) -> None:
         seen: list[int] = []
         source = _Fixed("a", "b")
