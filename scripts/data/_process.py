@@ -47,6 +47,12 @@ if TYPE_CHECKING:
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
 
 
+DEFAULT_SUBPATH: Final = PHASE_FLOAT_BIN
+
+SELECTION_LIMIT: Final = 5
+SELECTION_SPECS: Final = (".json", ".txt")
+
+
 @dataclass
 class SourceConfig:
     """Which sequences a run reads, and how much of each.
@@ -67,9 +73,8 @@ class SourceConfig:
     exclude: list[str] | str | None = None
     frame_step: int = 1
 
-    def frame_folder(self) -> str:
-        """Return where a sequence keeps its frames, with the default filled in."""
-        return unwrap_or_default(self.subpath, PHASE_FLOAT_BIN)
+    def frame_folder(self, default: str = DEFAULT_SUBPATH) -> str:
+        return unwrap_or_default(self.subpath, default)
 
 
 @dataclass
@@ -97,18 +102,8 @@ class TargetConfig:
     save_ranges: bool = True
     range_file: str = "value_range"
 
-    def frame_folder(self, read_at: str) -> str:
-        """Return where a written sequence keeps its frames.
-
-        Args:
-            read_at: where the source keeps its own, which an unset `subpath`
-                follows so a written tree is laid out like the one it came from.
-        """
-        return unwrap_or_default(self.subpath, read_at)
-
-
-SELECTION_LIMIT: Final = 5
-SELECTION_SPECS: Final = (".json", ".txt")
+    def frame_folder(self, default: str = DEFAULT_SUBPATH) -> str:
+        return unwrap_or_default(self.subpath, default)
 
 
 def _validate_target(
