@@ -75,8 +75,9 @@ class KoalaFrameWriter[T]:
         if step.value is None:
             return
 
-        if self._written >= 0 and step.index != self._source + 1:
-            msg = f"frame {step.index} does not follow {self._source}: expected {self._source + 1}"
+        last = self._source
+        if self._written >= 0 and step.index != last + 1:
+            msg = f"frame {step.index} does not follow {last}: expected {last + 1}"
             raise ValueError(msg)
 
         name = koala_frame_name(self._written + 1, stem=self._stem, ext=self._ext)
