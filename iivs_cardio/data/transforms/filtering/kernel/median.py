@@ -53,15 +53,15 @@ class MedianKernel(FilterKernel):
     """A 3D median over a discrete neighbourhood, robust to isolated spikes.
 
     Dropping out-of-range neighbours shortens the sample list rather than
-    biasing it, and with an even number left the median averages the middle two
-    -- which is why `torch.median`, returning the lower, cannot serve here.
+    biasing it, and with an even number left the median averages the middle two.
+    That is why `torch.median`, which returns the lower, cannot serve here.
 
     Args:
         radius: half-extent per axis; `0` disables that axis. Left required
             because there is no safe default: `rz` counts frames but damage
             tracks the time a window spans, so it has to follow the frame rate
-            rather than a constant -- which is also why `(r_spatial, r_temporal)`
-            is usually the form to reach for over a bare `r`.
+            rather than a constant. That is also why `(r_spatial, r_temporal)` is
+            usually the form to reach for over a bare `r`.
         shape: `ellipsoid` weighs the axes against their radii together, taking
             33 offsets at radius `(2, 2, 2)`; `cuboid` takes the whole box, 125.
 
@@ -175,6 +175,14 @@ class MedianKernel(FilterKernel):
 
 @dataclass(frozen=True, slots=True)
 class MedianConfig(KernelConfig):
+    """The settings of a `MedianKernel`, as one recordable value.
+
+    Attributes:
+        kind: what a record says this filter was.
+        radius: half-extent per axis, in samples.
+        shape: which neighbours inside that extent are read.
+    """
+
     kind: ClassVar[str] = "median"
 
     radius: RadiusLike
@@ -182,4 +190,5 @@ class MedianConfig(KernelConfig):
 
     @override
     def build(self) -> MedianKernel:
+        """Build the kernel these settings describe."""
         return MedianKernel(self.radius, shape=self.shape)

@@ -23,7 +23,7 @@ def _normalize_triple[T](
 ) -> tuple[T, T, T]:
     """Expand a scalar / `(spatial, temporal)` / `(x, y, z)` to the `(x, y, z)` triple.
 
-    Shape only -- element validation is the caller's, since a radius and a sigma
+    Shape only. Element validation is the caller's, since a radius and a sigma
     admit different values. Any two- or three-element `Sequence` is accepted, not
     only `list`/`tuple`, so OmegaConf's `ListConfig` and the lists a config parser
     produces pass as readily as tuples.
@@ -80,8 +80,8 @@ class FilterKernel(ABC):
     Holds the sampling geometry only, never frames, so one kernel serves any
     number of sequences and `FilteredSequence` owns the reading and buffering.
 
-    Out-of-range neighbours -- past a sequence end in time, past an edge in
-    space -- are **dropped, not padded**, in every subclass. A pixel near a
+    Out-of-range neighbours, past a sequence end in time or past an edge in
+    space, are **dropped, not padded**, in every subclass. A pixel near a
     border is therefore reduced over fewer samples, and each subclass says what
     that means for its own reduction.
 
@@ -105,10 +105,12 @@ class FilterKernel(ABC):
 
     @property
     def spatial_radius(self) -> tuple[int, int]:
+        """The `(x, y)` half-extents, which is how far it reads within a frame."""
         return self.radius[:2]
 
     @property
     def temporal_radius(self) -> int:
+        """The `z` half-extent, which is how many frames it reaches either way."""
         return self.radius[2]
 
     @abstractmethod
@@ -142,7 +144,7 @@ class KernelConfig(ABC):
     """A kernel's constructor arguments as one value, buildable into the kernel.
 
     Separate from `FilterKernel` so a config, a CLI, or the cache sidecar carries the
-    settings without a live object -- and what a later run reconstructs is
+    settings without a live object, and what a later run reconstructs is
     exactly what was recorded. Closed at the same family as `FilterKernel`; each
     concrete config is a plain frozen record that neither expands nor validates
     its fields, leaving the kernel the one place that interprets them.

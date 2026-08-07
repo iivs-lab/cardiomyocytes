@@ -44,6 +44,11 @@ def _cv_type(dtype: type, channels: int) -> int:
 def _hw_channels(shape: tuple[int, ...]) -> tuple[int, int, int]:
     """Read `(height, width, channels)` off a `(H, W)` or `(H, W, C)` shape.
 
+    Channels come last because that is how a `GpuMat` lays them out, one pixel's
+    channels together. A tensor on its way into one is read in the destination's
+    layout, and a caller that wants torch's `(C, H, W)` permutes at the boundary
+    rather than here, where a permute would cost the copy this module avoids.
+
     Rejecting any other rank here is what keeps a wrong one from being read as a
     plausible frame: a 4-D shape otherwise reaches `_cv_type` as a channel count
     it never had, or the assignment below as a broadcast that cannot work.
@@ -66,7 +71,7 @@ def gpumat_to_cupy(gm: cv2.cuda.GpuMat) -> cp.ndarray:
 
     The GpuMat's device memory is wrapped (not copied); its row padding (`step`)
     is honored through the CuPy strides. The view stays valid only while `gm`
-    lives — `gm` is held as the memory's owner to keep it alive.
+    lives, so `gm` is held as the memory's owner to keep it alive.
 
     The memory is labelled with cv2's current device, since a GpuMat does not
     report its own and CuPy would otherwise attribute the pointer to whichever
@@ -113,9 +118,9 @@ def tensor_to_gpumat(
 ) -> cv2.cuda.GpuMat:
     """Copy a CUDA `torch.Tensor` into a `cv2.cuda.GpuMat`, device-to-device.
 
-    Copies into `out` in place when given — sizing it to `tensor` (a no-op when it
-    already matches), so a reused buffer skips a per-call allocation — otherwise
-    allocates a fresh GpuMat. Accepts `(H, W)` or `(H, W, C)` tensors and rejects
+    Copies into `out` in place when given, sizing it to `tensor` (a no-op when it
+    already matches) so a reused buffer skips a per-call allocation. Without one
+    it allocates a fresh GpuMat. Accepts `(H, W)` or `(H, W, C)` tensors and rejects
     any other rank; `tensor` must live on a CUDA device (else `cp.asarray` would
     silently host->device copy).
     """

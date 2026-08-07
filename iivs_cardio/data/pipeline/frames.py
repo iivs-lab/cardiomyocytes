@@ -20,11 +20,24 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class FrameTree:
+    """The side branch that writes each sequence back out under a new root.
+
+    A written sequence keeps the name and the layout it had in the source, so
+    the result can be read by whatever reads the source. Each writer takes the
+    pixel size, height scale and unit from the sequence it was made for.
+
+    Attributes:
+        root: where the tree is written.
+        subpath: where a sequence's frames sit inside its own folder.
+        overwrite: whether an existing sequence folder may be replaced.
+    """
+
     root: StrPath
     subpath: str
     overwrite: bool = field(default=False, kw_only=True)
 
     def get_hook(self, source: PhaseFilteredSequence) -> KoalaFrameWriter[Tensor]:
+        """Return the writer for `source`, placed where the source sits."""
         origin = source.origin
         header = origin.header
 

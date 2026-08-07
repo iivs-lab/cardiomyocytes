@@ -49,6 +49,18 @@ if TYPE_CHECKING:
 
 @dataclass
 class SourceConfig:
+    """Which sequences a run reads, and how much of each.
+
+    Attributes:
+        root: the dataset folder to search for sequences.
+        subpath: where a sequence's frames sit inside its time lapse, or `None`
+            for the usual one.
+        include: the sequences to take, as names or as a path to a file listing
+            them; `None` takes all of them.
+        exclude: the same, for sequences to leave out.
+        frame_step: take every `frame_step`th frame of each sequence.
+    """
+
     root: str = MISSING
     subpath: str | None = None
     include: list[str] | str | None = None
@@ -58,6 +70,18 @@ class SourceConfig:
 
 @dataclass
 class TargetConfig:
+    """What a run writes, and where.
+
+    Attributes:
+        root: where the run's outputs land.
+        overwrite: whether what is already there may be replaced.
+        save_frames: whether to write the filtered frames, laid out like the
+            source.
+        save_ranges: whether to write the value ranges as one document.
+        range_file: what that document is called, given `.json` if it has no
+            extension.
+    """
+
     root: str = MISSING
     overwrite: bool = False
     save_frames: bool = False
@@ -70,6 +94,7 @@ SELECTION_SPECS = (".json", ".txt")
 
 
 def _subpath(source_config: SourceConfig) -> str:
+    """Which folder of a time lapse a run reads, defaulted in one place."""
     return unwrap_or_default(source_config.subpath, PHASE_FLOAT_BIN)
 
 
@@ -81,6 +106,7 @@ def _validate_target_config(target_config: TargetConfig) -> None:
 
 
 def _log_selection(logger: Logger, verb: str, value: list[str] | str) -> None:
+    """Log a selection, listing it only while a list is short enough to read."""
     if isinstance(value, str):
         if value.endswith(SELECTION_SPECS):
             log_indented(logger, "%s as listed in %s", verb, value)
@@ -99,6 +125,7 @@ def _log_selection(logger: Logger, verb: str, value: list[str] | str) -> None:
 
 
 def log_source_config(source_config: SourceConfig, logger: Logger) -> None:
+    """Log what a run reads, naming only the settings that were moved."""
     log_indented(logger, "source: %s", source_config.root, depth=0)
 
     log_indented(logger, "reading <sequence>/%s", _subpath(source_config))
@@ -115,6 +142,7 @@ def log_source_config(source_config: SourceConfig, logger: Logger) -> None:
 
 
 def log_filter_config(kernel_config: KernelConfig, logger: Logger) -> None:
+    """Log the filter a run applies, with the settings that shape it."""
     described = describe_filter_kernel(kernel_config)
     kind = described.pop("kind")
     settings = ", ".join(f"{key}={value}" for key, value in described.items())
@@ -125,6 +153,13 @@ def log_filter_config(kernel_config: KernelConfig, logger: Logger) -> None:
 def log_target_config(
     target_config: TargetConfig, logger: Logger, *, subpath: str | None = None
 ) -> None:
+    """Log what a run writes and where, naming each output it will produce.
+
+    Args:
+        target_config: what the run was told to write.
+        logger: where the lines go.
+        subpath: how a written sequence is laid out, when frames are written.
+    """
     log_indented(logger, "target: %s", target_config.root, depth=0)
 
     if target_config.save_frames:
@@ -149,6 +184,11 @@ def log_configs(
     *,
     name: str,
 ) -> None:
+    """Log the whole configuration of a run, as one block per part.
+
+    A run that writes nothing has no target to describe, which is what an
+    absent `target_config` means.
+    """
     logger = logging.getLogger(name)
 
     log_source_config(source_config, logger)
@@ -159,6 +199,16 @@ def log_configs(
 
 
 def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
+    """Find the sequences a run reads, narrowed by what it was told to take.
+
+    Returns:
+        One folder per sequence, each set to give its frames in radians.
+
+    Raises:
+        ValueError: If the root holds no sequence at all, or if the selection
+            leaves none of the ones it holds. The two are told apart, since
+            they are fixed differently.
+    """
     subpath = _subpath(config)
 
     folders = search_phase_bin_folders(config.root, subpath=subpath)
@@ -186,6 +236,14 @@ def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
 def build_sequences(
     source_config: SourceConfig, kernel_config: KernelConfig
 ) -> list[PhaseFilteredSequence]:
+    """Build one filtered view per sequence, all sharing a single kernel.
+
+    A kernel holds only the shape it reads, never frames, so one serves every
+    sequence of the run.
+
+    Returns:
+        The sequences, in the order the search found them.
+    """
     sources = search_sources(source_config)
     subpath = _subpath(source_config)
 
@@ -210,6 +268,22 @@ def build_branches(
     output_root: StrPath,
     sequence_names: Sequence[str],
 ) -> list[SideBranch[PhaseFilteredSequence, Tensor, Path]]:
+    """Build the branches a target describes, in the order they will watch.
+
+    Args:
+        source_config: what the run reads, recorded in what the branches write.
+        target_config: what the run writes.
+        kernel_config: the filter, recorded for a later run to compare against.
+        output_root: where the branches write.
+        sequence_names: every sequence the run set out to cover.
+
+    Returns:
+        The branches, empty of neither output when the target asks for both.
+
+    Raises:
+        ValueError: If the target writes nothing, which is a mistake rather
+            than a way to ask for a run that only reads.
+    """
     _validate_target_config(target_config)
 
     branches = []
@@ -243,6 +317,27 @@ def build_phase_stages(
     output_root: StrPath,
     name: str,
 ) -> PhaseStageFactory:
+    """Assemble everything a run needs from the configuration it was given.
+
+    The configuration is logged before the sources are searched, so a run says
+    what it was asked to do even when it cannot do it. A target that writes
+    nothing is refused at the same point, before the search costs anything.
+
+    Args:
+        source_config: which sequences to read, and how much of each.
+        target_config: what to write, or `None` for a run that only reads.
+        filter_config: the filter to apply, or `None` to leave frames as they
+            are.
+        output_root: where the branches write.
+        name: what the run is called.
+
+    Returns:
+        The factory a driver runs the sequences through.
+
+    Raises:
+        ValueError: If the target writes nothing, or the source search finds
+            nothing to run.
+    """
     kernel_config = parse_filter_config(filter_config)
 
     log_configs(source_config, target_config, kernel_config, name=name)

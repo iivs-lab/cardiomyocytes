@@ -61,10 +61,10 @@ class FrameNormalizer:
     `apply(frame1, frame2)` returns both frames scaled, each keeping its
     `(*dim, H, W)` shape. The mode decides only *which* range they scale from:
 
-    - `perframe` — each frame by its own range, which breaks the brightness
+    - `perframe`: each frame by its own range, which breaks the brightness
       constancy every optical-flow estimator assumes.
-    - `pairwise` — both frames by their joint range, so a pair stays comparable.
-    - `injected` — both by `source_range`, spanning more frames than one call
+    - `pairwise`: both frames by their joint range, so a pair stays comparable.
+    - `injected`: both by `source_range`, spanning more frames than one call
       sees, which keeps the result order-independent under random access.
       Sequence or dataset scope is the caller's choice; scaling is identical.
 
@@ -73,8 +73,8 @@ class FrameNormalizer:
         dtype: output dtype, or `None` to keep each input's own.
         source_range: range to scale from, for `injected` mode; also the
             baseline `reset` returns to.
-        target_range: the span the output covers, or `None` for the dtype's own
-            -- `[0, 1]` for floats, the full `iinfo` span for integers.
+        target_range: the span the output covers, or `None` for the dtype's own,
+            which is `[0, 1]` for floats and the full `iinfo` span for integers.
 
     Raises:
         ValueError: If `source_range` is set on a mode that measures its own,
@@ -104,7 +104,12 @@ class FrameNormalizer:
 
     @property
     def source_range(self) -> tuple[float, float] | None:
-        """The range `injected` mode scales from, until `reset` or the next set."""
+        """The range `injected` mode scales from, until `reset` or the next set.
+
+        Raises:
+            ValueError: If set on a mode that measures its own range, or set
+                to a span whose maximum does not exceed its minimum.
+        """
         return self._source_range
 
     @source_range.setter
@@ -121,7 +126,11 @@ class FrameNormalizer:
 
     @property
     def target_range(self) -> tuple[float, float] | None:
-        """The span the output covers, or `None` to take `dtype`'s own."""
+        """The span the output covers, or `None` to take `dtype`'s own.
+
+        Raises:
+            ValueError: If set to a span the output dtype cannot hold.
+        """
         return self._target_range
 
     @target_range.setter
@@ -150,8 +159,8 @@ class FrameNormalizer:
 
         Returns:
             Both frames scaled, each keeping its shape and dtype rule. Values
-            outside an injected range are clamped -- lossy, but expected when the
-            range was measured on another split.
+            outside an injected range are clamped, which is lossy but expected
+            when the range was measured on another split.
 
         Raises:
             ValueError: If the `injected` mode has no `source_range`, a measured

@@ -18,8 +18,8 @@ PaddingMode = Literal["border", "zeros", "reflection"]
 def _norm_scale(image: Tensor) -> Tensor:
     """The `(2,)` float32 `(x, y)` pixel-to-normalized scale, on `image`'s device.
 
-    `(2/(W-1), 2/(H-1))` -- one pixel step spans this much of grid_sample's `[-1, 1]`
-    range under `align_corners=True`. An axis of extent 1 has no pixel step to
+    `(2/(W-1), 2/(H-1))`, the share of grid_sample's `[-1, 1]` range that one pixel
+    step spans under `align_corners=True`. An axis of extent 1 has no pixel step to
     measure, and scales by `0`.
     """
     *_, height, width = image.shape
@@ -95,8 +95,8 @@ def backward_warp(
     to *read from*, not where to move content to. **Note the sign**: content ends up
     displaced by `-offset`, so to move an image *by* a displacement, negate it.
 
-    An offset already defined *on the output grid* -- one that says where in `image`
-    each output position reads from -- is used exactly as given, with no inversion.
+    An offset already defined *on the output grid*, saying where in `image` each
+    output position reads from, is used exactly as given, with no inversion.
     Deriving the opposite direction by negating only approximates that inverse,
     with an error growing as `|offset| * |grad offset|`.
 
@@ -104,8 +104,8 @@ def backward_warp(
     across same-size warps.
 
     Args:
-        image: `(*dim, H, W)` field(s) to sample, any real (integer or float) dtype
-            -- a frame, a mask, or one channel of a multi-channel field.
+        image: `(*dim, H, W)` field(s) to sample, any real (integer or float) dtype:
+            a frame, a mask, or one channel of a multi-channel field.
         offset: `(*dim, 2, H, W)` float32 sampling offset (channel 0 = dx, 1 = dy),
             sharing `image`'s leading dims. Those dims warp together.
         padding_mode: out-of-bounds policy (`border`, `zeros`, or `reflection`).
@@ -116,8 +116,8 @@ def backward_warp(
         and clamped back to its range.
 
     Raises:
-        TypeError: If a shape, dtype, or `padding_mode` breaks the contract above --
-            a `jaxtyping.TypeCheckError`, raised at the call boundary.
+        TypeError: If a shape, dtype, or `padding_mode` breaks the contract above.
+            It arrives as a `jaxtyping.TypeCheckError`, raised at the call boundary.
     """
     scale = _norm_scale(image)
     grid = _identity_grid(image, scale)
@@ -164,8 +164,8 @@ class BackwardWarp(nn.Module):
                 sharing `image`'s leading dims.
 
         Returns:
-            The sampled field, shaped and dtyped like `image` -- integers rounded
-            and clamped to their range, floats kept fractional.
+            The sampled field, shaped and dtyped like `image`, with integers
+            rounded and clamped to their range and floats kept fractional.
         """
         grid, scale = self._coords(image)
         return _warp_with_grid(image, offset, grid, scale, self.padding_mode)

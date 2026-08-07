@@ -28,9 +28,9 @@ SigmaLike = float | tuple[float, float] | SigmaType
 def _normalize_sigma(sigma: SigmaLike) -> SigmaType:
     """Expand `sigma` to the validated `(sx, sy, sz)` of standard deviations.
 
-    Mirrors a radius in shape -- scalar, `(s_spatial, s_temporal)`, or the full
-    triple -- but the axes carry a width, not a sample count, so an `int` is
-    coerced to `float` rather than required.
+    Mirrors a radius in shape, taking a scalar, `(s_spatial, s_temporal)`, or the
+    full triple. The axes carry a width rather than a sample count, so an `int`
+    is coerced to `float` rather than required.
 
     Raises:
         ValueError: If `sigma` is none of those shapes, holds a non-number, or
@@ -52,10 +52,10 @@ class GaussianKernel(FilterKernel):
     """A separable 3D Gaussian, renormalized over whatever neighbours survive.
 
     Dropping out-of-range neighbours would darken every border, so the weights
-    that landed inside are summed and divided out -- a weighted mean over the
-    surviving support, not a partial sum. Because the weights are separable and
-    that division happens once at the end, the result equals the full 3D
-    normalized Gaussian exactly, not a per-axis approximation of it.
+    that landed inside are summed and divided out, giving a weighted mean over
+    the surviving support rather than a partial sum. Because the weights are
+    separable and that division happens once at the end, the result equals the
+    full 3D normalized Gaussian exactly, not a per-axis approximation of it.
 
     Where a `MedianKernel` deletes an isolated spike, this spreads it across the
     neighbourhood; the two are not interchangeable.
@@ -63,11 +63,11 @@ class GaussianKernel(FilterKernel):
     Args:
         sigma: standard deviation per axis, in samples; `0` disables that axis.
             Written as `s`, `(s_spatial, s_temporal)`, or `(sx, sy, sz)`, like a
-            radius -- and for the same reason the two-value form is usual, since
+            radius, and for the same reason the two-value form is usual, since
             `sz` spans frames and tracks the frame rate.
         truncate: how many standard deviations the window spans, so each radius
-            is `int(truncate * sigma + 0.5)` -- `scipy.ndimage`'s rule and name,
-            distinct from the border policy, which is always to drop.
+            is `int(truncate * sigma + 0.5)`, which is `scipy.ndimage`'s rule and
+            name. It is distinct from the border policy, which is always to drop.
 
     Raises:
         ValueError: If any sigma is negative, or `truncate` is not positive.
@@ -158,6 +158,14 @@ class GaussianKernel(FilterKernel):
 
 @dataclass(frozen=True, slots=True)
 class GaussianConfig(KernelConfig):
+    """The settings of a `GaussianKernel`, as one recordable value.
+
+    Attributes:
+        kind: what a record says this filter was.
+        sigma: standard deviation per axis, in samples.
+        truncate: how many standard deviations the window spans.
+    """
+
     kind: ClassVar[str] = "gaussian"
 
     sigma: SigmaLike
@@ -165,4 +173,5 @@ class GaussianConfig(KernelConfig):
 
     @override
     def build(self) -> GaussianKernel:
+        """Build the kernel these settings describe."""
         return GaussianKernel(self.sigma, truncate=self.truncate)

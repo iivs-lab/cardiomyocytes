@@ -15,8 +15,8 @@ DeviceKind = Literal["cpu", "cuda"]
 
 DEVICE_KINDS: frozenset[DeviceKind] = frozenset(get_args(DeviceKind))
 
+# What a caller may write for a device; `Device` is the form it is stored as.
 type DeviceLike = str | torch.device | Device
-"""What a caller may write for a device; `Device` is the form it is stored as."""
 
 
 def _cuda_count() -> int:
@@ -78,8 +78,8 @@ class Device:
         `torch.device` is read as-is, and a `Device` passes through, so a layer may
         re-resolve what it was handed without knowing which form it arrived in.
 
-        A CUDA index is not checked against the host here — a caller naming one
-        device is describing what it already holds. `resolve_all` makes that check,
+        A CUDA index is not checked against the host here, since a caller naming
+        one device is describing what it already holds. `resolve_all` makes that check,
         since naming a set is planning work across it.
 
         Args:
@@ -173,7 +173,7 @@ class Device:
         torch takes the device from each tensor it is given, but `cv2.cuda` and
         CuPy each read a process-global current device instead. Both default to
         device 0 and nothing else here moves them, so on any GPU but the first
-        they disagree with the tensors they are handed -- CuPy would label a
+        they disagree with the tensors they are handed: CuPy would label a
         pointer from device 1 as device 0's. A `cpu` device has nothing to bind.
 
         Cheap enough to repeat per item on a hot path rather than hoisted into

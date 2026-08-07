@@ -53,8 +53,15 @@ class IdentityKernel(FilterKernel):
 
 @dataclass(frozen=True, slots=True)
 class IdentityConfig(KernelConfig):
+    """The settings of an `IdentityKernel`, which has none of its own.
+
+    Attributes:
+        kind: what a record says this filter was.
+    """
+
     kind: ClassVar[str] = "identity"
 
     @override
     def build(self) -> IdentityKernel:
+        """Build the kernel these settings describe."""
         return IdentityKernel()

@@ -25,6 +25,20 @@ if TYPE_CHECKING:
 
 
 class PhaseFilteredSequence(FilteredSequence[PhaseFileFolder, "Path"]):
+    """A filtered phase sequence that knows what it is called in its dataset.
+
+    The name is taken from where the folder sits under the dataset root, so a
+    side branch filing something under it lands where the frames came from.
+
+    Args:
+        source: the phase folder to read.
+        kernel: the reduction to apply over each window.
+        root: the dataset root the name is measured from.
+        subpath: the part of the folder's path that is the same for every
+            sequence, and so is left out of the name.
+        step: take every `step`th frame of the source, before filtering.
+    """
+
     def __init__(
         self,
         source: PhaseFileFolder,
@@ -39,10 +53,25 @@ class PhaseFilteredSequence(FilteredSequence[PhaseFileFolder, "Path"]):
 
     @property
     def name(self) -> str:
+        """What this sequence is called in the dataset it belongs to."""
         return self._name
 
 
 class PhaseStageFactory:
+    """The sequences of one job, and how to run and report on each of them.
+
+    The name is the job's to give rather than the factory's to assume: the same
+    filtering run is preprocessing under one pipeline and postprocessing behind
+    another, so a machine that named itself would be lying in the second case.
+    Every line of the run is filed under it.
+
+    Args:
+        sequences: the sequences to run, in the order they will be offered.
+        branches: what to watch each sequence with, such as a writer or a
+            meter. Each is asked for a hook per sequence.
+        name: what the run is called.
+    """
+
     def __init__(
         self,
         sequences: Sequence[PhaseFilteredSequence],
@@ -57,24 +86,39 @@ class PhaseStageFactory:
 
     @property
     def name(self) -> str:
+        """What the run is called, and what its log lines are filed under."""
         return self._name
 
     def __len__(self) -> int:
+        """The number of sequences this run was given."""
         return len(self._sequences)
 
     def get_name(self, index: int) -> str:
+        """Return what the sequence at `index` is called."""
         return self._sequences[index].name
 
     def get_stage(self, index: int, device: Device) -> SequenceStage[Tensor, Path]:
+        """Build the stage for the sequence at `index`, running on `device`.
+
+        Every branch is asked for a hook first, so a branch that cannot make
+        one refuses before any frame is read.
+        """
         sequence = self._sequences[index]
         sequence.device = device
         hooks = [branch.get_hook(sequence) for branch in self._branches]
         return SequenceStage(sequence).register_hooks(*hooks)
 
     def _log(self, message: str, *args: object, nested: bool = True) -> None:
+        """Log under this run's name, indented unless it heads a block."""
         log_indented(self._logger, message, *args, depth=int(nested))
 
     def run_stage(self, index: int, device: Device) -> None:
+        """Filter the sequence at `index` on `device`, and log what happened.
+
+        The sequence's name heads a block and everything else hangs under it,
+        so a reader skimming the left margin sees one entry per sequence. Every
+        branch that has something to say says it after it committed.
+        """
         sequence = self._sequences[index]
 
         self._log("%s", sequence.name, nested=False)
@@ -91,6 +135,12 @@ class PhaseStageFactory:
 
     @contextmanager
     def running(self) -> Iterator[Self]:
+        """Open the branches that outlive one sequence, for the whole run.
+
+        A branch that gathers across the dataset commits when this closes, and
+        says what it committed afterwards. One whose work ends with the
+        sequence it watched needs nothing here.
+        """
         with ExitStack() as stack:
             for branch in self._branches:
                 if isinstance(branch, AbstractContextManager):
@@ -103,6 +153,7 @@ class PhaseStageFactory:
 
 
 def _reports(candidates: Iterable[object]) -> Iterator[str]:
+    """Yield a line from each candidate that can report and has something."""
     for candidate in candidates:
         if not isinstance(candidate, Reporting):
             continue

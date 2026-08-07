@@ -13,6 +13,17 @@ if TYPE_CHECKING:
 
 
 def apply_schema[T](schema: type[T], node: DictConfig) -> T:
+    """Read a configuration node as `schema`, checking it against the fields.
+
+    What comes back holds plain values rather than configuration containers,
+    so the rest of the code never has to know where its settings came from.
+
+    Returns:
+        The node as an instance of `schema`.
+
+    Raises:
+        ValidationError: If a value does not fit the field it was given for.
+    """
     merged = OmegaConf.merge(OmegaConf.structured(schema), node)
     return cast("T", OmegaConf.to_object(merged))
 

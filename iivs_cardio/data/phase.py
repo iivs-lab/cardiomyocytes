@@ -23,6 +23,24 @@ def phase_frame_writer(
     unit: PhaseUnit = PhaseUnit.RADIANS,
     overwrite: bool = False,
 ) -> KoalaFrameWriter[Tensor]:
+    """Build a writer that saves frames as a phase folder under `dest`.
+
+    The pixel size, height scale and unit are written into each file, so what
+    a later run needs to read them back travels with the frames rather than
+    beside them. A non finite value is refused rather than written, since
+    what is written here is what a later run will take as its source.
+
+    Args:
+        dest: where the finished folder goes.
+        pixel_size: the size one pixel covers, stamped into each frame.
+        height_scale: the scale that turns phase into height.
+        unit: what the values mean.
+        overwrite: whether an existing folder may be replaced.
+
+    Returns:
+        A writer ready to be registered as a hook.
+    """
+
     def save(path: Path, frame: Tensor) -> None:
         save_phase_bin(
             path,
