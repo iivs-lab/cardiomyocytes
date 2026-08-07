@@ -204,12 +204,17 @@ def test_step_keeps_every_nth_frame_from_the_first(step, kept):
         assert torch.equal(sequence[index], torch.from_numpy(source[index * step]))
 
 
-def test_step_renumbers_the_metadata_too():
-    # Indices count kept frames, so `get_meta` has to follow them rather than the
-    # source's own numbering.
+def test_step_leaves_the_metadata_naming_the_source_frame():
+    # The opposite of what this used to be called: an index counts kept frames,
+    # but the metadata keeps naming the frame the source knows, so a message
+    # about one points at the file to go and look at. That is also why a value
+    # range filed under it does not line up with a cache numbered from zero --
+    # both are right, and position is what joins them.
     sequence = FilteredSequence(_Frames(_frames(6)), IdentityKernel(), step=2)
 
+    # View 0, 1, 2 are source 0, 2, 4 -- whose metadata is 0, 20, 40.
     assert [sequence.get_meta(i) for i in range(len(sequence))] == [0, 20, 40]
+    assert [sequence.get_meta(i) for i in range(len(sequence))] != [0, 10, 20]
 
 
 def test_step_is_applied_before_filtering():

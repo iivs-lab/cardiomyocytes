@@ -2,19 +2,25 @@ from __future__ import annotations
 
 import logging
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
+import torch
 from mpire import WorkerPool
 
+from iivs_cardio.common.device import Device
+from scripts import _compute as compute
 from scripts._compute import (
-    DEFAULT_WORKERS,
     ComputeConfig,
     IncompleteRunError,
+    SharedContext,
     WorkerLogFolder,
     _collect_failures,
+    _init_worker,
     log_compute_config,
     log_insights,
+    pin_threads,
     plan_devices,
     run_all,
 )
@@ -22,8 +28,6 @@ from scripts._compute import (
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
     from pathlib import Path
-
-    from iivs_cardio.common.device import Device
 
 
 class _Stages:
@@ -158,9 +162,16 @@ def test_a_branch_that_cannot_commit_is_the_verdict_when_nothing_failed(tmp_path
 
 
 @pytest.mark.parametrize("workers", (0, 2))
-def test_a_run_with_no_items_starts_no_pool(tmp_path, workers):
+def test_a_run_with_no_items_starts_no_pool(tmp_path, monkeypatch, workers):
     # `plan_devices` is capped at the item count, so an empty run plans no worker
     # at all and must not reach `WorkerPool`, which cannot be asked for none.
+    # "It did not raise" only caught the narrowest way back, so the pool itself
+    # is watched: reaching it at all is the failure, whatever it then did.
+    def refuse(*args, **kwargs):
+        pytest.fail("an empty run reached the pool")
+
+    monkeypatch.setattr("scripts._compute.WorkerPool", refuse)
+
     run_all(_Stages(0, tmp_path / "done"), _compute(workers))
 
 
@@ -179,6 +190,60 @@ def test_the_pool_starts_its_workers_fresh_rather_than_forked(tmp_path, monkeypa
     run_all(_Stages(2, tmp_path / "done"), _compute(2))
 
     assert started["start_method"] == "spawn"
+
+
+@pytest.fixture()
+def restored_thread_count():
+    """Put torch's thread count back, since pinning changes it process-wide."""
+    before = torch.get_num_threads()
+
+    yield before
+
+    torch.set_num_threads(before)
+
+
+def test_a_lone_worker_keeps_the_machine_to_itself(restored_thread_count):
+    pin_threads(1)
+
+    assert torch.get_num_threads() == restored_thread_count
+
+
+def test_workers_take_a_share_of_the_machine_each(restored_thread_count):
+    # Measured on 64 cores: sixteen unpinned workers ran 2.7x slower than no
+    # pool at all, since every process sizes its pool to the whole machine. The
+    # share is what the pool path runs, and the pool runs it in a subprocess --
+    # so nothing here had ever seen it happen.
+    pin_threads(4)
+
+    assert torch.get_num_threads() == max(1, restored_thread_count // 4)
+
+
+@pytest.mark.usefixtures("restored_root_logger")
+def test_a_starting_worker_takes_the_level_the_parent_was_at(tmp_path):
+    # A spawned worker starts with no handlers at `WARNING`, so a level not
+    # carried across leaves its file without a single line of the run. Nothing
+    # held that: every other test names the level when it configures a worker,
+    # so the field could be dropped and they would all still pass.
+    folder = WorkerLogFolder(tmp_path)
+    context = SharedContext("run", _Stages(2, tmp_path), (Device("cpu"),) * 2, folder)
+
+    _init_worker(1, replace(context, log_level=logging.DEBUG))
+    logging.getLogger("run").debug("a line only DEBUG lets through")
+
+    assert "only DEBUG" in (tmp_path / "worker1.log").read_text(encoding="utf-8")
+
+
+def test_a_worker_with_nowhere_to_write_keeps_the_logging_it_started_with(tmp_path):
+    # A driver may run without a log folder -- a test, or a caller doing its own
+    # logging -- and a worker then has no file to open. It leaves the process's
+    # logging alone rather than replacing it with nothing.
+    context = SharedContext("run", _Stages(1, tmp_path), (Device("cpu"),), None)
+    before = logging.getLogger().handlers[:]
+
+    _init_worker(0, context)
+
+    assert logging.getLogger().handlers == before
+    assert not list(tmp_path.glob("worker*.log"))
 
 
 @pytest.fixture()
@@ -315,8 +380,16 @@ def test_a_failure_is_named_by_the_index_it_carries_not_by_when_it_returned(
     ]
 
 
-def test_an_unset_worker_count_falls_back_to_the_machine():
-    assert len(plan_devices(ComputeConfig(device="cpu"))) == DEFAULT_WORKERS
+def test_an_unset_worker_count_falls_back_to_the_machine(monkeypatch):
+    # Comparing against `DEFAULT_WORKERS` could not fail, whatever that constant
+    # came to mean. What the fallback owes is the machine's own answer, so the
+    # machine is what it is checked against -- and moving that answer has to
+    # move the plan with it.
+    monkeypatch.setattr(compute, "DEFAULT_WORKERS", 3)
+
+    assert len(plan_devices(ComputeConfig(device="cpu"))) == 3
+    assert len(plan_devices(ComputeConfig(device="cpu", workers=None))) == 3
+    assert len(plan_devices(ComputeConfig(device="cpu", workers=5))) == 5
 
 
 # ---------------------------- the configuration log ----------------------- #

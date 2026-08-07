@@ -425,6 +425,33 @@ def test_the_written_frames_are_always_in_radians(phase_tree, tmp_path):
     assert header.unit is PhaseUnit.RADIANS
 
 
+def test_a_source_in_metres_is_converted_rather_than_relabelled(phase_tree, tmp_path):
+    # Every source the suite builds is already in radians, so the conversion
+    # `search_sources` asks for was a no-op everywhere -- the call could be
+    # deleted and nothing would fail. A source in metres is what makes it do
+    # something: `height_scale` is the height one radian stands for, in m per
+    # rad, so the values come back divided by it rather than restamped.
+    dest = tmp_path / "out"
+    height = np.linspace(0.0, 4 * HEIGHT_SCALE, 20, dtype=np.float32).reshape(4, 5)
+    for frame in range(FRAMES):
+        save_phase_bin(
+            phase_tree / "TL_00" / PHASE_FLOAT_BIN / f"{frame:05d}_phase.bin",
+            height,
+            pixel_size=PIXEL_SIZE,
+            height_scale=HEIGHT_SCALE,
+            unit=PhaseUnit.METERS,
+            overwrite=True,
+        )
+
+    _scan(phase_tree, dest, 0, save_frames=True)
+
+    written = PhaseBinFolder(dest / "TL_00" / PHASE_FLOAT_BIN)
+    radians = height / HEIGHT_SCALE
+
+    assert read_phase_bin_header(written.get_file(0)).unit is PhaseUnit.RADIANS
+    np.testing.assert_allclose(np.asarray(written[0]), radians, rtol=1e-5)
+
+
 def test_the_job_names_the_stage_every_line_is_filed_under(
     phase_tree, tmp_path, caplog
 ):

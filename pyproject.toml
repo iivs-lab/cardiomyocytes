@@ -139,7 +139,10 @@ addopts = [
 # https://docs.pytest.org/en/stable/reference/reference.html#configuration-options
 
 [tool.coverage.run]
-source = ["iivs_cardio"]
+# `scripts` too, since that is where the pipeline is assembled and a gap there
+# used to be invisible. Its two folders without an `__init__.py` stay out, which
+# is the same boundary the tests draw.
+source = ["iivs_cardio", "scripts"]
 branch = true
 data_file = ".cache/coverage/.coverage"
 
@@ -156,6 +159,7 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "\\.\\.\\.",
     "@overload",
+    "if __name__ == .__main__.:",
 ]
 # omit = ["iivs_cardio/types.py"]  # e.g. type-alias-only modules
 
