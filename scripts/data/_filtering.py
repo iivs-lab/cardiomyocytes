@@ -7,14 +7,15 @@ from typing import TYPE_CHECKING, Any, Final
 
 from hydra.utils import instantiate
 
-from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig
+from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig, KernelConfig
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
 
-    from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
-
 _WHITELIST: Final = ("iivs_cardio.data.transforms.filtering.kernel.*",)
+
+# The config group `filter` is filled from, which an override has to name in full.
+_GROUP: Final = "data/transforms/filtering"
 
 
 def parse_filter_config(node: DictConfig | None) -> KernelConfig:
@@ -28,13 +29,27 @@ def parse_filter_config(node: DictConfig | None) -> KernelConfig:
         The settings the node describes.
 
     Raises:
+        TypeError: If the node is a kernel's name rather than the kernel, or
+            describes something that is not a kernel at all.
         InstantiationException: If the node names something that is not one
             of this project's kernels.
     """
     if not node:
         return IdentityConfig()
 
-    return instantiate(node, _target_whitelist_=_WHITELIST, _convert_="all")
+    if isinstance(node, str):
+        msg = f"`filter={node}` names a group: use `{_GROUP}@filter={node}`"
+        raise TypeError(msg)
+
+    config = instantiate(node, _target_whitelist_=_WHITELIST, _convert_="all")
+    if not isinstance(config, KernelConfig):
+        kinds = ", ".join(
+            sorted(kernel.kind for kernel in KernelConfig.__subclasses__())
+        )
+        msg = f"`filter` describes no kernel: pick one of {kinds}, or set it to null"
+        raise TypeError(msg)
+
+    return config
 
 
 def describe_filter_kernel(config: KernelConfig) -> dict[str, Any]:

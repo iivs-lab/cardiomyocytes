@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, ClassVar, Final
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import PhaseFileFolder, PhaseUnit, search_phase_bin_folders
 from kaparoo.filesystem import ensure_file_extension, stringify_path
+from kaparoo.filesystem.exceptions import UnsupportedExtensionError
 from kaparoo.filesystem.search import select
 from kaparoo.utils.optional import unwrap_or_default
 from omegaconf import MISSING
@@ -182,6 +183,21 @@ def _validate_output(
         raise ValueError(msg)
 
 
+def _range_file(target_config: TargetConfig) -> Path:
+    """Return what the range document is called, given `.json` if it has none.
+
+    Raises:
+        ValueError: If the name carries some other extension. The library's own
+            refusal names the extensions but not the setting that holds one,
+            which is the only part a reader has to go and change.
+    """
+    try:
+        return ensure_file_extension(target_config.range_file, DOCUMENT_EXT, add=True)
+    except UnsupportedExtensionError as error:
+        msg = f"invalid `target.range_file` {target_config.range_file!r}: {error}"
+        raise ValueError(msg) from error
+
+
 def _log_selection(logger: Logger, verb: str, value: list[str] | str) -> None:
     """Log a selection, listing it only while a list is short enough to read."""
     if isinstance(value, str):
@@ -244,7 +260,7 @@ def log_target_config(
         log_indented(logger, "writing the filtered frames to %s", layout)
 
     if target_config.save_ranges:
-        name = ensure_file_extension(target_config.range_file, DOCUMENT_EXT, add=True)
+        name = _range_file(target_config)
         log_indented(logger, "writing the value ranges to %s", name)
 
     if not (target_config.save_frames or target_config.save_ranges):
@@ -330,11 +346,10 @@ def search_sources(config: SourceConfig) -> tuple[list[PhaseFileFolder], int]:
     for source in sources:
         try:
             source.validate_if_supported(level="names")
+            taken.append(source.with_unit(PhaseUnit.RADIANS))
         except ValueError as error:
             msg = f"{folder_subpath(source)}: {error}"
             raise ValueError(msg) from error
-
-        taken.append(source.with_unit(PhaseUnit.RADIANS))
 
     return taken, num_folders
 

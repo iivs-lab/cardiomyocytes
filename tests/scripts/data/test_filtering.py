@@ -4,6 +4,7 @@ import json
 
 import pytest
 from hydra import compose, initialize_config_dir
+from omegaconf import OmegaConf
 
 from iivs_cardio.data.transforms.filtering.kernel import IdentityKernel, MedianKernel
 from scripts.data._filtering import describe_filter_kernel, parse_filter_config
@@ -26,6 +27,24 @@ def test_a_run_that_filters_nothing_still_names_a_kernel(node):
     # record saying any of those leaves a reader guessing what actually ran.
     assert isinstance(parse_filter_config(node).build(), IdentityKernel)
     assert describe_filter_kernel(parse_filter_config(node)) == {"kind": "identity"}
+
+
+def test_a_filter_named_the_way_compute_is_says_the_form_it_wanted():
+    # `compute=cpu` works because that group's path matches its key, and the
+    # filter's does not -- so the shape a reader infers from the one they have
+    # already typed leaves a bare name where a node belongs, and hydra puts the
+    # string there. Inferring it is what makes this reachable, so the refusal
+    # has to carry the form that does work.
+    with pytest.raises(TypeError, match=r"use `data/transforms/filtering@filter="):
+        parse_filter_config("identity")
+
+
+def test_a_node_that_names_no_kernel_lists_the_ones_there_are():
+    # Reached by dropping `_target_`, or by adding a node by hand: `instantiate`
+    # then hands back a plain mapping, and the failure surfaced later still, as
+    # a missing attribute on a dict.
+    with pytest.raises(TypeError, match=r"gaussian, identity, median"):
+        parse_filter_config(OmegaConf.create({"radius": [1, 1, 1]}))
 
 
 def test_a_composed_node_builds_the_kernel_it_names():

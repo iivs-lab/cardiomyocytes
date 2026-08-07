@@ -77,6 +77,19 @@ def _written(dest: Path) -> dict[str, list[float]]:
     return out
 
 
+def _rewrite_unit(phase_tree: Path, name: str, unit: PhaseUnit) -> None:
+    """Rewrite one sequence's frames under `unit`, in a single statement."""
+    for frame in range(FRAMES):
+        save_phase_bin(
+            phase_tree / name / PHASE_FLOAT_BIN / f"{frame:05d}_phase.bin",
+            np.zeros((4, 5), dtype=np.float32),
+            pixel_size=PIXEL_SIZE,
+            height_scale=HEIGHT_SCALE,
+            unit=unit,
+            overwrite=True,
+        )
+
+
 def test_sources_are_found_under_the_root(phase_tree):
     # The one that fails silently: a search that finds nothing leaves every other
     # check green, since there is then no sequence to get anything wrong with.
@@ -123,6 +136,21 @@ def test_a_sequence_missing_a_frame_is_refused_by_name(phase_tree, tmp_path):
         _scan(phase_tree, dest, 0)
 
     assert not dest.exists()
+
+
+def test_a_sequence_that_cannot_be_read_in_radians_is_named(phase_tree):
+    # A header may say `UNKNOWN`, which `save_phase_bin` only warns about, and
+    # setting the unit runs the conversion check again. One such acquisition
+    # took the whole run down saying only that it could not convert -- with 121
+    # sequences and no name, there was nothing to `exclude` on.
+    with pytest.warns(UserWarning, match="unit=UNKNOWN"):
+        _rewrite_unit(phase_tree, "TL_01", PhaseUnit.UNKNOWN)
+
+    with pytest.raises(ValueError, match=r"TL_01: cannot convert phase"):
+        search_sources(SourceConfig(root=str(phase_tree)))
+
+    sources, _ = search_sources(SourceConfig(root=str(phase_tree), exclude=["TL_01"]))
+    assert len(sources) == SEQUENCES - 1
 
 
 def test_a_sequence_missing_a_frame_can_be_excluded_rather_than_fixed(phase_tree):
@@ -815,6 +843,17 @@ def test_a_target_says_what_it_writes_and_where(caplog, target, written):
     )
 
     assert [line for line in logged if line.startswith("  writing")] == written
+
+
+@pytest.mark.parametrize("name", ("value.range", "ranges.txt"))
+def test_a_range_file_carrying_another_extension_names_the_setting(caplog, name):
+    # The library's refusal names the extensions it takes but not the setting
+    # that holds one, and there are two `.json` names in this configuration --
+    # so the reader was left with an extension and no key to go and change.
+    with pytest.raises(ValueError, match=r"invalid `target.range_file`"):
+        _logged(
+            caplog, SourceConfig(root="/d"), TargetConfig(root="/o", range_file=name)
+        )
 
 
 def test_the_written_frames_take_the_shape_the_source_was_read_in(caplog):
