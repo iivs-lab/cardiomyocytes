@@ -2,6 +2,7 @@ from __future__ import annotations
 
 __all__ = ("KernelShape", "MedianConfig", "MedianKernel")
 
+import logging
 from dataclasses import dataclass
 from itertools import product
 from typing import TYPE_CHECKING, ClassVar, Final, Literal, get_args, override
@@ -31,8 +32,16 @@ KERNEL_SHAPES: Final[tuple[KernelShape, ...]] = get_args(KernelShape)
 # Where CUDA's `sort` and `topk` each leave a faster shared-memory path.
 _SHARED_TIERS: Final = (32, 128)
 
-# Stacked neighbourhood one pass may hold; every temporary scales with it.
-_TILE_BYTES: Final = 32 << 20
+_logger = logging.getLogger(__name__)
+
+# What one pass may hold at its peak, over everything it allocates by name.
+# The sort's own workspace sits on top, so the true peak runs a little above it.
+_TILE_BYTES: Final = 136 << 20
+
+# What ordering the stack adds per sample: `sort` hands back the values again
+# and an int64 index beside each, and the validity count reads a bool mask.
+_INDEX_BYTES: Final = 8
+_MASK_BYTES: Final = 1
 
 
 def _prefers_topk(samples: int) -> bool:
@@ -44,9 +53,26 @@ def _prefers_topk(samples: int) -> bool:
     return tier(samples) > tier(samples // 2 + 1)
 
 
+def _band_bytes(samples: int, rows: int, width: int, itemsize: int) -> int:
+    """What one pass over `rows` rows holds at its peak.
+
+    The stack of neighbours is only part of it: ordering hands back the values
+    again with an int64 index beside each, and the validity count reads a bool
+    mask over the same shape. Counting the stack alone put the real peak at
+    several times the budget it was measured against.
+    """
+    per_sample = 2 * itemsize + _INDEX_BYTES + _MASK_BYTES
+
+    return samples * rows * width * per_sample
+
+
 def _tile_rows(samples: int, width: int, itemsize: int) -> int:
-    """How many rows of the frame one pass may take, at least one."""
-    return max(1, _TILE_BYTES // (samples * width * itemsize))
+    """How many rows of the frame one pass may take, at least one.
+
+    One row is the floor: a neighbourhood wide enough to exceed the budget on
+    its own has nothing left to divide, and the pass takes it anyway.
+    """
+    return max(1, _TILE_BYTES // _band_bytes(samples, 1, width, itemsize))
 
 
 class MedianKernel(FilterKernel):
@@ -78,6 +104,7 @@ class MedianKernel(FilterKernel):
         super().__init__(radius)
         self.shape = shape
         self._offsets = self._build_offsets()
+        self._warned_unbounded = False
 
     @property
     def offsets(self) -> tuple[RadiusType, ...]:
@@ -125,7 +152,10 @@ class MedianKernel(FilterKernel):
         rx, ry = self.spatial_radius
         padded = pad(window, (rx, rx, ry, ry), value=float("nan"))
 
-        rows = _tile_rows(len(offsets), width, window.element_size())
+        itemsize = window.element_size()
+        rows = _tile_rows(len(offsets), width, itemsize)
+        self._warn_if_unbounded(len(offsets), rows, width, itemsize)
+
         if rows >= height:
             return self._median(padded, offsets, target, 0, height, width)
 
@@ -137,6 +167,33 @@ class MedianKernel(FilterKernel):
             )
 
         return filtered
+
+    def _warn_if_unbounded(
+        self, samples: int, rows: int, width: int, itemsize: int
+    ) -> None:
+        """Say so once when a single row already exceeds what a pass may hold.
+
+        Tiling can only divide down to one row, so past that the bound is gone
+        and the pass takes whatever the neighbourhood asks for. A radius large
+        enough to reach here costs nothing to build and nothing to configure,
+        so without this the first sign of it is the allocation failing.
+        """
+        if rows > 1 or self._warned_unbounded:
+            return
+
+        held = _band_bytes(samples, 1, width, itemsize)
+        if held <= _TILE_BYTES:
+            return
+
+        self._warned_unbounded = True
+        band = f"{held / 2**20:.0f} MiB for one row of {samples} samples"
+        _logger.warning(
+            "radius %s %s needs %s, past the %d MiB a pass may hold",
+            self.radius,
+            self.shape,
+            band,
+            _TILE_BYTES >> 20,
+        )
 
     def _median(
         self,

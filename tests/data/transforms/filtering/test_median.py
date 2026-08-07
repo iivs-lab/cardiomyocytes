@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections import UserList
 from dataclasses import FrozenInstanceError
 from statistics import median
@@ -377,3 +378,54 @@ def test_a_banded_frame_answers_exactly_what_a_whole_one_does(
     banded = kernel.apply(window, radius[2])
 
     assert torch.equal(banded, whole)
+
+
+def test_the_budget_counts_what_ordering_adds_to_the_stack():
+    # It counted only the stack of neighbours, so the number it bounded was a
+    # quarter of what a pass actually held: ordering hands the values back with
+    # an int64 index beside each, and the validity count reads a bool mask over
+    # the same shape. A reader sizing workers off the constant was reading the
+    # wrong number.
+    budget = median_kernel._TILE_BYTES  # noqa: SLF001
+    samples, width, itemsize = 33, 900, 4
+
+    rows = median_kernel._tile_rows(samples, width, itemsize)  # noqa: SLF001
+    held = median_kernel._band_bytes(samples, rows, width, itemsize)  # noqa: SLF001
+
+    assert rows < budget // (samples * width * itemsize)  # the stack alone
+    assert held <= budget
+
+
+def test_a_neighbourhood_too_wide_to_band_says_so_once(caplog):
+    # Tiling divides down to one row and no further, so past that the bound is
+    # gone and the pass takes whatever the neighbourhood asks for. Building such
+    # a kernel costs nothing and says nothing, so the first sign of it used to be
+    # the allocation failing part-way through a dataset.
+    kernel = MedianKernel(6, shape="cuboid")  # 2197 offsets
+
+    with caplog.at_level(logging.WARNING):
+        for _ in range(3):
+            kernel.apply(torch.randn(13, 4, 4096), 6)
+
+    warned = [record.getMessage() for record in caplog.records]
+    assert len(warned) == 1
+    assert "past the 136 MiB a pass may hold" in warned[0]
+
+
+@pytest.mark.parametrize(
+    ("radius", "shape", "width"),
+    (
+        pytest.param((2, 2, 2), "ellipsoid", 13, id="many-rows-a-band"),
+        pytest.param(5, "cuboid", 4096, id="one-row-a-band-and-within"),
+    ),
+)
+def test_a_neighbourhood_that_bands_says_nothing(caplog, radius, shape, width):
+    # One row a band is not itself the trouble -- it is one row that does not
+    # fit that is, so the wide-but-affordable case has to stay quiet.
+    kernel = MedianKernel(radius, shape=shape)
+    frames = 2 * kernel.temporal_radius + 1
+
+    with caplog.at_level(logging.WARNING):
+        kernel.apply(torch.randn(frames, 4, width), kernel.temporal_radius)
+
+    assert not caplog.records
