@@ -270,18 +270,14 @@ force          4     3, 4, 5 → acceleration 4
 ## 열린 것 — `TreeConfig`를 (2)·(3)이 쓰게 하려면
 
 `SourceConfig`·`TargetConfig`가 `TreeConfig`(= `root` + `subpath` +
-`resolve_subpath`)를 공유한다. (2)와 (3)도 각자의 source·target config를 갖게 되므로 셋이
-같은 베이스를 쓰는 것이 목표인데, 지금 그것이 `scripts/data/_process.py` 안에 있다. 남은
-것은 셋이다.
+`resolve_subpath`)를 공유한다. 단계별 기본값은 이미 서브클래스의 몫이다 —
+`DEFAULT_SUBPATH`가 `ClassVar[str]`로 베이스에 선언만 되어 있고 값은 각 서브클래스가 댄다.
+(2)의 flow 트리 레이아웃이 정해지면 그 클래스에 적으면 되고, **베이스는 손대지 않는다.**
+남은 것은 둘이다.
 
 - **베이스가 (1)의 모듈에 산다.** (2)가 `scripts.data`에서 import하는 것은 의존 방향이
   거꾸로다. 두 번째 쌍이 생길 때 위로 올릴 것. 지금 공용 모듈을 미리 만들지 않는 이유는
   소비자가 하나뿐이어서고, 옮기는 것은 기계적이다.
-
-- **`DEFAULT_SUBPATH`는 (1)의 것이다.** Koala의 `Phase/Float/Bin`이라, 공용 베이스가
-  `resolve_subpath(default=DEFAULT_SUBPATH)`를 그대로 들고 가면 (2)·(3)에 (1)의 기본값이
-  박힌다. 올릴 때 기본값을 떼고 호출자가 늘 넘기게 하거나, 단계별 서브클래스가 대게 할 것.
-  (2)의 flow 트리 레이아웃이 아직 없어 그 값이 무엇일지도 미정이다.
 
 - **(3)의 target은 프레임 트리가 아닐 수 있다.** 출력이 `{지표: (인덱스, 프레임)}`과
   문서라, `save_frames`도 폴더 통째 교체도 (3)에는 없을 수 있다. 그래서 겹침 검사는

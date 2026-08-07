@@ -17,7 +17,7 @@ __all__ = (
 import logging
 from dataclasses import dataclass
 from pathlib import Path, PurePath
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, ClassVar, Final
 
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import PhaseFileFolder, PhaseUnit, search_phase_bin_folders
@@ -48,8 +48,6 @@ if TYPE_CHECKING:
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
 
 
-DEFAULT_SUBPATH: Final = PHASE_FLOAT_BIN
-
 SELECTION_LIMIT: Final = 5
 SELECTION_SPECS: Final = (".json", ".txt")
 
@@ -59,21 +57,24 @@ class TreeConfig:
     """A tree of sequences, and where inside one of them the frames sit.
 
     What a run reads and what it writes are the same shape, so the pair of
-    settings that says where a tree is lives here once. An unset `subpath` is
-    a question rather than an answer: whoever resolves it says what it stands
-    for, since the source's own layout and the target's are not the same
-    default.
+    settings that says where a tree is lives here once. A subclass sets
+    `DEFAULT_SUBPATH` to the layout its own end of a stage uses, which is what
+    an unset `subpath` comes to when the caller offers nothing to follow.
 
     Attributes:
         root: the folder the sequences sit under.
         subpath: where a sequence's frames sit inside its own folder, or `None`
-            to take whatever it is resolved against.
+            to follow what the caller offers, and this end's own layout when it
+            offers nothing.
     """
+
+    DEFAULT_SUBPATH: ClassVar[str]
 
     root: str = MISSING
     subpath: str | None = None
 
-    def resolve_subpath(self, default: str = DEFAULT_SUBPATH) -> str:
+    def resolve_subpath(self, follow: str | None = None) -> str:
+        default = unwrap_or_default(follow, self.DEFAULT_SUBPATH)
         return unwrap_or_default(self.subpath, default)
 
 
@@ -90,6 +91,8 @@ class SourceConfig(TreeConfig):
         exclude: the same, for sequences to leave out.
         frame_step: take every `frame_step`th frame of each sequence.
     """
+
+    DEFAULT_SUBPATH: ClassVar[str] = PHASE_FLOAT_BIN
 
     include: list[str] | str | None = None
     exclude: list[str] | str | None = None
@@ -113,6 +116,8 @@ class TargetConfig(TreeConfig):
         range_file: what that document is called, given `.json` if it has no
             extension.
     """
+
+    DEFAULT_SUBPATH: ClassVar[str] = PHASE_FLOAT_BIN
 
     overwrite: bool = False
     save_frames: bool = False
