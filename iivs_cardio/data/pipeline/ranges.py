@@ -275,20 +275,20 @@ class RangeDocument:
         self,
         path: Path,
         source: str,
-        expected: Sequence[str],
+        sequence_names: Sequence[str],
         settings: Mapping[str, object] | None = None,
         *,
         overwrite: bool = False,
     ) -> None:
-        if not expected:
-            msg = "no sequence to cover: `expected` must name at least one"
+        if not sequence_names:
+            msg = "no sequence to cover: `sequence_names` must hold at least one"
             raise ValueError(msg)
 
         self.path = ensure_file_extension(path, DOCUMENT_EXT, add=True)
         self.parts_root = self.path.with_suffix(self.PARTS_SUFFIX)
 
         self.source = source
-        self.expected = tuple(dict.fromkeys(expected))
+        self.sequence_names = tuple(dict.fromkeys(sequence_names))
         self.settings = settings
         self.overwrite = overwrite
 
@@ -321,9 +321,9 @@ class RangeDocument:
 
     def get_coverage(self, dataset: DatasetRange) -> Coverage:
         covered = {sequence.source for sequence in dataset.sequences}
-        skipped = tuple(name for name in self.expected if name not in covered)
+        skipped = tuple(name for name in self.sequence_names if name not in covered)
 
-        return Coverage(len(self.expected), len(covered), skipped)
+        return Coverage(len(self.sequence_names), len(covered), skipped)
 
     def save(self) -> Path:
         dataset = self.to_range()

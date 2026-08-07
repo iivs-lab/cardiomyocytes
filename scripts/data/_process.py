@@ -208,7 +208,7 @@ def build_branches(
     target_config: TargetConfig,
     kernel_config: KernelConfig,
     output_root: StrPath,
-    expected: Sequence[str],
+    sequence_names: Sequence[str],
 ) -> list[SideBranch[PhaseFilteredSequence, Tensor, Path]]:
     _validate_target_config(target_config)
 
@@ -229,7 +229,7 @@ def build_branches(
         }
 
         branches.append(
-            RangeDocument(path, source, expected, settings, overwrite=overwrite)
+            RangeDocument(path, source, sequence_names, settings, overwrite=overwrite)
         )
 
     return branches

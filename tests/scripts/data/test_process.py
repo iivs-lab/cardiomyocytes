@@ -360,7 +360,7 @@ def test_a_branch_with_nothing_to_say_adds_no_line(phase_tree, caplog):
 # ------------------------------ the side branches ------------------------- #
 
 
-def _branches(tmp_path, *, roster=("TL_00",), subpath=None, step=1, **target):
+def _branches(tmp_path, *, sequence_names=("TL_00",), subpath=None, step=1, **target):
     source = SourceConfig(root="/dataset", subpath=subpath, frame_step=step)
     config = TargetConfig(root=str(tmp_path), **target)
 
@@ -369,7 +369,7 @@ def _branches(tmp_path, *, roster=("TL_00",), subpath=None, step=1, **target):
         config,
         parse_filter_config(None),
         tmp_path,
-        list(roster),
+        list(sequence_names),
     )
 
 
@@ -422,9 +422,9 @@ def test_the_selection_stays_out_of_the_settings(tmp_path):
 
 
 def test_the_roster_reaches_the_document_that_reports_on_it(tmp_path):
-    (document,) = _branches(tmp_path, roster=("TL_00", "TL_01", "TL_02"))
+    (document,) = _branches(tmp_path, sequence_names=("TL_00", "TL_01", "TL_02"))
 
-    assert document.expected == ("TL_00", "TL_01", "TL_02")
+    assert document.sequence_names == ("TL_00", "TL_01", "TL_02")
 
 
 def test_branches_are_refused_before_any_of_them_is_built(tmp_path):

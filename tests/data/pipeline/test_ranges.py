@@ -252,9 +252,11 @@ def test_a_meter_that_saw_nothing_is_refused_by_name(tmp_path):
 
 def test_the_parts_folder_sits_beside_the_document(tmp_path):
     named = RangeDocument(
-        tmp_path / "phase_range.json", expected=["a"], source="plate_A"
+        tmp_path / "phase_range.json", sequence_names=["a"], source="plate_A"
     )
-    bare = RangeDocument(tmp_path / "phase_range", expected=["a"], source="plate_A")
+    bare = RangeDocument(
+        tmp_path / "phase_range", sequence_names=["a"], source="plate_A"
+    )
 
     assert named.parts_root == bare.parts_root == tmp_path / "phase_range.parts"
 
@@ -267,7 +269,7 @@ def test_a_document_asks_a_sequence_only_what_it_is_called(tmp_path):
         name: str
 
     meter = RangeDocument(
-        tmp_path / "range", expected=["plate/TL_00"], source="plate_A"
+        tmp_path / "range", sequence_names=["plate/TL_00"], source="plate_A"
     ).get_hook(_Named("plate/TL_00"))
     with meter:
         meter(Step(0, torch.tensor([[0.0, 1.0]]), Path("00000_phase.bin")))
@@ -276,7 +278,9 @@ def test_a_document_asks_a_sequence_only_what_it_is_called(tmp_path):
 
 
 def test_a_document_folds_the_parts_in_name_order(tmp_path):
-    document = RangeDocument(tmp_path / "range", expected=["a", "b"], source="plate_A")
+    document = RangeDocument(
+        tmp_path / "range", sequence_names=["a", "b"], source="plate_A"
+    )
     with document:
         _scan(_meter(tmp_path, "b"), (0.0, 5.0))
         _scan(_meter(tmp_path, "a"), (-3.0, 1.0))
@@ -292,7 +296,7 @@ def test_a_document_writes_the_settings_it_was_given(tmp_path):
     with RangeDocument(
         tmp_path / "range",
         settings={"filter": "identity"},
-        expected=["a"],
+        sequence_names=["a"],
         source="plate_A",
     ):
         _scan(_meter(tmp_path, "a"), (-1.0, 2.0))
@@ -305,7 +309,7 @@ def test_a_document_writes_the_settings_it_was_given(tmp_path):
 def test_a_document_that_gathered_nothing_is_refused_by_name(tmp_path):
     with (
         pytest.raises(ValueError, match="DatasetRange holds nothing"),
-        RangeDocument(tmp_path / "range", expected=["a"], source="plate_A"),
+        RangeDocument(tmp_path / "range", sequence_names=["a"], source="plate_A"),
     ):
         pass
 
@@ -313,7 +317,9 @@ def test_a_document_that_gathered_nothing_is_refused_by_name(tmp_path):
 def test_a_run_that_died_writes_no_document(tmp_path):
     # The parts it did finish stay: they are what a re-run does not have to redo.
     def die() -> None:
-        with RangeDocument(tmp_path / "range", expected=["a", "b"], source="plate_A"):
+        with RangeDocument(
+            tmp_path / "range", sequence_names=["a", "b"], source="plate_A"
+        ):
             _scan(_meter(tmp_path, "a"), (0.0, 1.0))
             msg = "the run gave up"
             raise RuntimeError(msg)
@@ -326,7 +332,9 @@ def test_a_run_that_died_writes_no_document(tmp_path):
 
 
 def test_a_document_reports_only_once_it_has_saved(tmp_path):
-    document = RangeDocument(tmp_path / "range", expected=["a", "b"], source="plate_A")
+    document = RangeDocument(
+        tmp_path / "range", sequence_names=["a", "b"], source="plate_A"
+    )
 
     assert document.report() is None  # a worker's copy never folds anything
 
@@ -340,12 +348,12 @@ def test_a_document_reports_only_once_it_has_saved(tmp_path):
 def test_entering_drops_what_an_earlier_run_left(tmp_path):
     # `output_directory` is pinned rather than timestamped, so a re-run lands in
     # the same folder -- and a stale part would fold in as if it were this run's.
-    with RangeDocument(tmp_path / "range", expected=["a", "b"], source="plate_A"):
+    with RangeDocument(tmp_path / "range", sequence_names=["a", "b"], source="plate_A"):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
         _scan(_meter(tmp_path, "b"), (0.0, 5.0))
 
     with RangeDocument(
-        tmp_path / "range", expected=["a"], overwrite=True, source="plate_A"
+        tmp_path / "range", sequence_names=["a"], overwrite=True, source="plate_A"
     ):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
 
@@ -357,11 +365,11 @@ def test_entering_drops_the_folders_that_layout_left_too(tmp_path):
     # A mirrored part nests, so clearing the files alone would keep every folder
     # the source ever had -- and a plate dropped from the dataset would go on
     # looking present to anyone reading the tree.
-    with RangeDocument(tmp_path / "range", expected=["a", "b"], source="plate_A"):
+    with RangeDocument(tmp_path / "range", sequence_names=["a", "b"], source="plate_A"):
         _scan(_meter(tmp_path, "plate_A/TL_00"), (0.0, 1.0))
 
     with RangeDocument(
-        tmp_path / "range", expected=["a"], overwrite=True, source="plate_A"
+        tmp_path / "range", sequence_names=["a"], overwrite=True, source="plate_A"
     ):
         _scan(_meter(tmp_path, "plate_B/TL_00"), (0.0, 1.0))
 
@@ -377,7 +385,7 @@ def test_entering_leaves_alone_what_it_did_not_write(tmp_path):
     (parts / "plate_A").mkdir(parents=True)
     (parts / "plate_A" / "notes.txt").write_text("mine", encoding="utf-8")
 
-    with RangeDocument(tmp_path / "range", expected=["a", "b"], source="plate_A"):
+    with RangeDocument(tmp_path / "range", sequence_names=["a", "b"], source="plate_A"):
         _scan(_meter(tmp_path, "plate_B/TL_00"), (0.0, 1.0))
 
     assert (parts / "plate_A" / "notes.txt").read_text(encoding="utf-8") == "mine"
@@ -391,7 +399,7 @@ def _saved(tmp_path) -> dict:
 
 
 def test_a_document_told_its_roster_says_what_it_covered(tmp_path):
-    with RangeDocument(tmp_path / "range", expected=["a", "b"], source="plate_A"):
+    with RangeDocument(tmp_path / "range", sequence_names=["a", "b"], source="plate_A"):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
         _scan(_meter(tmp_path, "b"), (0.0, 5.0))
 
@@ -401,7 +409,9 @@ def test_a_document_told_its_roster_says_what_it_covered(tmp_path):
 def test_a_document_names_the_sequences_that_left_nothing(tmp_path):
     # Bounds folded over a subset are not the dataset's, and a consumer setting
     # a normalization policy from them would read a hole as data.
-    with RangeDocument(tmp_path / "range", expected=["a", "b", "c"], source="plate_A"):
+    with RangeDocument(
+        tmp_path / "range", sequence_names=["a", "b", "c"], source="plate_A"
+    ):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
 
     assert _saved(tmp_path)["coverage"] == {
@@ -416,7 +426,7 @@ def test_coverage_sits_ahead_of_the_numbers_it_qualifies(tmp_path):
     with RangeDocument(
         tmp_path / "range",
         settings={"filter": "identity"},
-        expected=["a"],
+        sequence_names=["a"],
         source="plate_A",
     ):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
@@ -430,7 +440,7 @@ def test_a_document_with_no_sequence_to_cover_is_refused(tmp_path):
     # door anyway: a document that cannot name what it set out to cover would
     # write a `coverage` that reads as "complete" rather than "unknown".
     with pytest.raises(ValueError, match=r"no sequence to cover"):
-        RangeDocument(tmp_path / "range", expected=[], source="plate_A")
+        RangeDocument(tmp_path / "range", sequence_names=[], source="plate_A")
 
 
 def test_a_roster_naming_one_sequence_twice_counts_it_once(tmp_path):
@@ -438,9 +448,9 @@ def test_a_roster_naming_one_sequence_twice_counts_it_once(tmp_path):
     # part, so a repeated name would hold `covered` below `total` for a run that
     # measured everything -- and report the sequence as skipped besides.
     with RangeDocument(
-        tmp_path / "range", expected=["a", "b", "a"], source="plate_A"
+        tmp_path / "range", sequence_names=["a", "b", "a"], source="plate_A"
     ) as document:
-        assert document.expected == ("a", "b")
+        assert document.sequence_names == ("a", "b")
 
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
         _scan(_meter(tmp_path, "b"), (2.0, 3.0))
@@ -452,16 +462,16 @@ def test_the_roster_keeps_the_order_it_was_first_given_in(tmp_path):
     # `skipped` is reported in roster order, so the survivor of a repeat has to
     # be the first sighting rather than the last.
     document = RangeDocument(
-        tmp_path / "range", expected=["b", "a", "b", "c"], source="plate_A"
+        tmp_path / "range", sequence_names=["b", "a", "b", "c"], source="plate_A"
     )
 
-    assert document.expected == ("b", "a", "c")
+    assert document.sequence_names == ("b", "a", "c")
 
 
 def test_every_document_carries_its_coverage(tmp_path):
     # Always written, never omitted: an absent block would leave a reader
     # guessing whether it means complete or unknown.
-    with RangeDocument(tmp_path / "range", expected=["a"], source="plate_A"):
+    with RangeDocument(tmp_path / "range", sequence_names=["a"], source="plate_A"):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
 
     assert _saved(tmp_path)["coverage"] == {
@@ -474,14 +484,17 @@ def test_every_document_carries_its_coverage(tmp_path):
 def test_a_partial_document_reads_differently_from_a_whole_one(tmp_path):
     # A count that usually matches is a number nobody checks, so the partial
     # line is shaped differently rather than carrying the same one.
-    whole = RangeDocument(tmp_path / "range", expected=["a"], source="plate_A")
+    whole = RangeDocument(tmp_path / "range", sequence_names=["a"], source="plate_A")
     with whole:
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
 
     assert whole.report() == "wrote range.json from 1 sequence: [0, 1]"
 
     partial = RangeDocument(
-        tmp_path / "range", expected=["a", "b", "c"], overwrite=True, source="plate_A"
+        tmp_path / "range",
+        sequence_names=["a", "b", "c"],
+        overwrite=True,
+        source="plate_A",
     )
     with partial:
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
@@ -496,7 +509,7 @@ def test_the_skipped_list_keeps_the_roster_s_own_order(tmp_path):
     # Not the folded order and not sorted: the roster is what a caller reads the
     # list back against, and it is the order the run was going to take.
     document = RangeDocument(
-        tmp_path / "range", expected=["c", "a", "b"], source="plate_A"
+        tmp_path / "range", sequence_names=["c", "a", "b"], source="plate_A"
     )
     with document:
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
@@ -583,7 +596,9 @@ def test_a_sequence_named_with_a_dot_still_files_and_reads_back(tmp_path, source
     # A time-lapse folder may carry a dot -- a date, a magnification, a repeat
     # marker -- and the tail after it is part of the name, not an extension the
     # part file has to justify.
-    document = RangeDocument(tmp_path / "range", expected=[source], source="plate_A")
+    document = RangeDocument(
+        tmp_path / "range", sequence_names=[source], source="plate_A"
+    )
     with document:
         meter = document.get_hook(_Named(source))
         with meter:
