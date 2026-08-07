@@ -45,8 +45,8 @@ class ComputeConfig:
     device: str = "cpu"
     workers: int | list[int] | None = None
     tasks_per_worker: int | None = None
-    show_progress: bool = True
     measure_workers: bool = False
+    show_progress: bool = True
 
 
 class IncompleteRunError(RuntimeError):
@@ -88,9 +88,9 @@ class WorkerLogFolder:
 
 @dataclass(frozen=True, slots=True)
 class SharedContext:
-    devices: tuple[Device, ...]
-    stages: StageFactory
     name: str
+    stages: StageFactory
+    devices: tuple[Device, ...]
     log_folder: WorkerLogFolder | None
     log_level: int = logging.INFO
 
@@ -98,10 +98,8 @@ class SharedContext:
 def log_compute_config(config: ComputeConfig, logger: Logger) -> None:
     log_indented(logger, "compute: %s", config.device, depth=0)
 
-    if config.tasks_per_worker is not None:
-        log_indented(
-            logger, "replacing a worker after %d tasks", config.tasks_per_worker
-        )
+    if (tasks := config.tasks_per_worker) is not None:
+        log_indented(logger, "replacing a worker after %d tasks", tasks)
 
     if config.measure_workers:
         log_indented(logger, "reporting how busy each worker was")
@@ -179,12 +177,12 @@ def _collect_failures(
     failed: dict[str, str] = {}
     total = len(stages)
 
-    for returned, (index, why) in enumerate(outcomes, start=1):
+    for returned, (index, reason) in enumerate(outcomes, start=1):
         name = stages.get_name(index)
-        if why is not None:
-            failed[name] = why
+        if reason is not None:
+            failed[name] = reason
 
-        verdict = "done" if why is None else "failed"
+        verdict = "done" if reason is None else "failed"
         logger.info("%s %s (%d/%d)", name, verdict, returned, total)
 
     return failed
@@ -197,13 +195,11 @@ def log_insights(insights: dict[str, Any], name: str, *, unit: str = "it") -> No
         logger.warning("nothing to report: the pool collected no insights")
         return
 
-    summary = (
-        "workers spent %s: %.1f%% working, %.1f%% waiting, %.1f%% starting/stopping"
-    )
+    summary = "workers spent %s: %.1f%% working, %.1f%% waiting, %.1f%% overhead"
     working = insights["working_ratio"] * 100
     waiting = insights["waiting_ratio"] * 100
-    idle = 100 - working - waiting
-    logger.info(summary, insights["total_time"], working, waiting, idle)
+    overhead = 100 - (working + waiting)
+    logger.info(summary, insights["total_time"], working, waiting, overhead)
 
     per_worker = "worker %d completed %d %s in %s"
     rows = zip(insights["n_completed_tasks"], insights["working_time"], strict=True)
@@ -226,54 +222,61 @@ def run_all(
     num_stages = len(stages)
     devices = plan_devices(config)[:num_stages]
     num_workers = len(devices)
-    one_worker = num_workers == 1
+    in_process = num_workers <= 1
 
-    log_level = logger.getEffectiveLevel()
-    context = SharedContext(devices, stages, name, log_folder, log_level)
+    workers = f"{num_workers} worker{'' if in_process else 's'}"
+    where = ", ".join(str(device) for device in dict.fromkeys(devices))
+    logger.info("running %d %s across %s on %s", num_stages, unit, workers, where)
 
-    if config.measure_workers and one_worker:
+    if config.measure_workers and in_process:
         logger.warning("not measuring workers: a lone worker runs no pool")
 
+    log_level = logger.getEffectiveLevel()
+    context = SharedContext(name, stages, devices, log_folder, log_level)
     show_progress = config.show_progress and num_stages > 1
-    pbar_options = {"desc": name, "unit": unit}
 
-    stages_str = f"{num_stages} {unit}"
-    workers_str = f"{num_workers} worker{'' if one_worker else 's'}"
-    devices_str = ", ".join(str(device) for device in dict.fromkeys(devices))
+    failed: dict[str, str] = {}
 
-    logger.info("running %s across %s on %s", stages_str, workers_str, devices_str)
+    with Timer("s") as timer:
+        try:
+            with stages.running():
+                if in_process:
+                    bar = trange(
+                        num_stages, desc=name, unit=unit, disable=not show_progress
+                    )
+                    outcomes = (_run_on_worker(0, context, index) for index in bar)
+                    failed = _collect_failures(outcomes, stages, logger)
+                else:
+                    with WorkerPool(
+                        n_jobs=num_workers,
+                        shared_objects=context,
+                        pass_worker_id=True,
+                        enable_insights=config.measure_workers,
+                    ) as pool:
+                        outcomes = pool.imap(
+                            _run_on_worker,
+                            range(num_stages),
+                            chunk_size=1,
+                            worker_init=_init_worker,
+                            worker_lifespan=config.tasks_per_worker,
+                            progress_bar=show_progress,
+                            progress_bar_options={"desc": name, "unit": unit},
+                        )
+                        failed = _collect_failures(outcomes, stages, logger)
 
-    with Timer("s") as timer, stages.running():
-        if one_worker:
-            indices = trange(num_stages, disable=not show_progress, **pbar_options)
-            outcomes = (_run_on_worker(0, context, index) for index in indices)
-            failed = _collect_failures(outcomes, stages, logger)
-        else:
-            with WorkerPool(
-                n_jobs=num_workers,
-                shared_objects=context,
-                pass_worker_id=True,
-                enable_insights=config.measure_workers,
-            ) as pool:
-                outcomes = pool.imap(
-                    _run_on_worker,
-                    range(num_stages),
-                    chunk_size=1,
-                    worker_init=_init_worker,
-                    worker_lifespan=config.tasks_per_worker,
-                    progress_bar=show_progress,
-                    progress_bar_options=pbar_options,
-                )
-                failed = _collect_failures(outcomes, stages, logger)
+                        if config.measure_workers:
+                            log_insights(pool.get_insights(), name, unit=unit)
+        except Exception:
+            if not failed:
+                raise
 
-                if config.measure_workers:
-                    log_insights(pool.get_insights(), name, unit=unit)
+            logger.exception("every item was seen, but the run could not be closed")
 
     completed = num_stages - len(failed)
     logger.info("%d of %d done in %.1fs", completed, num_stages, timer.elapsed)
 
     if failed:
-        for stage, why in failed.items():
-            logger.error("%s: %s", stage, why)
+        for stage, reason in failed.items():
+            logger.error("%s: %s", stage, reason)
 
         raise IncompleteRunError(failed, num_stages)

@@ -126,6 +126,43 @@ def test_the_run_is_bracketed_before_anything_says_it_failed(tmp_path):
     assert closed == [2]
 
 
+class _Unclosable(_Stages):
+    @contextmanager
+    def running(self) -> Iterator[_Stages]:
+        self._dest.mkdir(parents=True, exist_ok=True)
+        yield self
+        msg = "value_range.json already exists"
+        raise FileExistsError(msg)
+
+
+def test_a_branch_that_cannot_commit_does_not_bury_what_failed(tmp_path, caplog):
+    # The verdict is what a retry is built from, and a side branch raising on its
+    # way out would otherwise replace it with a file error naming no sequence.
+    dest = tmp_path / "done"
+
+    with caplog.at_level(logging.INFO), pytest.raises(IncompleteRunError) as failure:
+        run_all(_Unclosable(3, dest, explode_at=[1]), _compute(0))
+
+    assert failure.value.failed == {"item1": "ValueError: item 1 gave up"}
+
+    logged = [record.getMessage() for record in caplog.records]
+    assert "2 of 3 done" in " ".join(logged)
+    assert any("could not be closed" in message for message in logged)
+
+
+def test_a_branch_that_cannot_commit_is_the_verdict_when_nothing_failed(tmp_path):
+    # With every item through, the broken output is the only thing left to report.
+    with pytest.raises(FileExistsError, match=r"already exists"):
+        run_all(_Unclosable(3, tmp_path / "done"), _compute(0))
+
+
+@pytest.mark.parametrize("workers", (0, 2))
+def test_a_run_with_no_items_starts_no_pool(tmp_path, workers):
+    # `plan_devices` is capped at the item count, so an empty run plans no worker
+    # at all and must not reach `WorkerPool`, which cannot be asked for none.
+    run_all(_Stages(0, tmp_path / "done"), _compute(workers))
+
+
 @pytest.fixture()
 def restored_root_logger():
     """Put the root logger back, since configuring a worker replaces it."""
@@ -339,14 +376,15 @@ _INSIGHTS = {
 def test_the_shares_reported_account_for_the_whole(caplog):
     # `mpire` splits a worker's life five ways and the ratios are of their sum,
     # so naming two of them leaves a reader asking where the rest went -- 98% of
-    # it, on a run short enough for process start-up to dominate.
+    # it, on a run short enough for process start-up to dominate. The other three
+    # are start-up, `worker_init` and `worker_exit`, which no single name covers.
     with caplog.at_level(logging.INFO):
         log_insights(_INSIGHTS, "run", unit="seq")
 
     (summary, *_) = [record.getMessage() for record in caplog.records]
 
     assert summary == (
-        "workers spent 0:00:10: 50.0% working, 20.0% waiting, 30.0% starting/stopping"
+        "workers spent 0:00:10: 50.0% working, 20.0% waiting, 30.0% overhead"
     )
 
 

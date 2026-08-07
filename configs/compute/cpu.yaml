@@ -1,5 +1,5 @@
 device: cpu
 workers: 0 # 0 stays in this process, N workers, null one per core
 tasks_per_worker: null # tasks before a worker is replaced; null keeps it for the run
-show_progress: true
 measure_workers: false # how busy each worker was, logged once a pool finishes
+show_progress: true
