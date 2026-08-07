@@ -67,7 +67,7 @@ class TargetConfig:
 
 
 SELECTION_LIMIT = 5
-SELECTION_FILES = (".json", ".txt")
+SELECTION_SPECS = (".json", ".txt")
 
 
 def _subpath(source_config: SourceConfig) -> str:
@@ -76,7 +76,7 @@ def _subpath(source_config: SourceConfig) -> str:
 
 def _log_selection(logger: Logger, verb: str, value: list[str] | str) -> None:
     if isinstance(value, str):
-        if value.endswith(SELECTION_FILES):
+        if value.endswith(SELECTION_SPECS):
             log_indented(logger, "%s as listed in %s", verb, value)
         else:
             log_indented(logger, "%s %s", verb, value)
