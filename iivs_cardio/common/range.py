@@ -17,6 +17,11 @@ def finite_range(frame: Tensor) -> tuple[float, float] | None:
     background does not swallow the range. An empty frame and an entirely
     non-finite one both answer `None`: whether that is a frame to skip or a run
     to refuse is the caller's to decide, which is why it is not an exception.
+
+    The bounds come back as Python floats, so an integer frame holding values a
+    float cannot tell apart answers with them rounded together. Phase frames are
+    float32 by the time they arrive here, which is what makes that no one's
+    problem in practice rather than a check worth paying for per frame.
     """
     if frame.numel() == 0:
         return None
