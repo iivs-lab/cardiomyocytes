@@ -76,13 +76,27 @@ class TreeConfig:
     def resolve_subpath(self, follow: str | None = None) -> str:
         """Return where the frames sit, settling an unset `subpath`.
 
+        The answer is always a path a sequence's own folder contains, which is
+        what lets two of them be compared as they stand: one that could reach
+        outside would leave whatever compares them looking at the wrong pair.
+
         Args:
             follow: what an unset `subpath` takes, such as where the other end
                 of the stage keeps its own. `None` leaves it to
                 `DEFAULT_SUBPATH`, which is this end's own layout.
+
+        Raises:
+            ValueError: If the answer would reach outside a sequence's folder.
         """
         default = unwrap_or_default(follow, self.DEFAULT_SUBPATH)
-        return unwrap_or_default(self.subpath, default)
+        subpath = unwrap_or_default(self.subpath, default)
+
+        path = PurePath(subpath)
+        if path.anchor or ".." in path.parts:
+            msg = f"invalid subpath {subpath!r}: expected a relative path, no '..'"
+            raise ValueError(msg)
+
+        return subpath
 
 
 @dataclass
@@ -137,22 +151,10 @@ def _validate_output(
 ) -> None:
     """Raise unless the target names an output this run can safely write.
 
-    Both refusals are configuration errors, so neither costs a read: a target
-    with no branch at all is a mistake rather than a way to ask for a run that
-    only reads, and one whose frames would land on the source destroys what the
-    run is about to read.
-
     A sequence is written by replacing its folder whole, so a destination that
-    is a source folder, holds one, or sits inside one is refused. So is one the
-    source search would find again, since a later run would take this run's
-    output for more sequences. Writing beside the source is left open: a
-    filtered tree kept next to the raw one under a name of its own collides
-    with neither.
-
-    Args:
-        source_config: what the run reads.
-        target_config: what the run writes.
-        output_root: where the branches write.
+    is a source folder, holds one, or sits inside one is refused, as is one the
+    source search would find again. A tree written beside the source under a
+    name of its own collides with neither, and is left open.
 
     Raises:
         ValueError: If the target writes nothing, or the frames it writes would
@@ -166,18 +168,18 @@ def _validate_output(
 
     source_root = Path(source_config.root).resolve()
     output_root = Path(output_root).resolve()
+
     if not output_root.is_relative_to(source_root):
         return
 
     subpath = PurePath(source_config.resolve_subpath())
-    written_at = PurePath(target_config.resolve_subpath(subpath.as_posix()))
-    if not (subpath.is_relative_to(written_at) or written_at.is_relative_to(subpath)):
-        return
+    target_subpath = PurePath(target_config.resolve_subpath(subpath.as_posix()))
 
-    where = f"{output_root.as_posix()}/*/{written_at.as_posix()}"
-    fix = "`target.subpath` beside it, or `target.root` outside the source"
-    msg = f"frames would land on the source at {where}: set {fix}"
-    raise ValueError(msg)
+    if subpath.is_relative_to(target_subpath) or target_subpath.is_relative_to(subpath):
+        where = f"{output_root.as_posix()}/*/{target_subpath.as_posix()}"
+        fix = "`target.subpath` beside it, or `target.root` outside the source"
+        msg = f"frames would land on the source at {where}: set {fix}"
+        raise ValueError(msg)
 
 
 def _log_selection(logger: Logger, verb: str, value: list[str] | str) -> None:

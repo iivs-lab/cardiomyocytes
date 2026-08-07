@@ -175,6 +175,31 @@ def test_a_target_asking_for_nothing_is_refused_before_the_source_is_read(tmp_pa
 FILTERED = "Phase/Float/FilteredBin"
 
 
+@pytest.mark.parametrize("config", (SourceConfig, TargetConfig))
+@pytest.mark.parametrize("subpath", ("/elsewhere", "../raw", "Phase/../../raw"))
+def test_a_subpath_that_reaches_outside_a_sequence_is_refused(config, subpath):
+    # The destination check compares the two subpaths as they stand, so a `..`
+    # walks straight past it and `Path(root, name, subpath)` lands wherever it
+    # points -- back inside the source, on a run the check just cleared. Refused
+    # where a subpath is read instead, which covers whichever end named it.
+    # `is_absolute()` is not the test: `/elsewhere` is False on Windows, where
+    # it still resets the path to the drive root, and the anchor is what says so
+    # on both platforms.
+    with pytest.raises(ValueError, match=r"invalid subpath"):
+        config(root="/d", subpath=subpath).resolve_subpath()
+
+
+def test_a_subpath_reaching_outside_stops_the_run_before_it_starts(
+    phase_tree, tmp_path
+):
+    dest = tmp_path / "out"
+
+    with pytest.raises(ValueError, match=r"invalid subpath"):
+        _scan(phase_tree, dest, 0, subpath="../../elsewhere")
+
+    assert not dest.exists()
+
+
 def test_writing_frames_over_the_source_is_refused(phase_tree):
     # A sequence is committed by replacing its folder whole and atomically, so
     # this ran to "3 of 3 done" and exited 0 with every acquisition it had read
