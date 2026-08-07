@@ -73,6 +73,13 @@ def _subpath(source_config: SourceConfig) -> str:
     return unwrap_or_default(source_config.subpath, PHASE_FLOAT_BIN)
 
 
+def _validate_target_config(target_config: TargetConfig) -> None:
+    """Raise if `target_config` names no side branch to write through."""
+    if not (target_config.save_ranges or target_config.save_frames):
+        msg = "nothing to do: set `target.save_ranges` or `target.save_frames`"
+        raise ValueError(msg)
+
+
 def _log_selection(logger: Logger, verb: str, value: list[str] | str) -> None:
     if isinstance(value, str):
         if value.endswith(SELECTION_SPECS):
@@ -203,9 +210,7 @@ def build_branches(
     output_root: StrPath,
     expected: Sequence[str],
 ) -> list[SideBranch[PhaseFilteredSequence, Tensor, Path]]:
-    if not (target_config.save_ranges or target_config.save_frames):
-        msg = "nothing to do: set `target.save_ranges` or `target.save_frames`"
-        raise ValueError(msg)
+    _validate_target_config(target_config)
 
     branches = []
 
@@ -241,6 +246,9 @@ def build_phase_stages(
     kernel_config = parse_filter_config(filter_config)
 
     log_configs(source_config, target_config, kernel_config, name=name)
+
+    if target_config is not None:
+        _validate_target_config(target_config)
 
     sequences = build_sequences(source_config, kernel_config)
     branches = []

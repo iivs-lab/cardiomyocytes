@@ -121,6 +121,18 @@ def test_a_target_asking_for_nothing_is_refused(phase_tree, tmp_path):
         build_phase_stages(source, target, name=STAGE, output_root=tmp_path)
 
 
+def test_a_target_asking_for_nothing_is_refused_before_the_source_is_read(tmp_path):
+    # Reading the source costs a header per frame -- about 4.3s for 121x1200 --
+    # and a sweep pays it per job, since it does not stop at the first refusal.
+    # Nothing about this verdict needs the frames, so a root that cannot be read
+    # at all still has to come back with the configuration's own complaint.
+    source = SourceConfig(root=str(tmp_path / "not-here"))
+    target = TargetConfig(root=str(tmp_path), save_frames=False, save_ranges=False)
+
+    with pytest.raises(ValueError, match=r"nothing to do"):
+        build_phase_stages(source, target, name=STAGE, output_root=tmp_path)
+
+
 def test_a_factory_offers_one_stage_per_sequence(phase_tree, tmp_path):
     source = SourceConfig(root=str(phase_tree))
     stages = build_phase_stages(source, name=STAGE, output_root=tmp_path)
