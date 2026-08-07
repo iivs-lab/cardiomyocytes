@@ -119,6 +119,9 @@ class FilterKernel(ABC):
 
         A pure function of its arguments, so a caller holding a whole sequence
         gets exactly what the streaming pass would produce for the same frame.
+        What comes back owns its memory rather than viewing `window`, so the
+        caller may keep or change it without reaching the frames still buffered
+        behind it.
 
         Args:
             window: `(T, H, W)` consecutive float32 frames.

@@ -166,7 +166,14 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
 
         This is the one place every source frame passes through, and the last
         one before they leave the host, so it is where a non finite value is
-        refused.
+        refused. The check follows the cast to float32, since a value a wider
+        source holds may be finite there and infinite once narrowed, and comes
+        before the move to the device, so the answer costs no synchronisation.
+
+        What is buffered owns its memory rather than viewing the source's, so
+        neither side can change the other: a source handing back a slice of an
+        array it keeps is the ordinary case, and without the copy a float32 one
+        would be buffered, filtered, and handed to a caller by reference.
         """
         self._buffer = {i: f for i, f in self._buffer.items() if i in indices}
 
@@ -174,11 +181,12 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
 
         if missing := [i for i in indices if i not in self._buffer]:
             for i, frame in zip(missing, self._source.get_items(missing), strict=True):
-                if not np.isfinite(frame).all():
+                held = torch.from_numpy(frame).to(torch.float32, copy=True)
+                if not held.isfinite().all():
                     msg = f"non-finite value in {self._source.get_meta(i)}"
                     raise ValueError(msg)
 
-                self._buffer[i] = torch.from_numpy(frame).to(device, torch.float32)
+                self._buffer[i] = held.to(device)
 
         if len(indices) == 1:
             return self._buffer[indices[0]].unsqueeze(0)

@@ -224,8 +224,11 @@ class MedianKernel(FilterKernel):
         else:
             ordered = gathered.sort(dim=0).values
 
+        # Clamped because a pixel with no valid neighbour would index -1, which
+        # on CUDA is a device-side assert that takes the context with it.
         valid = (~gathered.isnan()).sum(dim=0)
-        pair = ordered.gather(0, torch.stack(((valid - 1) // 2, valid // 2)))
+        middle = torch.stack(((valid - 1).clamp(min=0) // 2, valid // 2))
+        pair = ordered.gather(0, middle)
 
         return (pair[0] + pair[1]) / 2
 

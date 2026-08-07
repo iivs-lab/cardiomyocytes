@@ -429,3 +429,64 @@ def test_a_neighbourhood_that_bands_says_nothing(caplog, radius, shape, width):
         kernel.apply(torch.randn(frames, 4, width), kernel.temporal_radius)
 
     assert not caplog.records
+
+
+# --------------------------- a neighbourhood of none ----------------------- #
+
+
+def test_a_pixel_with_no_valid_neighbour_comes_back_as_nan():
+    # Every sample NaN leaves zero valid ones, and the lower of the middle pair
+    # is `(valid - 1) // 2` -- which is -1 there. On the cpu that raises; on cuda
+    # it is a device-side assert, and the context it kills is the worker's.
+    kernel = MedianKernel((1, 1, 0))
+    window = torch.full((1, 4, 5), float("nan"))
+
+    filtered = kernel.apply(window, 0)
+
+    assert filtered.isnan().all()
+
+
+def test_a_frame_of_its_own_is_unaffected_by_a_neighbour_of_nothing():
+    # The clamp must not reach a pixel that does have neighbours: with one NaN
+    # frame beside it, every pixel of the target still reduces as it would.
+    kernel = MedianKernel((1, 1, 1))
+    frames = _frames(3)
+    frames[0] = np.nan
+
+    filtered = kernel.apply(torch.from_numpy(frames), 1)
+    reference = kernel.apply(torch.from_numpy(frames[1:]), 0)
+
+    assert torch.equal(filtered, reference)
+
+
+# ---------------------------- the two devices agree ------------------------ #
+
+
+requires_cuda = pytest.mark.skipif(
+    not torch.cuda.is_available(),
+    reason="no CUDA-capable GPU detected",
+)
+
+
+@requires_cuda
+@pytest.mark.parametrize(
+    ("radius", "shape"),
+    (
+        pytest.param((1, 1, 1), "ellipsoid", id="sort-7-samples"),
+        pytest.param((2, 2, 2), "ellipsoid", id="topk-33-samples"),
+        pytest.param((1, 1, 1), "cuboid", id="sort-27-samples"),
+        pytest.param((2, 2, 1), "cuboid", id="topk-75-samples"),
+    ),
+)
+def test_the_two_devices_reduce_a_window_to_the_same_bits(radius, shape):
+    # `topk` past 32 samples is a cuda-only path, so the two devices do not run
+    # the same reduction and only a comparison says they agree. Border pixels
+    # carry NaN padding and an even count of valid samples, which is where the
+    # NaN ordering and the mean of the middle pair are decided.
+    kernel = MedianKernel(radius, shape=shape)
+    window = torch.from_numpy(_frames(2 * kernel.temporal_radius + 1, 12, 12))
+
+    on_cpu = kernel.apply(window, kernel.temporal_radius)
+    on_cuda = kernel.apply(window.cuda(), kernel.temporal_radius)
+
+    assert torch.equal(on_cpu, on_cuda.cpu())

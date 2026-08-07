@@ -516,13 +516,10 @@ for stale in self.list_parts():
 
 ## 열린 것
 
-- **장치 간 일치를 테스트로 만들 것.** `tests/`에 커널을 장치 간 비교하는 것이 없다.
-  `tests/common/test_cuda_utils.py`의 `requires_cuda` 마커를 가져다 쓸 것.
-
-  흥미로운 경계는 `sort` 대 `topk`다. 계단이 32와 128이므로 `ellipsoid (1,1,1)`(7개)은
-  `sort`, `ellipsoid (2,2,2)`(33개)는 `topk`로 **양쪽으로 갈린다**. 테두리 화소는 NaN
-  패딩과 짝수 유효 개수를 가지므로 NaN 정렬과 중앙 두 값 평균 경로도 함께 지나간다.
-  `torch.equal`로 전체 텐서를 비교할 것.
+- ~~**장치 간 일치를 테스트로 만들 것.**~~ `test_median.py`의
+  `test_the_two_devices_reduce_a_window_to_the_same_bits`가 네 설정을 `torch.equal`로
+  비교한다. `sort` 대 `topk`의 양쪽(7·27개는 `sort`, 33·75개는 `topk`)과, NaN 패딩과 짝수
+  유효 개수가 나오는 테두리 화소를 함께 지난다. RTX 2080 Ti에서 네 건 모두 bit-identical.
 
 - **시간 반지름은 프레임률을 따라야 한다.** 손상은 창이 덮는 **시간**을 따르지 프레임 수를
   따르지 않으므로, 레거시의 고정 `(2,2,2)`는 20 Hz 값이고 10 Hz 데이터를 과하게 뭉갠다 —

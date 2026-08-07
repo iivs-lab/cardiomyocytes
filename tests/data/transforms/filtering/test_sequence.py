@@ -404,3 +404,45 @@ def test_a_clean_sequence_is_untouched_by_the_check():
     filtered = FilteredSequence(_Frames(frames), IdentityKernel())
 
     assert torch.equal(filtered.get_item(1), torch.from_numpy(frames[1]))
+
+
+def test_a_value_only_a_wider_source_could_hold_is_refused():
+    # The check has to follow the cast, not precede it: 1e39 is an ordinary
+    # float64 and infinite as a float32, so a check on the source array passes
+    # and the tensor the kernel reduces is infinite anyway.
+    frames = _frames(3).astype(np.float64)
+    frames[1, 0, 0] = 1e39
+
+    filtered = FilteredSequence(_Frames(frames), IdentityKernel())
+
+    assert np.isfinite(frames).all()  # the source itself is clean
+    with pytest.raises(ValueError, match=r"non-finite value in 10"):
+        filtered.get_item(1)
+
+
+# ----------------------------- what memory is whose ----------------------- #
+
+
+def test_the_buffer_does_not_view_the_source_s_own_storage():
+    # `_Frames` hands back a slice of the array it keeps, as a memmap-backed
+    # source does -- and a float32 one needs no cast, so without the copy the
+    # buffer, the filter, and the caller all read the source's own memory.
+    frames = _frames(4)
+    sequence = FilteredSequence(_Frames(frames), MedianKernel((0, 0, 1)))
+    before = sequence[1]
+
+    frames[1] = 0.0  # the source changes under a window already read
+
+    assert torch.equal(sequence[1], before)
+
+
+def test_the_frame_handed_back_is_not_a_view_of_the_buffer():
+    # The identity kernel returns its target frame, which is the buffered one;
+    # a caller normalizing in place would rewrite the window behind it, and the
+    # next read of a neighbour would see the normalized values.
+    frames = _frames(4)
+    sequence = FilteredSequence(_Frames(frames), IdentityKernel())
+
+    sequence[1].fill_(0.0)
+
+    assert torch.equal(sequence[1], torch.from_numpy(frames[1]))

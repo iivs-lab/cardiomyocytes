@@ -41,14 +41,16 @@ class IdentityKernel(FilterKernel):
             target: index in `window` of the frame to return.
 
         Returns:
-            That frame, as a view rather than a copy.
+            That frame, copied out of `window` rather than viewed: no filtering
+            still means a frame of the caller's own, since the one behind it is
+            the buffer the next window is built from.
 
         Raises:
             ValueError: If `target` is not an index into `window`.
         """
         self._validate_target(window, target)
 
-        return window[target]
+        return window[target].clone()
 
 
 @dataclass(frozen=True, slots=True)
