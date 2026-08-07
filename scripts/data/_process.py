@@ -67,6 +67,10 @@ class SourceConfig:
     exclude: list[str] | str | None = None
     frame_step: int = 1
 
+    def frame_folder(self) -> str:
+        """Return where a sequence keeps its frames, with the default filled in."""
+        return unwrap_or_default(self.subpath, PHASE_FLOAT_BIN)
+
 
 @dataclass
 class TargetConfig:
@@ -93,19 +97,18 @@ class TargetConfig:
     save_ranges: bool = True
     range_file: str = "value_range"
 
+    def frame_folder(self, read_at: str) -> str:
+        """Return where a written sequence keeps its frames.
+
+        Args:
+            read_at: where the source keeps its own, which an unset `subpath`
+                follows so a written tree is laid out like the one it came from.
+        """
+        return unwrap_or_default(self.subpath, read_at)
+
 
 SELECTION_LIMIT: Final = 5
 SELECTION_SPECS: Final = (".json", ".txt")
-
-
-def _subpath(source_config: SourceConfig) -> str:
-    """Which folder of a time lapse a run reads, defaulted in one place."""
-    return unwrap_or_default(source_config.subpath, PHASE_FLOAT_BIN)
-
-
-def _target_subpath(source_config: SourceConfig, target_config: TargetConfig) -> str:
-    """Where a written sequence keeps its frames, defaulted in one place."""
-    return unwrap_or_default(target_config.subpath, _subpath(source_config))
 
 
 def _validate_source(source: PhaseFileFolder, name: str) -> None:
@@ -167,8 +170,8 @@ def _validate_output_root(
     if not write_root.is_relative_to(source_root):
         return
 
-    read_at = PurePath(_subpath(source_config))
-    write_at = PurePath(_target_subpath(source_config, target_config))
+    read_at = PurePath(source_config.frame_folder())
+    write_at = PurePath(target_config.frame_folder(read_at.as_posix()))
     if not (read_at.is_relative_to(write_at) or write_at.is_relative_to(read_at)):
         return
 
@@ -201,7 +204,7 @@ def log_source_config(source_config: SourceConfig, logger: Logger) -> None:
     """Log what a run reads, naming only the settings that were moved."""
     log_indented(logger, "source: %s", source_config.root, depth=0)
 
-    log_indented(logger, "reading <sequence>/%s", _subpath(source_config))
+    log_indented(logger, "reading <sequence>/%s", source_config.frame_folder())
 
     if (step := source_config.frame_step) > 1:
         kept = ", ".join(str(index * step) for index in range(3))
@@ -268,7 +271,7 @@ def log_configs(
     log_filter_config(kernel_config, logger)
 
     if target_config is not None:
-        subpath = _target_subpath(source_config, target_config)
+        subpath = target_config.frame_folder(source_config.frame_folder())
         log_target_config(target_config, logger, subpath=subpath)
 
 
@@ -287,7 +290,7 @@ def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
             a frame. The first two are told apart, since they are fixed
             differently.
     """
-    subpath = _subpath(config)
+    subpath = config.frame_folder()
 
     folders = search_phase_bin_folders(config.root, subpath=subpath)
     if (num_folders := len(folders)) == 0:
@@ -328,7 +331,7 @@ def build_sequences(
         The sequences, in the order the search found them.
     """
     sources = search_sources(source_config)
-    subpath = _subpath(source_config)
+    subpath = source_config.frame_folder()
 
     kernel = kernel_config.build()
 
@@ -373,11 +376,11 @@ def build_branches(
 
     branches = []
 
-    subpath = _subpath(source_config)
+    subpath = source_config.frame_folder()
     overwrite = target_config.overwrite
 
     if target_config.save_frames:
-        written_at = _target_subpath(source_config, target_config)
+        written_at = target_config.frame_folder(subpath)
         branches.append(FrameTree(output_root, written_at, overwrite=overwrite))
 
     if target_config.save_ranges:
