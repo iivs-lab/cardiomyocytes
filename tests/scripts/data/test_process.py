@@ -99,6 +99,25 @@ def test_a_root_holding_nothing_and_an_empty_selection_are_told_apart(
         )
 
 
+def test_a_sequence_missing_a_frame_is_refused_by_name(phase_tree, tmp_path):
+    # The one that would be believed: discovery is a name pattern and a sort, so
+    # a gap opens as an ordinary shorter sequence. The filter would then treat
+    # the frames either side of it as neighbours, and the tree written back out
+    # is numbered from zero without a gap -- leaving the run reporting success
+    # over numbers that are wrong by the width of the gap. Refused for the whole
+    # dataset rather than per item, and the name says which sequence to fix.
+    (phase_tree / "TL_01" / PHASE_FLOAT_BIN / "00002_phase.bin").unlink()
+    dest = tmp_path / "out"
+
+    with pytest.raises(ValueError, match=r"TL_01: non-contiguous"):
+        search_sources(SourceConfig(root=str(phase_tree)))
+
+    with pytest.raises(ValueError, match=r"TL_01: non-contiguous"):
+        _scan(phase_tree, dest, 0)
+
+    assert not dest.exists()
+
+
 def test_a_sequence_knows_what_it_is_called_in_its_dataset(phase_tree):
     # Derived from the folder it was opened over, so a side branch reading the
     # name cannot land somewhere the frames did not come from.
