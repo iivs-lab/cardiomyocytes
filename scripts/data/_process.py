@@ -3,6 +3,7 @@ from __future__ import annotations
 __all__ = (
     "SourceConfig",
     "TargetConfig",
+    "TreeConfig",
     "build_branches",
     "build_phase_stages",
     "build_sequences",
@@ -54,7 +55,30 @@ SELECTION_SPECS: Final = (".json", ".txt")
 
 
 @dataclass
-class SourceConfig:
+class TreeConfig:
+    """A tree of sequences, and where inside one of them the frames sit.
+
+    What a run reads and what it writes are the same shape, so the pair of
+    settings that says where a tree is lives here once. An unset `subpath` is
+    a question rather than an answer: whoever resolves it says what it stands
+    for, since the source's own layout and the target's are not the same
+    default.
+
+    Attributes:
+        root: the folder the sequences sit under.
+        subpath: where a sequence's frames sit inside its own folder, or `None`
+            to take whatever it is resolved against.
+    """
+
+    root: str = MISSING
+    subpath: str | None = None
+
+    def resolve_subpath(self, default: str = DEFAULT_SUBPATH) -> str:
+        return unwrap_or_default(self.subpath, default)
+
+
+@dataclass
+class SourceConfig(TreeConfig):
     """Which sequences a run reads, and how much of each.
 
     Attributes:
@@ -67,18 +91,13 @@ class SourceConfig:
         frame_step: take every `frame_step`th frame of each sequence.
     """
 
-    root: str = MISSING
-    subpath: str | None = None
     include: list[str] | str | None = None
     exclude: list[str] | str | None = None
     frame_step: int = 1
 
-    def resolve_subpath(self, default: str = DEFAULT_SUBPATH) -> str:
-        return unwrap_or_default(self.subpath, default)
-
 
 @dataclass
-class TargetConfig:
+class TargetConfig(TreeConfig):
     """What a run writes, and where.
 
     Attributes:
@@ -95,15 +114,10 @@ class TargetConfig:
             extension.
     """
 
-    root: str = MISSING
-    subpath: str | None = None
     overwrite: bool = False
     save_frames: bool = False
     save_ranges: bool = True
     range_file: str = "value_range"
-
-    def resolve_subpath(self, default: str = DEFAULT_SUBPATH) -> str:
-        return unwrap_or_default(self.subpath, default)
 
 
 def _validate_target(
