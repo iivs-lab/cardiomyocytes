@@ -68,7 +68,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `compute.lifespan` retires a worker and starts a fresh one under the same id.
   One file per worker rather than per stage, so a job that filters and then
   estimates reads in order. The parent's own file keeps the configuration, the
-  per-item verdicts and the summary; `report_insights` goes there too, and says
+  per-item verdicts and the summary; `log_insights` goes there too, and says
   so when a lone worker means no pool collected any.
 - `IncompleteRunError`, raised once every other item has finished. `mpire`
   re-raises a task's exception in the parent and tears the pool down, so a run
@@ -169,7 +169,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The script helpers split by what they know: `scripts/_hydra.py` holds the
   hydra boundary (`apply_schema`, `output_directory`, `is_multirun`),
   `scripts/_compute.py` the machine's division (`ComputeConfig`, `plan_devices`,
-  `pin_threads`, `report_insights`). `scripts/_config.py` is gone into the
+  `pin_threads`, `log_insights`). `scripts/_config.py` is gone into the
   first.
 - The pipeline pieces sit under `iivs_cardio/data/pipeline/`, leaving
   `scripts/data/` with the two hydra bridges (`_filtering.py` for the kernel,
