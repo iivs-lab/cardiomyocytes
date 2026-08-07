@@ -40,8 +40,8 @@ def main(cfg: DictConfig) -> None:
         source_config,
         target_config,
         filter_config,
-        name=STAGE,
         output_root=log_folder.root,
+        name=STAGE,
     )
 
     run_all(stages, compute_config, unit="seq", log_folder=log_folder)

@@ -118,22 +118,25 @@ def test_a_target_asking_for_nothing_is_refused(phase_tree, tmp_path):
     target = TargetConfig(root=str(tmp_path), save_frames=False, save_ranges=False)
 
     with pytest.raises(ValueError, match=r"nothing to do"):
-        build_phase_stages(source, target, name=STAGE)
+        build_phase_stages(source, target, name=STAGE, output_root=tmp_path)
 
 
-def test_a_factory_offers_one_stage_per_sequence(phase_tree):
-    stages = build_phase_stages(SourceConfig(root=str(phase_tree)), name=STAGE)
+def test_a_factory_offers_one_stage_per_sequence(phase_tree, tmp_path):
+    source = SourceConfig(root=str(phase_tree))
+    stages = build_phase_stages(source, name=STAGE, output_root=tmp_path)
 
     assert len(stages) == SEQUENCES
 
 
 def test_a_run_without_a_target_writes_nothing(phase_tree, tmp_path):
     # `target_config=None` is how a run that only reads -- a cached source, or a
-    # timing pass -- says it wants no side branch.
+    # timing pass -- says it wants no side branch. The root is still named, so
+    # what keeps it empty is the missing target rather than a missing place.
     dest = tmp_path / "out"
+    source = SourceConfig(root=str(phase_tree))
     compute = ComputeConfig(device="cpu", workers=0, progress_bar=False)
 
-    run_all(build_phase_stages(SourceConfig(root=str(phase_tree)), name=STAGE), compute)
+    run_all(build_phase_stages(source, name=STAGE, output_root=dest), compute)
 
     assert not dest.exists()
 
@@ -353,8 +356,8 @@ def _branches(tmp_path, *, roster=("TL_00",), subpath=None, step=1, **target):
         source,
         config,
         parse_filter_config(None),
+        tmp_path,
         list(roster),
-        output_root=tmp_path,
     )
 
 
@@ -400,7 +403,7 @@ def test_the_selection_stays_out_of_the_settings(tmp_path):
     config = TargetConfig(root=str(tmp_path), save_ranges=True)
 
     (document,) = build_branches(
-        source, config, parse_filter_config(None), ["TL_00"], output_root=tmp_path
+        source, config, parse_filter_config(None), tmp_path, ["TL_00"]
     )
 
     assert set(document.settings["source"]) == {"subpath", "frame_step"}

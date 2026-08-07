@@ -22,7 +22,7 @@ from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import PhaseFileFolder, PhaseUnit, search_phase_bin_folders
 from kaparoo.filesystem import ensure_file_extension, stringify_path
 from kaparoo.filesystem.search import select
-from kaparoo.utils.optional import unwrap_or_default, unwrap_or_factory
+from kaparoo.utils.optional import unwrap_or_default
 from omegaconf import MISSING
 
 from iivs_cardio.common.logging import log_indented
@@ -33,7 +33,6 @@ from iivs_cardio.data.pipeline import (
     PhaseStageFactory,
     RangeDocument,
 )
-from scripts._hydra import output_directory
 from scripts.data._filtering import describe_filter_kernel, parse_filter_config
 
 if TYPE_CHECKING:
@@ -201,9 +200,8 @@ def build_branches(
     source_config: SourceConfig,
     target_config: TargetConfig,
     kernel_config: KernelConfig,
+    output_root: StrPath,
     expected: Sequence[str],
-    *,
-    output_root: StrPath | None = None,
 ) -> list[SideBranch[PhaseFilteredSequence, Tensor, Path]]:
     if not (target_config.save_ranges or target_config.save_frames):
         msg = "nothing to do: set `target.save_ranges` or `target.save_frames`"
@@ -211,15 +209,14 @@ def build_branches(
 
     branches = []
 
-    root = unwrap_or_factory(output_root, output_directory)
     subpath = _subpath(source_config)
     overwrite = target_config.overwrite
 
     if target_config.save_frames:
-        branches.append(FrameTree(root, subpath, overwrite=overwrite))
+        branches.append(FrameTree(output_root, subpath, overwrite=overwrite))
 
     if target_config.save_ranges:
-        path = Path(root, target_config.range_file)
+        path = Path(output_root, target_config.range_file)
         source = source_config.root
         settings = {
             "source": {"subpath": subpath, "frame_step": source_config.frame_step},
@@ -238,8 +235,8 @@ def build_phase_stages(
     target_config: TargetConfig | None = None,
     filter_config: DictConfig | None = None,
     *,
+    output_root: StrPath,
     name: str,
-    output_root: StrPath | None = None,
 ) -> PhaseStageFactory:
     kernel_config = parse_filter_config(filter_config)
 
@@ -253,8 +250,8 @@ def build_phase_stages(
             source_config,
             target_config,
             kernel_config,
+            output_root,
             [sequence.name for sequence in sequences],
-            output_root=output_root,
         )
 
     return PhaseStageFactory(sequences, *branches, name=name)
