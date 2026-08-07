@@ -252,6 +252,21 @@ def test_visible_cuda_devices_agree_with_the_driver():
     assert len(Device.visible_cuda()) == expected
 
 
+def test_counting_the_devices_does_not_initialize_cuda_here(monkeypatch):
+    # `is_available()` initializes CUDA in whoever calls it, and a pool that
+    # forks after that gives every worker a context it cannot use -- which is a
+    # run that walks the whole dataset and fails every item of it. Planning the
+    # devices happens before the pool starts, so the count has to come from the
+    # driver query, which answers the same without initializing anything.
+    def fail() -> bool:
+        pytest.fail("`is_available` would initialize CUDA before the pool starts")
+
+    count = torch.cuda.device_count()
+    monkeypatch.setattr(torch.cuda, "is_available", fail)
+
+    assert len(Device.visible_cuda()) == count
+
+
 @pytest.mark.skipif(
     not torch.cuda.is_available(), reason="no CUDA-capable GPU detected"
 )

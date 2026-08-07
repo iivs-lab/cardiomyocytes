@@ -20,8 +20,14 @@ type DeviceLike = str | torch.device | Device
 
 
 def _cuda_count() -> int:
-    """How many CUDA devices the driver reports, 0 when there is no driver."""
-    return torch.cuda.device_count() if torch.cuda.is_available() else 0
+    """How many CUDA devices the driver reports, 0 when there is no driver.
+
+    Deliberately not guarded by `torch.cuda.is_available()`, which initializes
+    CUDA in whichever process asks: a pool started by forking after that gives
+    every worker a context it cannot use. This answers without doing so, and
+    already answers 0 where the guard was there to.
+    """
+    return torch.cuda.device_count()
 
 
 # `slots=True` is deliberately absent: it removes the instance `__dict__` that

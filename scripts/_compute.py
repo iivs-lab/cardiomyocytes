@@ -37,6 +37,10 @@ if TYPE_CHECKING:
 
 DEFAULT_WORKERS: Final = unwrap_or_default(os.cpu_count(), 1)
 
+# Named rather than left to `mpire`, which forks where the platform allows it.
+# A worker cannot inherit this process's CUDA context, only start its own.
+START_METHOD: Final = "spawn"
+
 _UNPINNED_THREADS: Final = torch.get_num_threads()
 
 
@@ -381,6 +385,7 @@ def run_all(
                         shared_objects=context,
                         pass_worker_id=True,
                         enable_insights=config.measure_workers,
+                        start_method=START_METHOD,
                     ) as pool:
                         outcomes = pool.imap(
                             _run_on_worker,

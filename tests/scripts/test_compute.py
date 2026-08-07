@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
+from mpire import WorkerPool
 
 from scripts._compute import (
     DEFAULT_WORKERS,
@@ -161,6 +162,23 @@ def test_a_run_with_no_items_starts_no_pool(tmp_path, workers):
     # `plan_devices` is capped at the item count, so an empty run plans no worker
     # at all and must not reach `WorkerPool`, which cannot be asked for none.
     run_all(_Stages(0, tmp_path / "done"), _compute(workers))
+
+
+def test_the_pool_starts_its_workers_fresh_rather_than_forked(tmp_path, monkeypatch):
+    # Spied rather than observed, because the platform this runs on has no fork
+    # to get wrong. `mpire` takes it where it can, and this run has already asked
+    # the driver about the GPUs by the time the pool starts, so a forked worker
+    # would inherit a CUDA context it cannot use and fail every item it took.
+    started = {}
+
+    def spy(*args, **kwargs):
+        started.update(kwargs)
+        return WorkerPool(*args, **kwargs)
+
+    monkeypatch.setattr("scripts._compute.WorkerPool", spy)
+    run_all(_Stages(2, tmp_path / "done"), _compute(2))
+
+    assert started["start_method"] == "spawn"
 
 
 @pytest.fixture()
