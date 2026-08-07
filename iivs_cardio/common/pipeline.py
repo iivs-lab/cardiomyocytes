@@ -12,7 +12,7 @@ __all__ = (
 
 import logging
 from abc import ABC, abstractmethod
-from contextlib import AbstractContextManager, ExitStack
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, Self, override, runtime_checkable
 
@@ -120,6 +120,35 @@ class StageFactory(Protocol):
     def run_stage(self, index: int, device: Device, /) -> None: ...
 
     def running(self) -> AbstractContextManager[Any]: ...
+
+
+def _close_hooks(
+    hooks: list[AbstractContextManager[Any]], error: BaseException | None
+) -> None:
+    """Close every hook in `hooks`, in reverse, each told only about `error`.
+
+    Args:
+        hooks: the hooks to close, in the order they were opened.
+        error: what the walk they bracket ended with, or `None` if it finished.
+
+    Raises:
+        BaseException: What closing raised, once every hook has been closed
+            rather than at the one that raised it. Only the first is carried,
+            since a second means the destination itself has gone.
+    """
+    failure: BaseException | None = None
+
+    for hook in reversed(hooks):
+        try:
+            if error is None:
+                hook.__exit__(None, None, None)
+            else:
+                hook.__exit__(type(error), error, error.__traceback__)
+        except BaseException as closing:  # noqa: BLE001
+            failure = failure or closing
+
+    if failure is not None:
+        raise failure
 
 
 class Stage[T, E = None](ABC):
@@ -256,14 +285,28 @@ class Stage[T, E = None](ABC):
         Hooks that are context managers are opened before the walk and closed
         after it, so a hook that gathers across indices commits at the end and
         leaves nothing half finished if the walk stops early.
+
+        Every hook is closed against the walk's own outcome and never against
+        another hook's. They are siblings writing separate outputs, so one that
+        cannot commit must not tell the rest their work failed. A hook cannot
+        suppress the walk's failure either: the driver's verdict for the whole
+        run is that exception reaching it.
         """
-        with ExitStack() as stack:
+        opened: list[AbstractContextManager[Any]] = []
+
+        try:
             for hook in self._all_hooks():
                 if isinstance(hook, AbstractContextManager):
-                    stack.enter_context(hook)
+                    hook.__enter__()
+                    opened.append(hook)
 
             for _ in self:
                 pass
+        except BaseException as error:
+            _close_hooks(opened, error)
+            raise
+
+        _close_hooks(opened, None)
 
 
 class SequenceStage[T, M](Stage[T, M]):

@@ -75,10 +75,15 @@ class _Sequence:
 
 
 class _Managed:
-    """A hook that also wants opening and closing, the way a writer does."""
+    """A hook that also wants opening and closing, the way a writer does.
 
-    def __init__(self) -> None:
+    `fails_closing` is the branch that cannot commit: it records the attempt and
+    then raises, standing in for a part file that could not be written.
+    """
+
+    def __init__(self, fails_closing: str | None = None) -> None:
         self.events: list[str] = []
+        self._fails_closing = fails_closing
 
     def __call__(self, step: Step[str, None]) -> None:
         self.events.append(f"see{step.index}")
@@ -89,6 +94,9 @@ class _Managed:
 
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         self.events.append("abort" if exc_type is not None else "close")
+
+        if self._fails_closing is not None:
+            raise OSError(self._fails_closing)
 
 
 class TestStep:
@@ -342,6 +350,61 @@ class TestStageRun:
 
         assert first.events == ["open", "see0", "abort"]
         assert second.events == ["open", "see0", "abort"]
+
+    def test_one_hook_failing_to_close_does_not_abort_the_others(self) -> None:
+        # The two are siblings writing separate outputs -- a frame tree and the
+        # document that indexes it -- so a part file that cannot be written must
+        # not tell the writer its 306 committed frames failed. Sharing one
+        # `ExitStack` did exactly that: it hands each callback whatever the last
+        # one raised, which is right for nested `with` and wrong for siblings.
+        first, second = _Managed(), _Managed("could not write the part file")
+        stage = _Fixed("a").register_hooks(first, second)
+
+        with pytest.raises(OSError, match="could not write the part file"):
+            stage.run()
+
+        assert first.events == ["open", "see0", "close"]
+        assert second.events == ["open", "see0", "close"]
+
+    def test_every_hook_is_closed_before_a_closing_failure_rises(self) -> None:
+        # The one that could not close is reached first, so a hook that has not
+        # been given its chance to commit is the whole point of finishing the
+        # sweep rather than raising where the failure happened.
+        first, second = _Managed(), _Managed("gone")
+        stage = _Fixed("a", "b").register_hooks(first, second)
+
+        with pytest.raises(OSError, match="gone"):
+            stage.run()
+
+        assert first.events[-1] == "close"
+
+    def test_the_first_closing_failure_is_the_one_that_rises(self) -> None:
+        # Closing runs in reverse, so the first failure is the last hook's. A
+        # second one means the destination itself has gone, which the first says
+        # already.
+        first, second = _Managed("the writer went first"), _Managed("and so did I")
+        stage = _Fixed("a").register_hooks(first, second)
+
+        with pytest.raises(OSError, match="and so did I"):
+            stage.run()
+
+        assert first.events == ["open", "see0", "close"]
+
+    def test_a_walk_that_failed_still_reaches_a_hook_that_cannot_close(self) -> None:
+        # The walk's own failure goes to every hook, including one whose close
+        # then fails -- and that failure is what rises, chained to the walk's.
+        def explode(step: Step[str, None]) -> None:
+            msg = "the walk gave up"
+            raise RuntimeError(msg)
+
+        managed = _Managed("and the branch could not commit")
+        stage = _Fixed("a").register_hooks(managed, explode)
+
+        with pytest.raises(OSError, match="could not commit") as failure:
+            stage.run()
+
+        assert managed.events == ["open", "see0", "abort"]
+        assert isinstance(failure.value.__context__, RuntimeError)
 
     def test_running_the_top_fires_a_hook_further_down(self) -> None:
         seen: list[int] = []
