@@ -286,6 +286,32 @@ def test_reassigning_the_same_device_keeps_the_buffered_window():
     assert source.reads == reads
 
 
+def test_releasing_drops_the_buffered_window():
+    # The window is whatever the last read needed, and nothing else lets go of
+    # it -- a driver holding every sequence of a dataset for the whole run holds
+    # one window per sequence with it, on the device, and again in each worker.
+    source = _Frames(_frames(4))
+    sequence = FilteredSequence(source, MedianKernel((0, 0, 1)))
+    _ = sequence[1]
+    reads = source.reads
+
+    sequence.release()
+    _ = sequence[1]
+
+    assert source.reads > reads
+
+
+def test_a_released_view_still_answers():
+    # Letting go is not closing: the frames come back off the source.
+    source = _Frames(_frames(4))
+    sequence = FilteredSequence(source, MedianKernel((0, 0, 1)))
+    before = sequence[1]
+
+    sequence.release()
+
+    assert torch.equal(sequence[1], before)
+
+
 def test_changing_the_device_drops_the_buffered_window():
     # Buffered frames sit on the old device, so they cannot be reused. Routed back
     # to the cpu so the re-read runs here; `Device.resolve` never touches a driver.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from pathlib import Path
@@ -15,6 +16,7 @@ from iivs.dhm.data.phase import (
     save_phase_bin,
 )
 
+from iivs_cardio.common.device import Device
 from iivs_cardio.data.pipeline import FrameTree, PhaseStageFactory, RangeDocument
 from scripts._compute import ComputeConfig, IncompleteRunError, run_all
 from scripts.data._filtering import parse_filter_config
@@ -539,6 +541,38 @@ class _Branch:
 
     def report(self) -> str | None:
         return self._line
+
+
+class _Exploding:
+    """A side branch whose hook gives up part way through a sequence."""
+
+    def get_hook(self, source):
+        def hook(step: object) -> None:
+            msg = "the branch gave up"
+            raise RuntimeError(msg)
+
+        return hook
+
+
+@pytest.mark.parametrize("branch", (_Branch(None), _Exploding()))
+def test_a_finished_sequence_lets_go_of_its_window(phase_tree, monkeypatch, branch):
+    # The factory holds every sequence for the whole run, so a window kept past
+    # the item it belongs to is kept to the end -- once per sequence, on the
+    # device, and again in each worker's own copy of them. A sequence that gave
+    # up holds one too, so the release has to happen either way. Spied rather
+    # than measured, since what the release costs is a device this test has no
+    # reason to need.
+    sequences, _ = build_sequences(
+        SourceConfig(root=str(phase_tree)), parse_filter_config(None)
+    )
+    stages = PhaseStageFactory(sequences, branch, name=STAGE)
+    released: list[str] = []
+    monkeypatch.setattr(sequences[0], "release", lambda: released.append("let go"))
+
+    with contextlib.suppress(RuntimeError):
+        stages.run_stage(0, Device("cpu"))
+
+    assert released == ["let go"]
 
 
 def test_a_branch_with_nothing_to_say_adds_no_line(phase_tree, caplog):

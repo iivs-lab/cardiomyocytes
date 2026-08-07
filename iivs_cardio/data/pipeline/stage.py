@@ -118,15 +118,23 @@ class PhaseStageFactory:
         The sequence's name heads a block and everything else hangs under it,
         so a reader skimming the left margin sees one entry per sequence. Every
         branch that has something to say says it after it committed.
+
+        The sequence lets go of its window afterwards, whether it finished or
+        gave up. Every sequence of the run is held for the whole of it, so a
+        window kept past the item it belongs to is held to the end -- once per
+        sequence, on the device, and again in each worker's own copy.
         """
         sequence = self._sequences[index]
 
         self._log("%s", sequence.name, nested=False)
         self._log("filtering %d frames on %s", len(sequence), device)
 
-        with Timer("s") as timer:
-            stage = self.get_stage(index, device)
-            stage.run()
+        try:
+            with Timer("s") as timer:
+                stage = self.get_stage(index, device)
+                stage.run()
+        finally:
+            sequence.release()
 
         for line in _reports(stage.hooks):
             self._log("%s", line)

@@ -95,6 +95,17 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
             self._buffer.clear()
         self._device = device
 
+    def release(self) -> None:
+        """Drop the buffered window, leaving the view usable.
+
+        Nothing else lets go of it: the window is whatever the last read needed,
+        so a view that has been walked to the end keeps that much on its device
+        for as long as anything holds the view. A caller that has finished with
+        a sequence but not with the object says so here, and one that reads
+        again simply pays for the frames a second time.
+        """
+        self._buffer.clear()
+
     @classmethod
     def from_config(
         cls,
