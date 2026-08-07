@@ -29,7 +29,7 @@ from kaparoo.filesystem import (
     search_files,
     stringify_path,
 )
-from kaparoo.filters import EndsWith
+from kaparoo.filters import And, EndsWith, StartsWith
 from kaparoo.utils.optional import unwrap_or_default
 
 from iivs_cardio.common.range import finite_range
@@ -542,9 +542,8 @@ class RangeDocument:
         collects them: they are hidden from `list_parts`, and the only other
         hand on them dies with the process that staged them.
         """
-        found = search_files(self.parts_root, name_filter=EndsWith(".tmp"))
-
-        return [path for path in found if path.name.startswith(".")]
+        temp_filter = And((StartsWith("."), EndsWith(".tmp")))
+        return search_files(self.parts_root, name_filter=temp_filter)
 
     def _source_of(self, part: Path) -> str:
         """The sequence a part belongs to, read back from where it sits."""
