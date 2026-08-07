@@ -111,25 +111,22 @@ SELECTION_LIMIT: Final = 5
 SELECTION_SPECS: Final = (".json", ".txt")
 
 
-def _validate_target_config(target_config: TargetConfig) -> None:
-    """Raise if `target_config` names no side branch to write through."""
-    if not (target_config.save_ranges or target_config.save_frames):
-        msg = "nothing to do: set `target.save_ranges` or `target.save_frames`"
-        raise ValueError(msg)
-
-
-def _validate_output_root(
+def _validate_target(
     source_config: SourceConfig, target_config: TargetConfig, output_root: StrPath
 ) -> None:
-    """Raise if the frames would be written where they are read from.
+    """Raise unless the target names an output this run can safely write.
+
+    Both refusals are configuration errors, so neither costs a read: a target
+    with no branch at all is a mistake rather than a way to ask for a run that
+    only reads, and one whose frames would land on the source destroys what the
+    run is about to read.
 
     A sequence is written by replacing its folder whole, so a destination that
-    is a source folder, holds one, or sits inside one destroys what the run is
-    reading. A destination the source search would find again is refused on the
-    same footing: a later run would take this run's output for more sequences.
-
-    Writing beside the source is left open, since a filtered tree kept next to
-    the raw one under a name of its own collides with neither.
+    is a source folder, holds one, or sits inside one is refused. So is one the
+    source search would find again, since a later run would take this run's
+    output for more sequences. Writing beside the source is left open: a
+    filtered tree kept next to the raw one under a name of its own collides
+    with neither.
 
     Args:
         source_config: what the run reads.
@@ -137,8 +134,13 @@ def _validate_output_root(
         output_root: where the branches write.
 
     Raises:
-        ValueError: If the destination and the source overlap.
+        ValueError: If the target writes nothing, or the frames it writes would
+            land on the source they are read from.
     """
+    if not (target_config.save_ranges or target_config.save_frames):
+        msg = "nothing to do: set `target.save_ranges` or `target.save_frames`"
+        raise ValueError(msg)
+
     if not target_config.save_frames:
         return
 
@@ -355,8 +357,7 @@ def build_branches(
             than a way to ask for a run that only reads, or if the frames it
             writes would land on the source they are read from.
     """
-    _validate_target_config(target_config)
-    _validate_output_root(source_config, target_config, output_root)
+    _validate_target(source_config, target_config, output_root)
 
     branches = []
 
@@ -417,8 +418,7 @@ def build_phase_stages(
     log_configs(source_config, target_config, kernel_config, name=name)
 
     if target_config is not None:
-        _validate_target_config(target_config)
-        _validate_output_root(source_config, target_config, output_root)
+        _validate_target(source_config, target_config, output_root)
 
     sequences = build_sequences(source_config, kernel_config)
     branches = []
