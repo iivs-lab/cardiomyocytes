@@ -894,3 +894,29 @@ def test_a_part_holding_a_backwards_range_is_named_too(tmp_path):
 
     with pytest.raises(ValueError, match=r"unreadable part 'a'.*inverted range"):
         document.to_range()
+
+
+def test_a_meter_takes_its_part_back_when_a_sibling_cannot_commit(tmp_path):
+    # The document counts a sequence as covered when its part is there, so a
+    # part outliving the frames it was measured beside would be counted while
+    # nothing of that sequence is on disk.
+    meter = _meter(tmp_path, "a")
+    _scan(meter, (0.0, 1.0))
+    part = tmp_path / "range.parts" / "a.json"
+    assert part.exists()
+
+    meter.revert()
+
+    assert not part.exists()
+
+
+def test_a_meter_that_wrote_nothing_reverts_to_nothing(tmp_path):
+    # A meter closed after an error writes no part, so reverting has nothing of
+    # its own to remove -- and must not reach for a name someone else holds.
+    meter = _meter(tmp_path, "a")
+    (tmp_path / "range.parts").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "range.parts" / "a.json").write_text("theirs", encoding="utf-8")
+
+    meter.revert()
+
+    assert (tmp_path / "range.parts" / "a.json").read_text(encoding="utf-8") == "theirs"

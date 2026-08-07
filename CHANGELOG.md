@@ -171,7 +171,50 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rather than patching one: `MedianKernel` pads out-of-range neighbours with NaN
   and counts the valid ones, and a frame whose whole neighbourhood was NaN drove
   that count to zero and the gather to index `-1`. With finite input the centre
-  is always valid, so the case cannot arise.
+  is always valid, so the pipeline cannot reach it; the index is clamped anyway,
+  since `apply` is a public function of its arguments and on CUDA that gather is
+  a device-side assert that takes the worker's context with it.
+- Sibling branches that could not all commit take back what did. Closing them
+  in turn is not one commit, so the range document's part reached disk and the
+  frame tree failed to move a moment later, leaving a part standing for a
+  sequence with no frames -- and a part is what `coverage` counts as covered,
+  so no number in the finished document showed it. `Reverting` is the hook that
+  can undo a clean close, `close_together` calls it on everything that closed
+  before the failure, and `SequenceRangeMeter` removes the part it wrote. Only
+  worth having where undoing is possible: a frame tree that replaced a folder
+  already there cannot put that one back. The reverse direction needs nothing,
+  since a sequence whose part is missing is named in `coverage.skipped`.
+- `KoalaFrameWriter` numbers frames from the first one that arrives rather than
+  from the step index, so a stream with nothing to say until its second step
+  writes a folder numbered from zero. That is the ordinary shape of a stage
+  needing two frames to make one, and it used to be refused as
+  `non-contiguous frame 1: expected 0`. A gap between frames is still refused,
+  since renumbering would close it -- the same reason `search_sources` refuses
+  one at the source.
+- A range document refuses what a range cannot be, wherever it reads one back.
+  `isinstance(True, int)` is true, so `{"min_value": true, "max_value": false}`
+  read as `[1.0, 0.0]`, a range running backwards; a pair the wrong way round is
+  now refused however it was built. Non-finite bounds go too, and that is what
+  makes the fold order-independent: `min` and `max` carry a NaN through or drop
+  it depending on which part holds it, so `[2.0, nan, 1.0]` folded to `1.0` and
+  `[nan, 2.0, 1.0]` to `nan`. Documents are written with `allow_nan=False`,
+  since `json.dumps` writes `NaN` and `Infinity` by default and neither is JSON.
+  A part that cannot be read names itself, the fold reading them sorted rather
+  than in the order they were written.
+- Filtering hands back memory of its own. A float32 frame cast with
+  `.to(torch.float32)` is a no-op, so the window buffered a view of the source's
+  own storage -- a phase folder returns a slice of an array it keeps -- and
+  `IdentityKernel` then returned that same tensor to the caller; `FilterKernel`
+  now states that what comes back owns its memory. The non-finite check follows
+  the cast rather than preceding it, since a float64 `1e39` passes `isfinite`
+  and reaches the kernel as `inf`.
+- The default worker count follows this process's own affinity
+  (`os.process_cpu_count`), so a run under `taskset`, a cpuset, or a scheduler's
+  allocation sizes its pool to what it may use rather than to the host's cores.
+  A cgroup cpu quota is still not visible. The progress bar is left undrawn when
+  stderr is not a terminal, and the run says so: `tqdm` renders with a carriage
+  return, so a redirected pool writes one long line of fragments at the timer's
+  rate rather than the run's.
 - A sequence's range part is filed at `<document>.parts/<name>.json` with the
   name's own nesting, mirroring the frame tree written beside it, where it was
   percent-encoded into one flat file name. Entering prunes the folders its own

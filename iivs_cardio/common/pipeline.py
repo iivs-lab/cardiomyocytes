@@ -3,6 +3,7 @@ from __future__ import annotations
 __all__ = (
     "Hook",
     "Reporting",
+    "Reverting",
     "SequenceStage",
     "SideBranch",
     "Stage",
@@ -103,6 +104,23 @@ class Reporting(Protocol):
     def report(self) -> str | None: ...
 
 
+@runtime_checkable
+class Reverting(Protocol):
+    """A hook that can take back what closing it cleanly put in place.
+
+    Siblings closing one after another are not one commit, so a hook that got
+    its output onto disk may find that the next one could not. What it wrote
+    then stands for work the sequence did not finish, and this is how it is
+    taken back.
+
+    Only worth having where taking back is possible: a hook that replaced an
+    output already there cannot put that one back, and would destroy it twice
+    over by trying.
+    """
+
+    def revert(self) -> None: ...
+
+
 class StageFactory(Protocol):
     """The whole of what a driver needs to run a job's items.
 
@@ -137,12 +155,19 @@ def close_together(
         opened: what to close, in the order it was opened.
         error: what the block they bracket ended with, or `None` if it finished.
 
+    A close that fails takes its siblings' outputs with it, for those that can
+    take them back: closing in turn is not one commit, so without this a hook
+    that had already committed would leave an output standing for a sequence
+    that never finished. What cannot be reverted stays, which is why the run
+    fails rather than reporting the sequence done.
+
     Raises:
         BaseException: What closing raised, once everything has been closed
             rather than at the one that raised it. Only the first is carried,
             since a second means the destination itself has gone.
     """
     failure: BaseException | None = None
+    closed: list[AbstractContextManager[Any]] = []
 
     for hook in reversed(opened):
         try:
@@ -152,9 +177,17 @@ def close_together(
                 hook.__exit__(type(error), error, error.__traceback__)
         except BaseException as closing:  # noqa: BLE001
             failure = failure or closing
+        else:
+            closed.append(hook)
 
-    if failure is not None:
-        raise failure
+    if failure is None:
+        return
+
+    for hook in closed:
+        if isinstance(hook, Reverting):
+            hook.revert()
+
+    raise failure
 
 
 class Stage[T, E = None](ABC):

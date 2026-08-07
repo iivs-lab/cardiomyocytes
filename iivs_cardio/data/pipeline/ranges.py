@@ -307,7 +307,9 @@ class SequenceRangeMeter:
     keeps in memory comes back.
 
     A close that follows an error writes nothing, so a part on disk always
-    stands for a sequence that finished.
+    stands for a sequence that finished. A sibling of this meter failing to
+    commit is that same thing seen a moment later, and `revert` is how the part
+    goes with it.
 
     Args:
         root: the folder the part is written into, created if it is not there.
@@ -328,6 +330,7 @@ class SequenceRangeMeter:
         self._overwrite = overwrite
         self._frames: list[FrameRange] = []
         self._cached: SequenceRange | None = None
+        self._saved = False
 
     def __call__(self, step: Step[Tensor, Path]) -> None:
         """Measure `step`, so the meter can be registered as a hook directly."""
@@ -397,6 +400,21 @@ class SequenceRangeMeter:
             file.write(json.dumps(cache.to_dict(), indent=2, allow_nan=False))
 
         self._cached = cache
+        self._saved = True
+
+    def revert(self) -> None:
+        """Take back the part, if this meter got as far as writing one.
+
+        A part on disk stands for a sequence that finished, and one whose
+        siblings could not commit did not. Taking it back is what puts the
+        sequence back among the skipped rather than leaving the document
+        counting it as covered while its frames are nowhere.
+        """
+        if not self._saved:
+            return
+
+        self._path.unlink(missing_ok=True)
+        self._saved = False
 
 
 @dataclass(frozen=True, slots=True)

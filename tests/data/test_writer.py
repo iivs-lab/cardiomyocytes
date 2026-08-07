@@ -102,7 +102,7 @@ def test_a_gap_is_refused_rather_than_closed(tmp_path: Path) -> None:
     dest = tmp_path / "frames"
     steps = [Step(0, "a"), Step[str](1, None), Step[str](2, "c")]
 
-    with pytest.raises(ValueError, match=r"non-contiguous frame 2: expected 1"):
+    with pytest.raises(ValueError, match=r"frame 2 does not follow 0: expected 1"):
         _write_all(dest, steps)
 
     assert not dest.exists()
@@ -111,17 +111,39 @@ def test_a_gap_is_refused_rather_than_closed(tmp_path: Path) -> None:
 def test_a_repeated_step_is_refused(tmp_path: Path) -> None:
     dest = tmp_path / "frames"
 
-    with pytest.raises(ValueError, match=r"non-contiguous frame 0: expected 1"):
+    with pytest.raises(ValueError, match=r"frame 0 does not follow 0: expected 1"):
         _write_all(dest, [Step(0, "a"), Step(0, "again")])
 
     assert not dest.exists()
 
 
-def test_a_folder_not_starting_at_zero_is_refused(tmp_path: Path) -> None:
+def test_a_stream_that_starts_late_is_numbered_from_its_first_frame(
+    tmp_path: Path,
+) -> None:
+    # A stage needing two frames to make one says nothing at step 0, and that is
+    # the ordinary shape rather than a hole: the folder holds one frame per
+    # thing produced, numbered from zero, and nothing is missing from it.
     dest = tmp_path / "frames"
+    steps = [Step[str](0, None), Step(1, "a"), Step(2, "b")]
 
-    with pytest.raises(ValueError, match=r"non-contiguous frame 1: expected 0"):
-        _write_all(dest, [Step(1, "a")])
+    _write_all(dest, steps)
+
+    assert sorted(path.name for path in dest.iterdir()) == [
+        "00000_frame.txt",
+        "00001_frame.txt",
+    ]
+    assert (dest / "00000_frame.txt").read_text(encoding="utf-8") == "a"
+
+
+def test_a_late_start_is_not_a_licence_for_a_gap_after_it(tmp_path: Path) -> None:
+    # The two look alike from inside `write`: a step with nothing in it. What
+    # tells them apart is whether a frame has arrived yet, so the leading run
+    # being allowed must not carry over to a hole further along.
+    dest = tmp_path / "frames"
+    steps = [Step[str](0, None), Step(1, "a"), Step[str](2, None), Step(3, "c")]
+
+    with pytest.raises(ValueError, match=r"frame 3 does not follow 1: expected 2"):
+        _write_all(dest, steps)
 
     assert not dest.exists()
 

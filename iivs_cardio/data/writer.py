@@ -20,10 +20,15 @@ if TYPE_CHECKING:
 class KoalaFrameWriter[T]:
     """A hook that writes the frames it is given as a Koala folder.
 
-    Frames must arrive in order and without a gap, since the names they are
-    written under are counted from zero rather than taken from the source. A
-    step carrying no frame is passed over, which lets a sequence end early
-    without failing, but one missing in the middle is refused.
+    Names are counted from the first frame that arrives rather than taken from
+    the source, so a stream that has nothing to say until its second step still
+    writes a folder numbered from zero. That is the ordinary shape of a stage
+    that needs two frames to produce one.
+
+    What is refused is a gap between frames: renumbering would close it, and the
+    folder would then read as an unbroken sequence of whatever it does hold. A
+    step carrying no frame is passed over while none has arrived and after the
+    last one, which is what lets a sequence start late or end early.
 
     Nothing is moved into place until the writer closes cleanly. Closing after
     an error, or with no frame written at all, leaves the destination as it was.
@@ -57,24 +62,28 @@ class KoalaFrameWriter[T]:
         self._stem = stem
         self._ext = ext
         self._written = -1
+        self._source = -1
         self._committed = False
 
     def write(self, step: Step[T, Any]) -> None:
-        """Write the frame in `step`, numbered by the index it came from.
+        """Write the frame in `step`, numbered after the last one written.
 
         Raises:
-            ValueError: If the frame does not follow the last one written.
+            ValueError: If a frame does not follow the one before it at the
+                source, since the numbering here would close the gap.
         """
         if step.value is None:
             return
 
-        if step.index != (expected := self._written + 1):
-            msg = f"non-contiguous frame {step.index}: expected {expected}"
+        if self._written >= 0 and step.index != self._source + 1:
+            msg = f"frame {step.index} does not follow {self._source}: expected {self._source + 1}"
             raise ValueError(msg)
 
-        name = koala_frame_name(step.index, stem=self._stem, ext=self._ext)
+        name = koala_frame_name(self._written + 1, stem=self._stem, ext=self._ext)
         self._save(self._root.workdir / name, step.value)
-        self._written = step.index
+
+        self._written += 1
+        self._source = step.index
 
     def __call__(self, step: Step[T, Any]) -> None:
         """Write `step`, so the writer can be registered as a hook directly."""
