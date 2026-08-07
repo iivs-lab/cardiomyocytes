@@ -73,7 +73,7 @@ class SourceConfig:
     exclude: list[str] | str | None = None
     frame_step: int = 1
 
-    def frame_folder(self, default: str = DEFAULT_SUBPATH) -> str:
+    def resolve_subpath(self, default: str = DEFAULT_SUBPATH) -> str:
         return unwrap_or_default(self.subpath, default)
 
 
@@ -102,7 +102,7 @@ class TargetConfig:
     save_ranges: bool = True
     range_file: str = "value_range"
 
-    def frame_folder(self, default: str = DEFAULT_SUBPATH) -> str:
+    def resolve_subpath(self, default: str = DEFAULT_SUBPATH) -> str:
         return unwrap_or_default(self.subpath, default)
 
 
@@ -144,8 +144,8 @@ def _validate_target(
     if not write_root.is_relative_to(source_root):
         return
 
-    read_at = PurePath(source_config.frame_folder())
-    write_at = PurePath(target_config.frame_folder(read_at.as_posix()))
+    read_at = PurePath(source_config.resolve_subpath())
+    write_at = PurePath(target_config.resolve_subpath(read_at.as_posix()))
     if not (read_at.is_relative_to(write_at) or write_at.is_relative_to(read_at)):
         return
 
@@ -178,7 +178,7 @@ def log_source_config(source_config: SourceConfig, logger: Logger) -> None:
     """Log what a run reads, naming only the settings that were moved."""
     log_indented(logger, "source: %s", source_config.root, depth=0)
 
-    log_indented(logger, "reading <sequence>/%s", source_config.frame_folder())
+    log_indented(logger, "reading <sequence>/%s", source_config.resolve_subpath())
 
     if (step := source_config.frame_step) > 1:
         kept = ", ".join(str(index * step) for index in range(3))
@@ -245,7 +245,7 @@ def log_configs(
     log_filter_config(kernel_config, logger)
 
     if target_config is not None:
-        subpath = target_config.frame_folder(source_config.frame_folder())
+        subpath = target_config.resolve_subpath(source_config.resolve_subpath())
         log_target_config(target_config, logger, subpath=subpath)
 
 
@@ -266,7 +266,7 @@ def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
             a frame. The first two are told apart, since they are fixed
             differently.
     """
-    subpath = config.frame_folder()
+    subpath = config.resolve_subpath()
 
     folders = search_phase_bin_folders(config.root, subpath=subpath)
     if (num_folders := len(folders)) == 0:
@@ -312,7 +312,7 @@ def build_sequences(
         The sequences, in the order the search found them.
     """
     sources = search_sources(source_config)
-    subpath = source_config.frame_folder()
+    subpath = source_config.resolve_subpath()
 
     kernel = kernel_config.build()
 
@@ -356,11 +356,11 @@ def build_branches(
 
     branches = []
 
-    subpath = source_config.frame_folder()
+    subpath = source_config.resolve_subpath()
     overwrite = target_config.overwrite
 
     if target_config.save_frames:
-        written_at = target_config.frame_folder(subpath)
+        written_at = target_config.resolve_subpath(subpath)
         branches.append(FrameTree(output_root, written_at, overwrite=overwrite))
 
     if target_config.save_ranges:
