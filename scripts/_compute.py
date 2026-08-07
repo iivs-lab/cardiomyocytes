@@ -155,7 +155,7 @@ def _init_worker(worker_id: int, context: SharedContext) -> None:
 
 def _run_on_worker(
     worker_id: int, context: SharedContext, index: int
-) -> tuple[int, str] | None:
+) -> tuple[int, str | None]:
     devices = context.devices
     stages = context.stages
     device = devices[worker_id]
@@ -168,23 +168,24 @@ def _run_on_worker(
         logging.getLogger(context.name).exception("%s failed", stages.get_name(index))
         return index, f"{type(error).__name__}: {error}"
 
-    return None
+    return index, None
 
 
-def _watch(
-    outcomes: Iterable[tuple[int, str] | None],
+def _collect_failures(
+    outcomes: Iterable[tuple[int, str | None]],
     stages: StageFactory,
     logger: logging.Logger,
-    total: int,
-) -> list[tuple[int, str]]:
-    failed: list[tuple[int, str]] = []
+) -> dict[str, str]:
+    failed: dict[str, str] = {}
+    total = len(stages)
 
-    for index, outcome in enumerate(outcomes):
-        if outcome is not None:
-            failed.append(outcome)
+    for returned, (index, why) in enumerate(outcomes, start=1):
+        name = stages.get_name(index)
+        if why is not None:
+            failed[name] = why
 
-        verdict = "done" if outcome is None else "failed"
-        logger.info("%s %s (%d/%d)", stages.get_name(index), verdict, index + 1, total)
+        verdict = "done" if why is None else "failed"
+        logger.info("%s %s (%d/%d)", name, verdict, returned, total)
 
     return failed
 
@@ -246,7 +247,7 @@ def run_all(
         if one_worker:
             indices = trange(num_stages, disable=not show_progress, **pbar_options)
             outcomes = (_run_on_worker(0, context, index) for index in indices)
-            failed = _watch(outcomes, stages, logger, num_stages)
+            failed = _collect_failures(outcomes, stages, logger)
         else:
             with WorkerPool(
                 n_jobs=num_workers,
@@ -263,7 +264,7 @@ def run_all(
                     progress_bar=show_progress,
                     progress_bar_options=pbar_options,
                 )
-                failed = _watch(outcomes, stages, logger, num_stages)
+                failed = _collect_failures(outcomes, stages, logger)
 
                 if config.measure_workers:
                     log_insights(pool.get_insights(), name, unit=unit)
@@ -272,8 +273,7 @@ def run_all(
     logger.info("%d of %d done in %.1fs", completed, num_stages, timer.elapsed)
 
     if failed:
-        named = {stages.get_name(index): why for index, why in failed}
-        for stage, why in named.items():
+        for stage, why in failed.items():
             logger.error("%s: %s", stage, why)
 
-        raise IncompleteRunError(named, num_stages)
+        raise IncompleteRunError(failed, num_stages)

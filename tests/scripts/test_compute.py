@@ -11,6 +11,7 @@ from scripts._compute import (
     ComputeConfig,
     IncompleteRunError,
     WorkerLogFolder,
+    _collect_failures,
     log_compute_config,
     log_insights,
     plan_devices,
@@ -240,6 +241,23 @@ def test_a_cpu_run_plans_one_device_per_worker_and_never_none(workers, count):
 
     assert len(planned) == count
     assert all(not device.is_cuda for device in planned)
+
+
+def test_a_failure_is_named_by_the_index_it_carries_not_by_when_it_returned(
+    tmp_path, caplog
+):
+    stages = _Stages(3, tmp_path)
+    outcomes = [(2, "boom"), (0, None), (1, None)]
+
+    with caplog.at_level(logging.INFO):
+        failed = _collect_failures(iter(outcomes), stages, logging.getLogger("run"))
+
+    assert failed == {"item2": "boom"}
+    assert [record.getMessage() for record in caplog.records] == [
+        "item2 failed (1/3)",
+        "item0 done (2/3)",
+        "item1 done (3/3)",
+    ]
 
 
 def test_an_unset_worker_count_falls_back_to_the_machine():
