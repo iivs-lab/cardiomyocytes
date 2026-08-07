@@ -24,6 +24,7 @@ from kaparoo.filesystem import (
     dir_empty,
     ensure_dir_exists,
     ensure_file_extension,
+    reserve_path,
     search_dirs,
     search_files,
     stringify_path,
@@ -557,11 +558,22 @@ class RangeDocument:
         return f"wrote {self.path.name} from {counted}: {dataset}"
 
     def __enter__(self) -> Self:
-        """Clear what an earlier run left, so only this run's parts are folded.
+        """Take the document's place, then clear what an earlier run left.
 
-        Folders left empty by that clearing go too, since a sequence dropped
+        In that order, since clearing is not undoable: the document is written
+        once every sequence has run, so a run that may not replace it would
+        otherwise pay for the whole dataset and be refused at the end, having
+        already dropped the parts an earlier run left behind.
+
+        Folders left empty by the clearing go too, since a sequence dropped
         from the dataset would otherwise go on looking present in the tree.
+
+        Raises:
+            FileExistsError: If the document is already there and this one was
+                not told it may replace it.
         """
+        reserve_path(self.path, exist_ok=self.overwrite, make_parents=True)
+
         ensure_dir_exists(self.parts_root, make=True)
 
         for stale in self.list_parts():

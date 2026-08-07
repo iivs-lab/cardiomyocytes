@@ -361,6 +361,27 @@ def test_entering_drops_what_an_earlier_run_left(tmp_path):
     assert [s["source"] for s in document["dataset"]["sequences"]] == ["a"]
 
 
+def test_a_document_it_may_not_replace_is_refused_before_anything_is_dropped(tmp_path):
+    # Clearing cannot be undone and the document is only written once every
+    # sequence has run, so refusing at the end meant paying for the whole
+    # dataset -- hours of it -- and dropping the earlier run's parts on the way
+    # in. The place is taken first, which costs nothing and settles it at once.
+    with RangeDocument(tmp_path / "range", sequence_names=["a", "b"], source="plate_A"):
+        _scan(_meter(tmp_path, "a"), (0.0, 1.0))
+        _scan(_meter(tmp_path, "b"), (0.0, 5.0))
+
+    parts = sorted(p.name for p in (tmp_path / "range.parts").iterdir())
+
+    with (
+        pytest.raises(FileExistsError),
+        RangeDocument(tmp_path / "range", sequence_names=["a"], source="plate_A"),
+    ):
+        pytest.fail("the run started over a document it may not replace")
+
+    assert sorted(p.name for p in (tmp_path / "range.parts").iterdir()) == parts
+    assert json.loads((tmp_path / "range.json").read_text(encoding="utf-8"))["coverage"]
+
+
 def test_entering_drops_the_folders_that_layout_left_too(tmp_path):
     # A mirrored part nests, so clearing the files alone would keep every folder
     # the source ever had -- and a plate dropped from the dataset would go on
