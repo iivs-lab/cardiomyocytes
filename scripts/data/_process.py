@@ -265,6 +265,11 @@ def log_configs(
 
     A run that writes nothing has no target to describe, which is what an
     absent `target_config` means.
+
+    One pairing gets a warning of its own: a stride makes the two outputs name
+    the same frame differently, since the ranges are filed under the source and
+    a cache numbers its own frames from zero. Both are right on their own, so
+    the run says which of them a reader should join by.
     """
     logger = logging.getLogger(name)
 
@@ -274,6 +279,10 @@ def log_configs(
     if target_config is not None:
         subpath = target_config.resolve_subpath(source_config.resolve_subpath())
         log_target_config(target_config, logger, subpath=subpath)
+
+        if target_config.save_frames and source_config.frame_step > 1:
+            fix = "join the value ranges to it by position rather than by name"
+            logger.warning("the cache renumbers the frames it keeps: %s", fix)
 
 
 def search_sources(config: SourceConfig) -> tuple[list[PhaseFileFolder], int]:

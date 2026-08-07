@@ -160,6 +160,46 @@ def test_a_narrowed_run_says_how_much_of_the_dataset_it_took(phase_tree, tmp_pat
     }
 
 
+def test_a_stride_leaves_the_two_outputs_naming_frames_differently(
+    phase_tree, tmp_path, caplog
+):
+    # The ranges are filed under the source and the cache numbers its own from
+    # zero, so at a stride the same name means different frames in the two. It
+    # is not a missing key but a wrong one: a reader joining by name gets a real
+    # entry holding another frame's bounds. Position is the key, and the run
+    # says so out loud rather than leaving it to whoever reads the pair.
+    dest = tmp_path / "out"
+    source = SourceConfig(root=str(phase_tree), frame_step=2)
+    target = TargetConfig(root=str(dest), save_frames=True, save_ranges=True)
+    compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
+
+    with caplog.at_level(logging.INFO):
+        stages = build_phase_stages(source, target, name=STAGE, output_root=dest)
+        run_all(stages, compute)
+
+    (sequence,) = [
+        s for s in _document(dest)["dataset"]["sequences"] if s["source"] == "TL_00"
+    ]
+    written = PhaseBinFolder(dest / "TL_00" / PHASE_FLOAT_BIN)
+
+    assert [frame["source"] for frame in sequence["frames"]] == [
+        "00000_phase.bin",
+        "00002_phase.bin",
+    ]
+    assert [path.name for path in written.files] == [
+        "00000_phase.bin",
+        "00001_phase.bin",
+    ]
+
+    # Joined by position, every pair agrees; by name, the second would not.
+    for index, frame in enumerate(sequence["frames"]):
+        held = np.asarray(written[index])
+        assert (frame["min_value"], frame["max_value"]) == (held.min(), held.max())
+
+    warned = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("renumbers the frames" in message for message in warned)
+
+
 def test_a_sequence_knows_what_it_is_called_in_its_dataset(phase_tree):
     # Derived from the folder it was opened over, so a side branch reading the
     # name cannot land somewhere the frames did not come from.

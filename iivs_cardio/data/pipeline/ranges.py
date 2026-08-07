@@ -110,7 +110,9 @@ class FrameRange(ValueRange):
     """The range of one frame.
 
     Attributes:
-        source: the file the frame was read from.
+        source: the file the frame was read from, which is the name it has at
+            the source and not necessarily the one a cache of the same run
+            gives it.
         min_value: the lowest value in the frame.
         max_value: the highest value in the frame.
     """
@@ -186,13 +188,20 @@ class CompositeRange(ValueRange, ABC):
 class SequenceRange(CompositeRange):
     """The range of one sequence, folded from the frames it was measured over.
 
+    Position is the key, not the name. Each frame is filed under the source it
+    was read from, while a cache the same run writes numbers its frames from
+    zero without a gap, so the two disagree wherever the run read the source
+    with a stride or the source itself was sparse. The nth entry here is the
+    nth frame either way.
+
     Attributes:
         source: what the sequence is called in its dataset.
         min_value: the lowest value across every frame.
         max_value: the highest value across every frame.
         min_index: which frame holds the lowest value.
         max_index: which frame holds the highest value.
-        frames: the range of each frame, in the order they were read.
+        frames: the range of each frame, in the order they were read, which is
+            the order a cache of the same run writes them in.
     """
 
     frames: tuple[FrameRange, ...]
