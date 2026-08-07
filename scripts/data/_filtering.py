@@ -43,11 +43,7 @@ def parse_filter_config(node: DictConfig | None) -> KernelConfig:
 
     config = instantiate(node, _target_whitelist_=_WHITELIST, _convert_="all")
     if not isinstance(config, KernelConfig):
-        # A set, not a list: `slots=True` builds the class a second time, and
-        # the one it replaced stays a subclass until the collector reaches it.
-        kernels = KernelConfig.__subclasses__()
-        kinds = ", ".join(sorted({kernel.kind for kernel in kernels}))
-        msg = f"`filter` describes no kernel: pick one of {kinds}, or set it to null"
+        msg = f"`filter` describes no kernel: give it a `_target_`, or pick from `{_GROUP}`"
         raise TypeError(msg)
 
     return config

@@ -39,14 +39,13 @@ def test_a_filter_named_the_way_compute_is_says_the_form_it_wanted():
         parse_filter_config("identity")
 
 
-def test_a_node_that_names_no_kernel_lists_the_ones_there_are():
+def test_a_node_that_names_no_kernel_points_at_the_group():
     # Reached by dropping `_target_`, or by adding a node by hand: `instantiate`
     # then hands back a plain mapping, and the failure surfaced later still, as
-    # a missing attribute on a dict. The list is each kind once -- every config
-    # is a `slots=True` dataclass, so the class the decorator replaced is still
-    # a subclass until the collector reaches it, and reading them as a list put
-    # whichever had not been collected yet in the message twice.
-    with pytest.raises(TypeError, match=r"pick one of gaussian, identity, median,"):
+    # a missing attribute on a dict. The group rather than the kernel kinds,
+    # since a kind is not what anyone types -- `gaussian` has no option to pick
+    # at all, and the default `median_ellipsoid_2x2x2` is not a kind.
+    with pytest.raises(TypeError, match=r"pick from `data/transforms/filtering`"):
         parse_filter_config(OmegaConf.create({"radius": [1, 1, 1]}))
 
 
