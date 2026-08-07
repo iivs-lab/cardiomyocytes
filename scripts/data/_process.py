@@ -111,29 +111,6 @@ SELECTION_LIMIT: Final = 5
 SELECTION_SPECS: Final = (".json", ".txt")
 
 
-def _validate_source(source: PhaseFileFolder, name: str) -> None:
-    """Raise unless `source` is the unbroken run of frames it is read as.
-
-    A gap otherwise opens as an ordinary shorter sequence: the filter joins the
-    frames on either side as though they were neighbours, and what is written
-    back out is numbered from zero without one, so nothing downstream can tell
-    there was a gap at all.
-
-    Args:
-        source: the folder to check.
-        name: what the sequence is called, so a run over a dataset says which
-            of its sequences is the broken one.
-
-    Raises:
-        ValueError: If the frame files are not numbered from zero without a gap.
-    """
-    try:
-        source.validate_if_supported(level="names")
-    except ValueError as error:
-        msg = f"{name}: {error}"
-        raise ValueError(msg) from error
-
-
 def _validate_target_config(target_config: TargetConfig) -> None:
     """Raise if `target_config` names no side branch to write through."""
     if not (target_config.save_ranges or target_config.save_frames):
@@ -280,6 +257,8 @@ def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
 
     Every sequence taken is checked for a missing frame before any of them is
     run, since a gap is a fault in the dataset rather than in one item of work.
+    A gap otherwise opens as an ordinary shorter sequence, and what is written
+    back out is numbered without one, so nothing downstream can tell.
 
     Returns:
         One folder per sequence, each set to give its frames in radians.
@@ -313,7 +292,12 @@ def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
 
     taken = []
     for source in sources:
-        _validate_source(source, folder_subpath(source))
+        try:
+            source.validate_if_supported(level="names")
+        except ValueError as error:
+            msg = f"{folder_subpath(source)}: {error}"
+            raise ValueError(msg) from error
+
         taken.append(source.with_unit(PhaseUnit.RADIANS))
 
     return taken
