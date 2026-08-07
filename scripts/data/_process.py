@@ -74,6 +74,13 @@ class TreeConfig:
     subpath: str | None = None
 
     def resolve_subpath(self, follow: str | None = None) -> str:
+        """Return where the frames sit, settling an unset `subpath`.
+
+        Args:
+            follow: what an unset `subpath` takes, such as where the other end
+                of the stage keeps its own. `None` leaves it to
+                `DEFAULT_SUBPATH`, which is this end's own layout.
+        """
         default = unwrap_or_default(follow, self.DEFAULT_SUBPATH)
         return unwrap_or_default(self.subpath, default)
 
