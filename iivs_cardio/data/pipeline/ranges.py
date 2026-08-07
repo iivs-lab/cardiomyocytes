@@ -196,6 +196,7 @@ class SequenceRange(CompositeRange):
     frames: tuple[FrameRange, ...]
 
     @property
+    @override
     def parts(self) -> tuple[FrameRange, ...]:
         """The frame ranges this sequence is folded from."""
         return self.frames
@@ -231,6 +232,7 @@ class DatasetRange(CompositeRange):
     sequences: tuple[SequenceRange, ...]
 
     @property
+    @override
     def parts(self) -> tuple[SequenceRange, ...]:
         """The sequence ranges this dataset is folded from."""
         return self.sequences

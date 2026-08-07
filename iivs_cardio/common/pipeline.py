@@ -14,7 +14,7 @@ import logging
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, Self, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, Self, override, runtime_checkable
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -290,8 +290,10 @@ class SequenceStage[T, M](Stage[T, M]):
         """The number of items in the sequence."""
         return len(self._sequence)
 
+    @override
     def _compute(self, index: int) -> T:
         return self._sequence.get_item(index)
 
+    @override
     def _describe(self, index: int) -> M:
         return self._sequence.get_meta(index)
