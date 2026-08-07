@@ -154,12 +154,12 @@ def _run_on_worker(
     worker_id: int, context: SharedContext, index: int
 ) -> tuple[int, str] | None:
     devices = context.devices
+    stages = context.stages
     device = devices[worker_id]
     device.activate()
     pin_threads(len(devices))
 
     try:
-        stages = context.stages
         stages.run_stage(index, device)
     except Exception as error:
         logging.getLogger(context.name).exception("%s failed", stages.get_name(index))
@@ -193,13 +193,13 @@ def log_insights(insights: dict[str, Any], name: str, *, unit: str = "it") -> No
         logger.warning("nothing to report: the pool collected no insights")
         return
 
-    subsets = ("working", "waiting", "starting/stopping")
-    shares = ", ".join(f"%.1f%% {subset}" for subset in subsets)
-    summary = f"workers spent %s: {shares}"
-    total_time = insights["total_time"]
+    summary = (
+        "workers spent %s: %.1f%% working, %.1f%% waiting, %.1f%% starting/stopping"
+    )
     working = insights["working_ratio"] * 100
     waiting = insights["waiting_ratio"] * 100
-    logger.info(summary, total_time, working, waiting, 100 - working - waiting)
+    idle = 100 - working - waiting
+    logger.info(summary, insights["total_time"], working, waiting, idle)
 
     per_worker = "worker %d completed %d %s in %s"
     rows = zip(insights["n_completed_tasks"], insights["working_time"], strict=True)
@@ -234,7 +234,7 @@ def run_all(
     pbar_options = {"desc": name, "unit": unit}
 
     stages_str = f"{num_stages} {unit}"
-    workers_str = f"{num_workers} 'worker'{'' if one_worker else 's'}"
+    workers_str = f"{num_workers} worker{'' if one_worker else 's'}"
     devices_str = ", ".join(str(device) for device in dict.fromkeys(devices))
 
     logger.info("running %s across %s on %s", stages_str, workers_str, devices_str)
@@ -270,7 +270,7 @@ def run_all(
 
     if failed:
         named = {stages.get_name(index): why for index, why in failed}
-        for name, why in named.items():
-            logger.error("%s: %s", name, why)
+        for stage, why in named.items():
+            logger.error("%s: %s", stage, why)
 
         raise IncompleteRunError(named, num_stages)
