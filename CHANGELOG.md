@@ -90,13 +90,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a side branch raising on its way out no longer replaces that verdict: once
   every item has been seen, the closing failure is logged and the verdict still
   rises.
-- A `coverage` block in the range document -- `{covered, total, skipped}`,
-  written immediately ahead of `dataset`. Bounds folded over a subset are not
-  the dataset's, and a consumer setting a normalization policy from them reads a
-  hole as data; the block is written even when nothing is missing, so the
-  absence of a key can never be mistaken for completeness. `skipped` is derived
+- A `coverage` block in the range document -- `{found, selected, covered,
+  skipped}`, written immediately ahead of `dataset`. Bounds folded over a subset
+  are not the dataset's, and a consumer setting a normalization policy from them
+  reads a hole as data; the block is written even when nothing is missing, so
+  the absence of a key can never be mistaken for completeness. The three numbers
+  narrow in turn -- found by the search, selected by `include` / `exclude`,
+  covered by the parts that arrived -- which is what tells a document describing
+  part of a dataset from one describing a smaller dataset. `skipped` is derived
   from the roster against the parts on disk rather than passed in, since a
-  sequence is missing whether it raised, died with its worker, or never ran.
+  sequence is missing whether it raised, died with its worker, or never ran, and
+  `Coverage` refuses a set of numbers no run could have had.
 - `mpire` and `tqdm` in the `scripts` group, and `compute.show_progress` /
   `compute.measure_workers` / `compute.tasks_per_worker` to drive the pool. The
   pool starts its workers with `spawn` rather than the platform's default, which
@@ -122,6 +126,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   wrong ways -- a bare unpack error, a channel count the array never had, or a
   broadcast failure at the assignment -- and `_cv_type` names the pairs it takes
   from the table beside it.
+- The filter group is `configs/filter/`, so an override selects from it the way
+  `compute=cuda` does: `filter=median_cuboid_2x2x2`, and `identity` for none.
+  It sat under `configs/data/transforms/filtering/` mirroring the package, and
+  the short form a reader infers from `compute` was a *value* override there --
+  hydra accepted it because `filter` was a declared key, put the string in, and
+  `instantiate` refused it several frames later. A group's folder is named for
+  the key it fills now, which is what makes the two forms one. `filter=null` is
+  gone with it, since a group override takes no null: `filter=identity` builds
+  the same `IdentityConfig` and can sit in a sweep list, and `~filter` drops the
+  default outright.
 - A filter is recorded by what it was rather than by which class did it:
   `KernelConfig.kind` is a declared `"median"` / `"gaussian"` / `"identity"`,
   where the record used to carry the `_target_` import path -- which made two

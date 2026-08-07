@@ -1,10 +1,10 @@
 # @package _global_
 
 defaults:
-  # Optional filter, defaulting to a 2x2x2 ellipsoid median. Disable it with
-  #   ~data/transforms/filtering@data.filtering
-  # or swap the option for another file in that group (e.g. median_cuboid_2x2x2).
-  - /data/transforms/filtering@data.filtering: median_ellipsoid_2x2x2
+  # The filter, defaulting to a 2x2x2 ellipsoid median. Swap it with
+  #   filter=<option>
+  # naming any file in the group, `identity` among them for no filtering.
+  - /filter@filter: median_ellipsoid_2x2x2
   - _self_
 
 data:

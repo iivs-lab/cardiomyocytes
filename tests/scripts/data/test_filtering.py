@@ -15,7 +15,7 @@ def _filter_node(name: str):
     with initialize_config_dir(config_dir=CONFIG_PATH, version_base=None):
         composed = compose(
             config_name=CONFIG_NAME,
-            overrides=[f"data/transforms/filtering@filter={name}"],
+            overrides=[f"filter={name}"],
         )
 
     return composed.filter
@@ -29,13 +29,13 @@ def test_a_run_that_filters_nothing_still_names_a_kernel(node):
     assert describe_filter_kernel(parse_filter_config(node)) == {"kind": "identity"}
 
 
-def test_a_filter_named_the_way_compute_is_says_the_form_it_wanted():
-    # `compute=cpu` works because that group's path matches its key, and the
-    # filter's does not -- so the shape a reader infers from the one they have
-    # already typed leaves a bare name where a node belongs, and hydra puts the
-    # string there. Inferring it is what makes this reachable, so the refusal
-    # has to carry the form that does work.
-    with pytest.raises(TypeError, match=r"use `data/transforms/filtering@filter="):
+def test_a_name_where_a_kernel_goes_says_it_has_to_select():
+    # No override reaches this any more: the group is named for the key it
+    # fills, so `filter=identity` selects from it exactly as `compute=cuda`
+    # does, and a name hydra cannot find is refused by hydra. It stands for the
+    # entry config that declares `filter` as a plain key without the group,
+    # where the same override would put the string back.
+    with pytest.raises(TypeError, match=r"has to select from `filter`"):
         parse_filter_config("identity")
 
 
@@ -45,7 +45,7 @@ def test_a_node_that_names_no_kernel_points_at_the_group():
     # a missing attribute on a dict. The group rather than the kernel kinds,
     # since a kind is not what anyone types -- `gaussian` has no option to pick
     # at all, and the default `median_ellipsoid_2x2x2` is not a kind.
-    with pytest.raises(TypeError, match=r"pick from `data/transforms/filtering`"):
+    with pytest.raises(TypeError, match=r"select from `filter`"):
         parse_filter_config(OmegaConf.create({"radius": [1, 1, 1]}))
 
 

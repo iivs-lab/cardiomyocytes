@@ -14,8 +14,9 @@ if TYPE_CHECKING:
 
 _WHITELIST: Final = ("iivs_cardio.data.transforms.filtering.kernel.*",)
 
-# The config group `filter` is filled from, which an override has to name in full.
-_GROUP: Final = "data/transforms/filtering"
+# The config group `filter` is filled from. Its name is the key it fills, so an
+# override selects from it as `filter=<option>`.
+_GROUP: Final = "filter"
 
 
 def parse_filter_config(node: DictConfig | None) -> KernelConfig:
@@ -38,12 +39,12 @@ def parse_filter_config(node: DictConfig | None) -> KernelConfig:
         return IdentityConfig()
 
     if isinstance(node, str):
-        msg = f"`filter={node}` names a group: use `{_GROUP}@filter={node}`"
+        msg = f"`filter` holds the name {node!r}: it has to select from `{_GROUP}`"
         raise TypeError(msg)
 
     config = instantiate(node, _target_whitelist_=_WHITELIST, _convert_="all")
     if not isinstance(config, KernelConfig):
-        msg = f"`filter` describes no kernel: give it a `_target_`, or pick from `{_GROUP}`"
+        msg = f"`filter` describes no kernel: give it a `_target_`, or select from `{_GROUP}`"
         raise TypeError(msg)
 
     return config

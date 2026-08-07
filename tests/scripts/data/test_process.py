@@ -793,7 +793,7 @@ def test_the_filter_fits_on_one_line(caplog):
     with initialize_config_dir(config_dir=CONFIG_PATH, version_base=None):
         composed = compose(
             config_name=CONFIG_NAME,
-            overrides=["data/transforms/filtering@filter=median_cuboid_2x2x1"],
+            overrides=["filter=median_cuboid_2x2x1"],
         )
 
     logged = _logged(

@@ -817,10 +817,36 @@ median 필터는 이 오염에 대한 정확한 대응이고, 창 안 절반 미
   `scripts/`만 hydra를 임포트하므로 런타임 의존성이 아니라 PEP 735 그룹에 산다
   (`uv sync --group scripts`). 1.4 stable이 나오면 재검토.
 
-- **짧은 오버라이드 형태가 모든 그룹에 통하지 않는다.** `compute=cpu`는 그룹과 패키지가 둘 다
-  `compute`라 되지만, 필터 그룹은 다른 패키지에 마운트되어
-  `data/transforms/filtering@filter=<name>`이 필요하다 — 그냥 `filter=<name>`은 값으로 읽혀
-  instantiation에서 실패한다. 잡의 정확한 호출은 그 잡의 `.hydra/overrides.yaml`에서 복구된다.
+- **결정 — 그룹 폴더 이름은 그것이 채우는 키와 같게 둔다.** 짧은 오버라이드(`filter=identity`)는
+  **그룹 경로와 패키지가 같을 때만** 통한다. `compute=cpu`가 되는 이유가 그것이고, 필터가
+  `configs/data/transforms/filtering/`에 있을 때 `filter=identity`가 값 오버라이드로 읽혀
+  문자열이 들어간 이유도 그것이다 — 선언된 키였으므로 하이드라가 조용히 받아들였다.
+  `configs/filter/`로 옮겨 해소했다.
+
+  **어디에 둘지는 「누가 쓰는가」가 정한다.**
+
+  - 모든 단계가 쓰는 그룹은 `configs/<이름>/` 최상위. 지금은 `compute`와 `filter`가 그렇다
+    ((2)도 `FilteredSequence`를 쓰고, 「정규화는 필터링 이후」 결정이 그 순서다).
+  - 한 단계만 쓰는 그룹은 **그 진입 설정 폴더 안**에 두고, 그 폴더를 `config_path`로 삼는다.
+    공용 그룹은 `hydra.searchpath: [file://${oc.env:CONFIGS_ROOT}]`로 계속 보인다. 셋 다
+    실측 확인했다 — `filter=identity`, `compute=cuda`, `${oc.env:...}` 보간.
+  - 진입 설정(`config.yaml`) 자체는 단계 경로 그대로 둔다. 그것은 `config_name`으로
+    지정하는 것이지 오버라이드하는 그룹이 아니다.
+
+  **평평하게 몰지 않는 이유.** 진입점이 하나인 학습 프로젝트는 `configs/model/`을 평평하게
+  두지만 여기는 (1)·(2)·(3)에 학습까지 진입점이 여럿이라 `model`·`data`의 뜻이 서로 다르다.
+  한 폴더에 몰면 관계없는 선택지가 섞이고, `model=beat_classifier`를 flow 학습이 **받아들인
+  뒤** instantiate에서 죽는다 — 필터에서 방금 고친 것과 같은 함정이다. 단계 폴더 안에 두면
+  그룹이 아예 없어 하이드라가 즉시 거부한다.
+
+  **모서리 둘.** 범위 그룹에 공용 그룹과 같은 이름을 주지 말 것(어느 쪽이 잡히는지 모호해진다).
+  두 단계가 공유하는 그룹은 복제하지 말고 최상위로 올릴 것(두 벌은 어긋난다).
+
+- **`filter=null`은 이제 통하지 않는다.** 그룹 오버라이드에 `null`을 줄 수 없다
+  (`Config group override must be a string or a list`). 대신 `filter=identity`(같은
+  `IdentityConfig`를 만들고 스윕 목록에 넣을 수 있다) 또는 `~filter`(키가 사라지므로 읽는 쪽이
+  `cfg.get("filter")`여야 한다)를 쓴다. 잡의 정확한 호출은 그 잡의 `.hydra/overrides.yaml`에서
+  복구된다.
 
 ## 관측
 

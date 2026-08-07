@@ -37,7 +37,7 @@ def main(cfg: DictConfig) -> None:
     compute_config = apply_schema(ComputeConfig, cfg.compute)
     source_config = apply_schema(SourceConfig, cfg.source)
     target_config = apply_schema(TargetConfig, cfg.target)
-    filter_config: DictConfig | None = cfg.filter
+    filter_config: DictConfig | None = cfg.get("filter")
 
     if target_config.save_frames and is_multirun():
         msg = "cannot write frames in a sweep: run the winning config alone instead"
