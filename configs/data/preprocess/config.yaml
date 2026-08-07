@@ -14,6 +14,7 @@ source:
 
 target:
   root: ??? # where the config snapshot, the log, and the outputs land
+  subpath: null # a written sequence's frame folder; null follows source.subpath
   overwrite: false
   save_frames: false # the filtered frames as a .bin tree, laid out like the source
   save_ranges: true # one JSON of the dataset, sequence, and frame ranges

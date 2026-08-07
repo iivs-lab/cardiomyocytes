@@ -46,11 +46,17 @@ def _scan(
     *,
     save_frames: bool = True,
     save_ranges: bool = False,
+    subpath: str | None = None,
+    overwrite: bool = False,
 ) -> None:
     source = SourceConfig(root=str(phase_tree))
     compute = ComputeConfig(device="cpu", workers=workers, show_progress=False)
     config = TargetConfig(
-        root=str(dest), save_frames=save_frames, save_ranges=save_ranges
+        root=str(dest),
+        subpath=subpath,
+        save_frames=save_frames,
+        save_ranges=save_ranges,
+        overwrite=overwrite,
     )
 
     run_all(build_phase_stages(source, config, name=STAGE, output_root=dest), compute)
@@ -150,6 +156,61 @@ def test_a_target_asking_for_nothing_is_refused_before_the_source_is_read(tmp_pa
 
     with pytest.raises(ValueError, match=r"nothing to do"):
         build_phase_stages(source, target, name=STAGE, output_root=tmp_path)
+
+
+# ------------------------------ the destination --------------------------- #
+
+FILTERED = "Phase/Float/FilteredBin"
+
+
+def test_writing_frames_over_the_source_is_refused(phase_tree):
+    # A sequence is committed by replacing its folder whole and atomically, so
+    # this ran to "3 of 3 done" and exited 0 with every acquisition it had read
+    # gone. Nothing else in the run would have said so: the frames it wrote are
+    # the ones it meant to write, and they are where it meant to put them.
+    before = _written(phase_tree)
+
+    with pytest.raises(ValueError, match=r"frames would land on the source"):
+        _scan(phase_tree, phase_tree, 0, overwrite=True)
+
+    assert _written(phase_tree) == before
+
+
+def test_a_destination_a_later_run_would_find_again_is_refused(phase_tree):
+    # Nested under the source and laid out the way the source is, this run's
+    # output is more sequences to the next run, which folds a dataset boundary
+    # over frames that are already filtered and doubles the tree again.
+    with pytest.raises(ValueError, match=r"frames would land on the source"):
+        _scan(phase_tree, phase_tree / "filtered", 0)
+
+
+def test_a_destination_that_holds_the_source_is_refused(phase_tree):
+    # `Phase/Float` is replaced whole too, and that takes `Bin` with it, so the
+    # check cannot be an equality between the two folders.
+    with pytest.raises(ValueError, match=r"frames would land on the source"):
+        _scan(phase_tree, phase_tree, 0, subpath="Phase/Float", overwrite=True)
+
+
+def test_frames_may_be_written_beside_the_ones_they_were_read_from(phase_tree):
+    # Which is why the check is about the folders and not about the roots: a
+    # filtered tree kept next to the raw one is how this layout is arranged
+    # already, and it collides with neither. The source survives, and a later
+    # search finds the sequences it found before rather than twice as many.
+    before = _written(phase_tree)
+
+    _scan(phase_tree, phase_tree, 0, subpath=FILTERED)
+
+    assert _written(phase_tree) == before
+    assert len(search_sources(SourceConfig(root=str(phase_tree)))) == SEQUENCES
+    assert len(PhaseBinFolder(phase_tree / "TL_00" / FILTERED)) == FRAMES
+
+
+def test_a_run_writing_no_frames_may_share_the_source_root(phase_tree):
+    # The document goes beside the dataset rather than into any sequence of it,
+    # so a run that only measures touches nothing it reads.
+    _scan(phase_tree, phase_tree, 0, save_frames=False, save_ranges=True)
+
+    assert _document(phase_tree)["coverage"]["covered"] == SEQUENCES
 
 
 def test_a_factory_offers_one_stage_per_sequence(phase_tree, tmp_path):
@@ -451,6 +512,56 @@ def test_branches_are_refused_before_any_of_them_is_built(tmp_path):
         _branches(tmp_path, save_frames=False, save_ranges=False)
 
 
+def _frame_tree(tmp_path, **target):
+    return build_branches(
+        SourceConfig(root="/dataset"),
+        TargetConfig(root=str(tmp_path), save_frames=True, save_ranges=False, **target),
+        parse_filter_config(None),
+        tmp_path,
+        ["TL_00"],
+    )
+
+
+def test_a_target_naming_a_subpath_is_where_the_frames_go(tmp_path):
+    # Without one they follow the source's layout, which is what puts them on
+    # top of it whenever the two roots are the same.
+    (tree,) = _frame_tree(tmp_path, subpath=FILTERED)
+
+    assert tree.subpath == FILTERED
+
+
+def test_an_unset_target_subpath_follows_the_source(tmp_path):
+    (tree,) = _frame_tree(tmp_path)
+
+    assert tree.subpath == PHASE_FLOAT_BIN
+
+
+def test_the_settings_record_the_subpath_that_was_read(tmp_path):
+    # A later run compares against where the frames came from, so writing them
+    # somewhere else must not change what the document says it describes.
+    source = SourceConfig(root="/dataset")
+    config = TargetConfig(root=str(tmp_path), subpath=FILTERED, save_ranges=True)
+
+    (document,) = build_branches(
+        source, config, parse_filter_config(None), tmp_path, ["TL_00"]
+    )
+
+    assert document.settings["source"]["subpath"] == PHASE_FLOAT_BIN
+
+
+def test_branches_are_refused_where_the_frames_would_land_on_the_source(tmp_path):
+    # The same verdict `build_phase_stages` reaches before its search, made here
+    # too, since a caller may assemble the branches without going through it.
+    with pytest.raises(ValueError, match=r"frames would land on the source"):
+        build_branches(
+            SourceConfig(root=str(tmp_path)),
+            TargetConfig(root=str(tmp_path), save_frames=True),
+            parse_filter_config(None),
+            tmp_path,
+            ["TL_00"],
+        )
+
+
 # ---------------------------- the configuration log ----------------------- #
 
 
@@ -606,8 +717,8 @@ def test_a_target_says_what_it_writes_and_where(caplog, target, written):
 
 def test_the_written_frames_take_the_shape_the_source_was_read_in(caplog):
     # The mirroring shown rather than claimed: the two lines carry the same
-    # template, close enough to read against each other, and a target that
-    # stopped following the source's subpath would show up as a mismatch.
+    # template, close enough to read against each other, so a target that named
+    # no subpath of its own and stopped following the source would not match.
     logged = _logged(
         caplog,
         SourceConfig(root="/dataset", subpath="Phase/Other"),
@@ -616,6 +727,19 @@ def test_the_written_frames_take_the_shape_the_source_was_read_in(caplog):
 
     assert "  reading <sequence>/Phase/Other" in logged
     assert "  writing the filtered frames to <sequence>/Phase/Other" in logged
+
+
+def test_a_target_naming_a_subpath_says_that_one(caplog):
+    # The two lines part company here, and the one about writing has to follow
+    # the target -- a reader checking where the output went reads this line.
+    logged = _logged(
+        caplog,
+        SourceConfig(root="/dataset"),
+        TargetConfig(root="/out", subpath=FILTERED, save_frames=True),
+    )
+
+    assert f"  reading <sequence>/{PHASE_FLOAT_BIN}" in logged
+    assert f"  writing the filtered frames to <sequence>/{FILTERED}" in logged
 
 
 def test_a_run_allowed_to_replace_says_so(caplog):

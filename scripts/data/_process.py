@@ -15,7 +15,7 @@ __all__ = (
 
 import logging
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Final
 
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
@@ -74,6 +74,10 @@ class TargetConfig:
 
     Attributes:
         root: where the run's outputs land.
+        subpath: where a written sequence keeps its frames inside its own
+            folder, or `None` to put them where the source keeps its own.
+            Naming one is what lets a run write beside the frames it read
+            rather than over them.
         overwrite: whether what is already there may be replaced.
         save_frames: whether to write the filtered frames, laid out like the
             source.
@@ -83,6 +87,7 @@ class TargetConfig:
     """
 
     root: str = MISSING
+    subpath: str | None = None
     overwrite: bool = False
     save_frames: bool = False
     save_ranges: bool = True
@@ -96,6 +101,11 @@ SELECTION_SPECS: Final = (".json", ".txt")
 def _subpath(source_config: SourceConfig) -> str:
     """Which folder of a time lapse a run reads, defaulted in one place."""
     return unwrap_or_default(source_config.subpath, PHASE_FLOAT_BIN)
+
+
+def _target_subpath(source_config: SourceConfig, target_config: TargetConfig) -> str:
+    """Where a written sequence keeps its frames, defaulted in one place."""
+    return unwrap_or_default(target_config.subpath, _subpath(source_config))
 
 
 def _validate_source(source: PhaseFileFolder, name: str) -> None:
@@ -126,6 +136,46 @@ def _validate_target_config(target_config: TargetConfig) -> None:
     if not (target_config.save_ranges or target_config.save_frames):
         msg = "nothing to do: set `target.save_ranges` or `target.save_frames`"
         raise ValueError(msg)
+
+
+def _validate_output_root(
+    source_config: SourceConfig, target_config: TargetConfig, output_root: StrPath
+) -> None:
+    """Raise if the frames would be written where they are read from.
+
+    A sequence is written by replacing its folder whole, so a destination that
+    is a source folder, holds one, or sits inside one destroys what the run is
+    reading. A destination the source search would find again is refused on the
+    same footing: a later run would take this run's output for more sequences.
+
+    Writing beside the source is left open, since a filtered tree kept next to
+    the raw one under a name of its own collides with neither.
+
+    Args:
+        source_config: what the run reads.
+        target_config: what the run writes.
+        output_root: where the branches write.
+
+    Raises:
+        ValueError: If the destination and the source overlap.
+    """
+    if not target_config.save_frames:
+        return
+
+    source_root = Path(source_config.root).resolve()
+    write_root = Path(output_root).resolve()
+    if not write_root.is_relative_to(source_root):
+        return
+
+    read_at = PurePath(_subpath(source_config))
+    write_at = PurePath(_target_subpath(source_config, target_config))
+    if not (read_at.is_relative_to(write_at) or write_at.is_relative_to(read_at)):
+        return
+
+    landing = f"{write_root.as_posix()}/*/{write_at.as_posix()}"
+    fix = "`target.subpath` beside it, or `target.root` outside the source"
+    msg = f"frames would land on the source at {landing}: set {fix}"
+    raise ValueError(msg)
 
 
 def _log_selection(logger: Logger, verb: str, value: list[str] | str) -> None:
@@ -218,7 +268,8 @@ def log_configs(
     log_filter_config(kernel_config, logger)
 
     if target_config is not None:
-        log_target_config(target_config, logger, subpath=_subpath(source_config))
+        subpath = _target_subpath(source_config, target_config)
+        log_target_config(target_config, logger, subpath=subpath)
 
 
 def search_sources(config: SourceConfig) -> list[PhaseFileFolder]:
@@ -314,9 +365,11 @@ def build_branches(
 
     Raises:
         ValueError: If the target writes nothing, which is a mistake rather
-            than a way to ask for a run that only reads.
+            than a way to ask for a run that only reads, or if the frames it
+            writes would land on the source they are read from.
     """
     _validate_target_config(target_config)
+    _validate_output_root(source_config, target_config, output_root)
 
     branches = []
 
@@ -324,7 +377,8 @@ def build_branches(
     overwrite = target_config.overwrite
 
     if target_config.save_frames:
-        branches.append(FrameTree(output_root, subpath, overwrite=overwrite))
+        written_at = _target_subpath(source_config, target_config)
+        branches.append(FrameTree(output_root, written_at, overwrite=overwrite))
 
     if target_config.save_ranges:
         path = Path(output_root, target_config.range_file)
@@ -353,7 +407,8 @@ def build_phase_stages(
 
     The configuration is logged before the sources are searched, so a run says
     what it was asked to do even when it cannot do it. A target that writes
-    nothing is refused at the same point, before the search costs anything.
+    nothing, or that would write over the source, is refused at the same point,
+    before the search costs anything.
 
     Args:
         source_config: which sequences to read, and how much of each.
@@ -367,8 +422,8 @@ def build_phase_stages(
         The factory a driver runs the sequences through.
 
     Raises:
-        ValueError: If the target writes nothing, or the source search finds
-            nothing to run.
+        ValueError: If the target writes nothing, if it would write over the
+            source, or if the source search finds nothing to run.
     """
     kernel_config = parse_filter_config(filter_config)
 
@@ -376,6 +431,7 @@ def build_phase_stages(
 
     if target_config is not None:
         _validate_target_config(target_config)
+        _validate_output_root(source_config, target_config, output_root)
 
     sequences = build_sequences(source_config, kernel_config)
     branches = []
