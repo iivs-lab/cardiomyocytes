@@ -242,31 +242,30 @@ force          4     3, 4, 5 → acceleration 4
 
 ## 열린 것 — `scripts/_compute.py`
 
-리뷰에서 나왔고 아직 손대지 않은 것들. 넷 다 지금은 드러나지 않지만, 셋은 나중에
-조용히 틀린다.
-
-- **`run_all`에서 `name`이 실패 루프에 덮어써진다.** 함수 앞의 `name = stages.name`을
-  `for name, why in named.items()`가 재바인딩하므로, 루프가 끝나면 `name`은 마지막으로
-  실패한 **시퀀스 이름**이다. 지금은 그 뒤로 읽는 코드가 없어 드러나지 않을 뿐이고, 한 줄만
-  추가되면 조용히 틀린다. 루프 변수 이름을 갈면 끝난다.
-
-- **`_watch`가 순서에 의존하는데 지키는 장치가 없다.** `enumerate(outcomes)`의 위치를 곧
-  스테이지 인덱스로 쓰므로 `pool.imap`이 순서를 보존한다는 사실에 기대고 있다. 「긴 것부터
-  정렬하고 동적 분배」가 `imap_unordered`로 가면 **모든 줄이 엉뚱한 이름을 단다** — 실패
-  보고까지. `_run_on_worker`는 실패 시 이미 `(index, why)`로 인덱스를 돌려주고 성공 시에만
-  `None`이라 위치가 유일한 근거다. **성공에도 인덱스를 실어 보내면** 의존이 사라진다.
-  `_watch`의 `total`도 `len(stages)`와 중복이라 같이 정리할 것.
-
-- **`show_progress`가 단독 경로에서만 쓰인다.** 풀 경로는 `config.progress_bar`를 그대로
-  넘겨 `num_stages > 1` 가드를 무시한다. `devices[:num_stages]` 때문에 `num_stages == 1`이면
-  워커도 1이라 풀에 닿지 않으니 현재 차이는 없지만, 같은 뜻의 두 값이 두 자리에 있다.
-
-- **단독 워커 경고가 걷어낸 용어를 다시 쓴다.** `"insights: not collected, since a lone
-  worker runs no pool"` — `insights`는 설정 줄과 보고 줄에서 없앤 `mpire` 용어다.
-
 - **로그 안에 시간 형식이 둘 섞인다.** `log_insights`는 `mpire`가 준 `0:00:03.318`을 그대로
   쓰고, `run_all`과 `stage.py`는 `%.1f` + `s`로 `3.6s`를 쓴다. `insights`에는 포맷된 문자열만
   있고 원시 초 값이 없어 우리 형식으로 다시 그리려면 파싱해야 한다.
+
+- **`unit` 하나가 진행표시줄과 산문 둘 다를 맡는다.** `tqdm`의 관례는 짧은 단수 축약이라
+  (`12.12seq/s`, 기본값 `it`) 완전한 낱말이 들어갈 자리가 아닌데, 같은 문자열이 「running
+  121 seq」와 「completed 3 seq」에도 쓰인다. 산문을 완전한 낱말로 하려면 막대의 단위와
+  가르고(`unit` + `noun`) 복수형을 붙여야 한다.
+
+- **복수형 처리가 세 곳에 복제돼 있다.** `_compute.py`의 `f"{num_workers} worker{...}"`,
+  `common/writer.py`의 `f"wrote {count} frame{...}"`, `data/pipeline/ranges.py`의 `_counted`.
+  `_counted`가 이미 그 함수인데 `data/` 아래 private이라 나머지 둘이 못 쓴다. 순수 텍스트
+  헬퍼라 도메인 의존이 없으므로 `common/`으로 올리면 셋이 하나가 되고, 위의 `noun` 항목도
+  같이 싸진다.
+
+- **`SharedContext.log_level`의 전달 경로에 테스트가 없다.** spawn된 워커는 root가
+  `WARNING`에 핸들러 0개로 시작하므로(실측) 레벨을 실어 보내지 않으면 워커 파일에 INFO 줄이
+  하나도 남지 않는다. 그런데 테스트는 `configure_worker(0, 2, logging.INFO)`로 항상 레벨을
+  명시해 부르므로, `run_all` → `SharedContext` → `_init_worker` 경로는 한 번도 검증되지
+  않는다 — 필드를 지워도 전부 통과한다. 부모가 DEBUG일 때 워커 파일에 DEBUG 줄이 남는지로
+  고정할 것. 출처가 root가 아니라 스테이지 로거인 것도 같이 볼 것.
+
+- **`completed = num_stages - len(failed)`가 모든 스테이지가 결과를 냈다고 가정한다.**
+  지금 `imap`에서는 참이고, §1순위의 세 번째 상태(재사용·미도달)가 들어오면 깨진다.
 
 # 1순위 — 캐시와 범위 문서의 재사용
 
@@ -413,7 +412,7 @@ target.range_file=value_range_retry source.include=[plate_A/2026-03-11/TL_01_wel
 covered = 이 문서가 범위를 가진 시퀀스 수          (계산분 + 재사용분)
 reused  = 그중 이전 실행의 파트를 그대로 쓴 수
 skipped = 명단에 있는데 파트가 없는 이름들
-total   = len(expected)
+total   = len(sequence_names)
 ```
 
 로그의 「N of M done (a failed, b reused)」와 **같은 어휘**를 쓰는 것이 요점이다. 두
@@ -816,7 +815,7 @@ median 필터는 이 오염에 대한 정확한 대응이고, 창 안 절반 미
 
 워커는 `worker_init`에서 `<잡 디렉터리>/worker<id>.log`를 자기 몫으로 연다. 여러 프로세스가
 한 파일에 붙이면 섞이고 Windows에서는 찢어진다. 스테이지별이 아니라 **워커별**이라, 한 잡이
-필터링하고 이어서 추정하면 시간 순으로 읽힌다. `mode="a"`인 것은 `compute.lifespan`이 워커를
+필터링하고 이어서 추정하면 시간 순으로 읽힌다. `mode="a"`인 것은 `compute.tasks_per_worker`가 워커를
 은퇴시키고 같은 id로 새로 띄우기 때문이고, 지우는 책임은 잡마다 한 번 드라이버에 있다.
 
 부모 파일에는 설정·판정·결산이, 워커 파일에는 시퀀스 블록이 남는다. `log_insights`도
@@ -838,7 +837,7 @@ median 필터는 이 오염에 대한 정확한 대응이고, 창 안 절반 미
   바가 움직이고, 무거운 것은 몇 분씩 멈춰 있어 멎은 것처럼 보인다.
 
   `tqdm`은 tty가 아니어도 **조용해지지 않는다** — 리디렉션된 바는 갱신마다 재그리기 줄을
-  로그에 쓴다. `compute.progress_bar` 기본값을 참으로 두면 `--multirun` 잡마다 그 소음을
+  로그에 쓴다. `compute.show_progress` 기본값을 참으로 두면 `--multirun` 잡마다 그 소음을
   문다.
 
 ## 실패
@@ -856,6 +855,13 @@ median 필터는 이 오염에 대한 정확한 대응이고, 창 안 절반 미
 `skipped`는 전달받는 것이 아니라 **명단과 디스크의 차**로 구한다: 예외로 죽었든, 워커가
 통째로 죽었든, 애초에 안 돌았든 파트가 없다는 사실은 하나다.
 
+**곁가지가 닫히지 못해도 판정은 남는다.** 예전에는 `running()`의 `__exit__`에서 난 예외가
+그 뒤의 「N of M done」과 `IncompleteRunError`를 통째로 덮어, 사용자가 보는 것이 파일 존재
+오류 하나뿐이었다. 지금은 **모든 항목을 본 뒤에 난 예외만** 삼켜 `logger.exception`으로
+남기고 판정을 계속 올린다 — 재시도에 필요한 것이 실패한 이름 목록이기 때문이다. 순회 도중
+풀이 무너진 경우는 보고할 것이 없으므로 그대로 터지고, 실패가 하나도 없이 닫기만 실패하면
+그 예외가 유일한 소식이라 그대로 오른다.
+
 **비유한 값은 아예 들이지 않는다.** `FilteredSequence._window`가 소스 프레임을 읽는 그 자리
 — 모든 프레임이 정확히 한 번 지나고, GPU 업로드 전이라 호스트에서 검사할 수 있는 마지막
 자리 — 에서 거절한다. 그래서 median 커널의 `valid == 0`(이웃이 전부 NaN → `gather` 인덱스
@@ -869,10 +875,6 @@ median 필터는 이 오염에 대한 정확한 대응이고, 창 안 절반 미
   `value_range.json`이 있어 또 실패하므로 **낡은 문서가 그대로 남아 디스크와 모순된다.**
   실측: 4개 중 3개가 이미 있는 상태에서 재실행하면, 문서는 방금 완성된 하나를 "빠진 것"으로
   지목한다. 위 §1순위가 이것을 함께 푼다.
-
-- **문서 쓰기 실패가 실행의 판정을 삼킨다.** `running()`의 `__exit__`에서 난 예외가 `run_all`
-  밖으로 나가면서 그 뒤의 「N of M done」과 `IncompleteRunError`를 덮는다. 사용자가 보는 것이
-  "무엇이 왜 실패했는가"가 아니라 파일 존재 오류 하나뿐이 된다.
 
 - **`filtering N frames`를 일이 실패할 수 있기 전에 찍는다.** `run_stage`이 그 줄을 찍고 나서
   `get_stage`를 부르므로, 훅 생성이 실패하면 한 장도 거르지 않고 "거르는 중"이라고 남는다.

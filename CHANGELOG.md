@@ -65,7 +65,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Logging, under the stage's name rather than the module's. A worker opens
   `<job>/worker<id>.log` for itself in `worker_init` -- several processes
   appending to one file interleave, and on Windows tear -- and appends, since
-  `compute.lifespan` retires a worker and starts a fresh one under the same id.
+  `compute.tasks_per_worker` retires a worker and starts a fresh one under the
+  same id.
   One file per worker rather than per stage, so a job that filters and then
   estimates reads in order. The parent's own file keeps the configuration, the
   per-item verdicts and the summary; `log_insights` goes there too, and says
@@ -74,8 +75,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   re-raises a task's exception in the parent and tears the pool down, so a run
   that let one through would lose every sequence still to come -- hours of
   finished work at dataset scale. A worker returns its failure as a result
-  instead, and the error carries `skipped` and `total` whole rather than folded
-  into a message a retry cannot read back.
+  instead, naming the item it finished whether it failed or not, so nothing is
+  inferred from the order results come back in. The error carries `failed` and
+  `total` whole rather than folded into a message a retry cannot read back, and
+  a side branch raising on its way out no longer replaces that verdict: once
+  every item has been seen, the closing failure is logged and the verdict still
+  rises.
 - A `coverage` block in the range document -- `{covered, total, skipped}`,
   written immediately ahead of `dataset`. Bounds folded over a subset are not
   the dataset's, and a consumer setting a normalization policy from them reads a
@@ -83,8 +88,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   absence of a key can never be mistaken for completeness. `skipped` is derived
   from the roster against the parts on disk rather than passed in, since a
   sequence is missing whether it raised, died with its worker, or never ran.
-- `mpire` and `tqdm` in the `scripts` group, and `compute.progress_bar` /
-  `compute.log_insights` / `compute.lifespan` to drive the pool.
+- `mpire` and `tqdm` in the `scripts` group, and `compute.show_progress` /
+  `compute.measure_workers` / `compute.tasks_per_worker` to drive the pool.
 - `pin_threads`, holding each worker to `torch`'s default thread count divided
   by the worker count. Every process otherwise sizes its pool to the whole
   machine and they contend: measured on 64 cores, sixteen unpinned workers ran
@@ -149,11 +154,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the config was no longer the plain frozen record `asdict` and `json.dumps`
   take it for -- which surfaced only when a real run wrote a document, since
   tests build the config directly.
-- `plan_devices` refuses the knob that belongs to the other device -- `workers`
-  under CUDA, `gpu_ids` under CPU -- rather than dropping it silently. A worker
-  count a CUDA run cannot honour is a wall clock several times what the caller
-  planned for, with nothing saying why; `gpu_ids` defaults to `None` so that a
-  value the caller wrote can be told from one they did not.
+- `plan_devices` refuses a `workers` whose shape the device cannot read -- a
+  count under CUDA, gpu ids under CPU -- rather than dropping it silently. A
+  worker count a CUDA run cannot honour is a wall clock several times what the
+  caller planned for, with nothing saying why. One field rather than two, so the
+  pair can no longer contradict each other; `null` still means the machine's own
+  answer, told apart from a value the caller wrote.
 - `preprocess` runs its workers through `mpire`, which retires
   `_WORKER_DEVICE`, the `SimpleQueue` that filled it and `_adopt_device`: a
   worker picks its device out of `shared_objects` by worker id, and binds the
