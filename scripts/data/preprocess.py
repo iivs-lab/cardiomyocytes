@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import hydra
 from dotenv import load_dotenv
@@ -16,10 +16,10 @@ if TYPE_CHECKING:
 
 load_dotenv()
 
-CONFIG_PATH = os.environ["CONFIGS_ROOT"]
-CONFIG_NAME = "data/preprocess/config"
+CONFIG_PATH: Final = os.environ["CONFIGS_ROOT"]
+CONFIG_NAME: Final = "data/preprocess/config"
 
-STAGE = "preprocess"
+STAGE: Final = "preprocess"
 
 
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name=CONFIG_NAME)

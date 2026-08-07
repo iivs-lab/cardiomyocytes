@@ -3,7 +3,7 @@ from __future__ import annotations
 __all__ = ("describe_filter_kernel", "parse_filter_config")
 
 from dataclasses import asdict
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 from hydra.utils import instantiate
 
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
 
-_WHITELIST = ("iivs_cardio.data.transforms.filtering.kernel.*",)
+_WHITELIST: Final = ("iivs_cardio.data.transforms.filtering.kernel.*",)
 
 
 def parse_filter_config(node: DictConfig | None) -> KernelConfig:

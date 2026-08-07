@@ -15,7 +15,7 @@ __all__ = (
 import logging
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, Final
 
 import torch
 from kaparoo.filesystem import ensure_dir_exists
@@ -35,9 +35,9 @@ if TYPE_CHECKING:
 
     from iivs_cardio.common.pipeline import StageFactory
 
-DEFAULT_WORKERS = unwrap_or_default(os.cpu_count(), 1)
+DEFAULT_WORKERS: Final = unwrap_or_default(os.cpu_count(), 1)
 
-_UNPINNED_THREADS = torch.get_num_threads()
+_UNPINNED_THREADS: Final = torch.get_num_threads()
 
 
 @dataclass

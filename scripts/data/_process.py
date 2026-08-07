@@ -16,7 +16,7 @@ __all__ = (
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import PhaseFileFolder, PhaseUnit, search_phase_bin_folders
@@ -89,8 +89,8 @@ class TargetConfig:
     range_file: str = "value_range"
 
 
-SELECTION_LIMIT = 5
-SELECTION_SPECS = (".json", ".txt")
+SELECTION_LIMIT: Final = 5
+SELECTION_SPECS: Final = (".json", ".txt")
 
 
 def _subpath(source_config: SourceConfig) -> str:

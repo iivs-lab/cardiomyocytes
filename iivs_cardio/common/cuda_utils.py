@@ -2,7 +2,7 @@ from __future__ import annotations
 
 __all__ = ("cupy_to_gpumat", "gpumat_to_cupy", "gpumat_to_tensor", "tensor_to_gpumat")
 
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Final, cast
 
 import cupy as cp
 import cv2
@@ -13,8 +13,8 @@ if TYPE_CHECKING:
 
 # cv2.cuda.GpuMat exposes `cudaPtr()` (a cudawarped extension) and a padded row
 # `step`, so a GpuMat is wrapped as a strided CuPy view rather than copied.
-_DEPTH_TO_DTYPE: dict[int, type] = {cv2.CV_8U: cp.uint8, cv2.CV_32F: cp.float32}
-_DTYPE_CH_TO_CVTYPE: dict[tuple[type, int], int] = {
+_DEPTH_TO_DTYPE: Final[dict[int, type]] = {cv2.CV_8U: cp.uint8, cv2.CV_32F: cp.float32}
+_DTYPE_CH_TO_CVTYPE: Final[dict[tuple[type, int], int]] = {
     (cp.uint8, 1): cv2.CV_8UC1,
     (cp.float32, 1): cv2.CV_32FC1,
     (cp.float32, 2): cv2.CV_32FC2,

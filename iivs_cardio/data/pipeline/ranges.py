@@ -17,7 +17,7 @@ __all__ = (
 import json
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, Self, override
+from typing import TYPE_CHECKING, Any, Final, Protocol, Self, override
 
 from kaparoo.filesystem import (
     StagedFile,
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from iivs_cardio.common.pipeline import Step
 
 
-DOCUMENT_EXT = ".json"
+DOCUMENT_EXT: Final = ".json"
 
 
 def _entry[T](

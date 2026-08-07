@@ -4,7 +4,7 @@ __all__ = ("DEVICE_KINDS", "Device", "DeviceKind", "DeviceLike")
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import TYPE_CHECKING, Literal, get_args
+from typing import TYPE_CHECKING, Final, Literal, get_args
 
 import torch
 
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 DeviceKind = Literal["cpu", "cuda"]
 
-DEVICE_KINDS: frozenset[DeviceKind] = frozenset(get_args(DeviceKind))
+DEVICE_KINDS: Final[frozenset[DeviceKind]] = frozenset(get_args(DeviceKind))
 
 # What a caller may write for a device; `Device` is the form it is stored as.
 type DeviceLike = str | torch.device | Device
