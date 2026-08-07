@@ -491,8 +491,10 @@ def test_a_short_selection_is_listed_one_to_a_line(caplog):
 def test_a_long_selection_points_at_the_config_instead(caplog):
     # Listing it would bury the lines around it, and the job's own `.hydra` holds
     # it exactly: `config.yaml` always, as part of the composed config, and
-    # `overrides.yaml` too when the command line is what set it. A sweep gives
-    # every job its own pair, so the paths hold there as well.
+    # `overrides.yaml` whenever the command line is what set it -- which is the
+    # usual way, since both selections default to null. The path stays relative
+    # because the log file naming it already sits in that directory, which is
+    # what keeps a sweep's jobs pointing at their own copies.
     names = [f"TL_{index:02d}" for index in range(SELECTION_LIMIT + 1)]
 
     logged = _logged(caplog, SourceConfig(root="/d", exclude=names))

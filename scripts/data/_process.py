@@ -83,12 +83,8 @@ def _log_selection(logger: Logger, verb: str, value: list[str] | str) -> None:
         return
 
     if (count := len(value)) > SELECTION_LIMIT:
-        log_indented(
-            logger,
-            "%s %d, listed in .hydra/{config,overrides}.yaml",
-            verb,
-            count,
-        )
+        record = ".hydra/{config,overrides}.yaml"
+        log_indented(logger, "%s %d, listed in %s", verb, count, record)
         return
 
     log_indented(logger, "%s:", verb)
