@@ -50,76 +50,6 @@ class ComputeConfig:
     progress_bar: bool = True
 
 
-def _workers(config: ComputeConfig, *, is_cuda: bool) -> str:
-    if is_cuda:
-        if not config.gpu_ids:
-            return "one worker per visible gpu"
-
-        return f"one worker per gpu ({', '.join(map(str, config.gpu_ids))})"
-
-    if config.workers is None:
-        return "one worker per core"
-
-    if config.workers <= 1:
-        return "one worker, in this process"
-
-    return f"{config.workers} workers"
-
-
-def log_compute_config(config: ComputeConfig, logger: Logger) -> None:
-    try:
-        is_cuda = Device.resolve(config.device).is_cuda
-    except ValueError:
-        log_indented(logger, "compute: %s", config.device, depth=0)
-    else:
-        where = _workers(config, is_cuda=is_cuda)
-        log_indented(logger, "compute: %s, %s", config.device, where, depth=0)
-
-    if config.lifespan is not None:
-        log_indented(logger, "replacing a worker after %d tasks", config.lifespan)
-
-    if config.log_insights:
-        log_indented(logger, "reporting how busy each worker was")
-
-    if not config.progress_bar:
-        log_indented(logger, "showing no progress bar")
-
-
-def plan_devices(config: ComputeConfig) -> tuple[Device, ...]:
-    if not Device.resolve(config.device).is_cuda:
-        if config.gpu_ids is not None:
-            msg = "`gpu_ids` has no effect on cpu: drop it, or set `compute=cuda`"
-            raise ValueError(msg)
-
-        workers = unwrap_or_default(config.workers, DEFAULT_WORKERS)
-        if workers < 0:
-            msg = f"invalid worker count {workers}: expected 0 or more, or null"
-            raise ValueError(msg)
-
-        return Device.resolve_all(["cpu"] * max(workers, 1))
-
-    if config.workers is not None:
-        msg = "`workers` has no effect on cuda: use `gpu_ids` to pick the devices"
-        raise ValueError(msg)
-
-    if not config.gpu_ids:
-        devices = Device.visible_cuda()
-        if not devices:
-            msg = "no CUDA device is visible: set `compute=cpu`, or check the driver"
-            raise ValueError(msg)
-
-        return devices
-
-    return Device.resolve_all(f"cuda:{index}" for index in config.gpu_ids)
-
-
-def pin_threads(max_workers: int) -> None:
-    if max_workers <= 1:
-        return
-
-    torch.set_num_threads(max(1, _UNPINNED_THREADS // max_workers))
-
-
 class IncompleteRunError(RuntimeError):
     def __init__(self, failed: Mapping[str, str], total: int) -> None:
         self.failed = dict(failed)
@@ -166,6 +96,54 @@ class SharedContext:
     log_level: int = logging.INFO
 
 
+def log_compute_config(config: ComputeConfig, logger: Logger) -> None:
+    log_indented(logger, "compute: %s", config.device, depth=0)
+
+    if config.lifespan is not None:
+        log_indented(logger, "replacing a worker after %d tasks", config.lifespan)
+
+    if config.log_insights:
+        log_indented(logger, "reporting how busy each worker was")
+
+    if not config.progress_bar:
+        log_indented(logger, "showing no progress bar")
+
+
+def plan_devices(config: ComputeConfig) -> tuple[Device, ...]:
+    if not Device.resolve(config.device).is_cuda:
+        if config.gpu_ids is not None:
+            msg = "`gpu_ids` has no effect on cpu: drop it, or set `compute=cuda`"
+            raise ValueError(msg)
+
+        workers = unwrap_or_default(config.workers, DEFAULT_WORKERS)
+        if workers < 0:
+            msg = f"invalid worker count {workers}: expected 0 or more, or null"
+            raise ValueError(msg)
+
+        return Device.resolve_all(["cpu"] * max(workers, 1))
+
+    if config.workers is not None:
+        msg = "`workers` has no effect on cuda: use `gpu_ids` to pick the devices"
+        raise ValueError(msg)
+
+    if not config.gpu_ids:
+        devices = Device.visible_cuda()
+        if not devices:
+            msg = "no CUDA device is visible: set `compute=cpu`, or check the driver"
+            raise ValueError(msg)
+
+        return devices
+
+    return Device.resolve_all(f"cuda:{index}" for index in config.gpu_ids)
+
+
+def pin_threads(max_workers: int) -> None:
+    if max_workers <= 1:
+        return
+
+    torch.set_num_threads(max(1, _UNPINNED_THREADS // max_workers))
+
+
 def _init_worker(worker_id: int, context: SharedContext) -> None:
     if context.log_folder is not None:
         num_workers = len(context.devices)
@@ -188,6 +166,45 @@ def _run_on_worker(
         return index, f"{type(error).__name__}: {error}"
 
     return None
+
+
+def _watch(
+    outcomes: Iterable[tuple[int, str] | None],
+    stages: StageFactory,
+    logger: logging.Logger,
+    total: int,
+) -> list[tuple[int, str]]:
+    failed: list[tuple[int, str]] = []
+
+    for index, outcome in enumerate(outcomes):
+        if outcome is not None:
+            failed.append(outcome)
+
+        verdict = "done" if outcome is None else "failed"
+        logger.info("%s %s (%d/%d)", stages.get_name(index), verdict, index + 1, total)
+
+    return failed
+
+
+def log_insights(insights: dict[str, Any], name: str, *, unit: str = "it") -> None:
+    logger = logging.getLogger(name)
+
+    if not insights:
+        logger.warning("nothing to report: the pool collected no insights")
+        return
+
+    subsets = ("working", "waiting", "starting/stopping")
+    shares = ", ".join(f"%.1f%% {subset}" for subset in subsets)
+    summary = f"workers spent %s: {shares}"
+    total_time = insights["total_time"]
+    working = insights["working_ratio"] * 100
+    waiting = insights["waiting_ratio"] * 100
+    logger.info(summary, total_time, working, waiting, 100 - working - waiting)
+
+    per_worker = "worker %d completed %d %s in %s"
+    rows = zip(insights["n_completed_tasks"], insights["working_time"], strict=True)
+    for worker_id, (completed, spent) in enumerate(rows):
+        log_indented(logger, per_worker, worker_id, completed, unit, spent)
 
 
 def run_all(
@@ -257,42 +274,3 @@ def run_all(
             logger.error("%s: %s", name, why)
 
         raise IncompleteRunError(named, num_stages)
-
-
-def _watch(
-    outcomes: Iterable[tuple[int, str] | None],
-    stages: StageFactory,
-    logger: logging.Logger,
-    total: int,
-) -> list[tuple[int, str]]:
-    failed: list[tuple[int, str]] = []
-
-    for index, outcome in enumerate(outcomes):
-        if outcome is not None:
-            failed.append(outcome)
-
-        verdict = "done" if outcome is None else "failed"
-        logger.info("%s %s (%d/%d)", stages.get_name(index), verdict, index + 1, total)
-
-    return failed
-
-
-def log_insights(insights: dict[str, Any], name: str, *, unit: str = "it") -> None:
-    logger = logging.getLogger(name)
-
-    if not insights:
-        logger.warning("nothing to report: the pool collected no insights")
-        return
-
-    subsets = ("working", "waiting", "starting/stopping")
-    shares = ", ".join(f"%.1f%% {subset}" for subset in subsets)
-    summary = f"workers spent %s: {shares}"
-    total_time = insights["total_time"]
-    working = insights["working_ratio"] * 100
-    waiting = insights["waiting_ratio"] * 100
-    logger.info(summary, total_time, working, waiting, 100 - working - waiting)
-
-    per_worker = "worker %d completed %d %s in %s"
-    rows = zip(insights["n_completed_tasks"], insights["working_time"], strict=True)
-    for worker_id, (completed, spent) in enumerate(rows):
-        log_indented(logger, per_worker, worker_id, completed, unit, spent)

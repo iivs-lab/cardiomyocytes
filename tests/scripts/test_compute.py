@@ -233,33 +233,22 @@ def _logged(caplog, **config):
 @pytest.mark.parametrize(
     ("config", "head"),
     (
-        ({}, "compute: cpu, one worker per core"),
-        ({"workers": 0}, "compute: cpu, one worker, in this process"),
-        ({"workers": 4}, "compute: cpu, 4 workers"),
-        ({"device": "cuda"}, "compute: cuda, one worker per visible gpu"),
-        (
-            {"device": "cuda", "gpu_ids": []},
-            "compute: cuda, one worker per visible gpu",
-        ),
-        (
-            {"device": "cuda", "gpu_ids": [0, 2]},
-            "compute: cuda, one worker per gpu (0, 2)",
-        ),
+        ({}, "compute: cpu"),
+        ({"workers": 4}, "compute: cpu"),
+        ({"device": "cuda"}, "compute: cuda"),
+        ({"device": "cuda", "gpu_ids": [0, 2]}, "compute: cuda"),
     ),
 )
-def test_the_head_says_the_device_and_how_many_workers_it_will_raise(
-    caplog, config, head
-):
-    # One worker per device either way -- `plan_devices` answers in devices and
-    # `run_all` takes a worker per device -- so a GPU run is as much a pool as a
-    # CPU one. Only which field sets the count differs.
+def test_the_head_says_the_device_and_leaves_the_count_to_the_run(caplog, config, head):
+    # `run_all` names the workers it resolved, and a count guessed from the
+    # configuration would only say the same thing less reliably.
     assert _logged(caplog, **config)[0] == head
 
 
 def test_a_default_run_says_nothing_beyond_its_head(caplog):
     # `run_all` reports the plan it resolved, so a configuration that moved
     # nothing else has nothing to add.
-    assert _logged(caplog) == ["compute: cpu, one worker per core"]
+    assert _logged(caplog) == ["compute: cpu"]
 
 
 @pytest.mark.parametrize(
@@ -277,13 +266,12 @@ def test_a_setting_a_run_moved_gets_a_line(caplog, config, said):
 @pytest.mark.parametrize("config", ({"lifespan": None}, {"log_insights": False}))
 def test_a_setting_left_alone_gets_none(caplog, config):
     # Silence is the default, which `run_all` then answers for itself.
-    assert _logged(caplog, **config) == ["compute: cpu, one worker per core"]
+    assert _logged(caplog, **config) == ["compute: cpu"]
 
 
 def test_a_device_that_cannot_be_resolved_is_still_logged(caplog):
     # Refusing it here would cost the block that shows what was refused, so the
-    # spec is taken verbatim, without a worker count it cannot know, and
-    # `plan_devices` is left to turn it down.
+    # spec is taken verbatim and `plan_devices` is left to turn it down.
     assert _logged(caplog, device="tpu") == ["compute: tpu"]
 
     with pytest.raises(ValueError, match=r"invalid device spec"):
