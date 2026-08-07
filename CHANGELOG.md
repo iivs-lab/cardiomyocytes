@@ -42,7 +42,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   into a reader for them.
 - `preprocess` writes the filtered frames when `target.save_frames` is set.
   `target.overwrite` decides whether an output already under `target.root` may
-  be replaced. `FrameTree` carries what every sequence's writer shares
+  be replaced, and `target.subpath` where a written sequence keeps its frames,
+  defaulting to wherever the source keeps its own. Naming one is what lets a run
+  write beside the frames it read -- `Phase/Float/FilteredBin` next to
+  `Phase/Float/Bin` -- rather than over them, and a run whose frames would land
+  on the source is refused before the search: a sequence is committed by
+  replacing its folder whole, so writing back to where it was read from
+  destroyed the acquisition under a run that logged `N of N done` and exited 0.
+  `FrameTree` carries what every sequence's writer shares
   and `PhaseStageFactory` hands out a stage with its hooks already registered,
   so whatever owns a stage never wires that stage's side branches.
 - `preprocess` refuses `target.save_frames` in a `--multirun`. Frames go to
@@ -89,7 +96,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   from the roster against the parts on disk rather than passed in, since a
   sequence is missing whether it raised, died with its worker, or never ran.
 - `mpire` and `tqdm` in the `scripts` group, and `compute.show_progress` /
-  `compute.measure_workers` / `compute.tasks_per_worker` to drive the pool.
+  `compute.measure_workers` / `compute.tasks_per_worker` to drive the pool. The
+  pool starts its workers with `spawn` rather than the platform's default, which
+  is `fork` on Linux: `run_all` plans its devices before the pool starts,
+  and a worker forked after this process has touched CUDA inherits a context it
+  cannot use, so every item of a multi-GPU run would have failed. `Device`
+  counts the GPUs without initializing CUDA here for the same reason.
 - `pin_threads`, holding each worker to `torch`'s default thread count divided
   by the worker count. Every process otherwise sizes its pool to the whole
   machine and they contend: measured on 64 cores, sixteen unpinned workers ran
@@ -171,7 +183,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `target.range_file` defaults to `value_range` rather than `phase_range`. The
   document holds whatever a stage measured, and (2) and (3) will write one too.
 - `search_sources` tells its two failures apart -- finding nothing under `root`,
-  and filtering everything out -- since they are fixed differently.
+  and filtering everything out -- since they are fixed differently. It also
+  refuses a sequence whose frames are not numbered from zero without a gap,
+  naming the sequence, before any of them runs. Discovery is a name pattern and
+  a sort, so a folder missing a frame opened as an ordinary shorter sequence:
+  the filter joined the frames either side of the gap as neighbours, and the
+  tree written back out was numbered densely, which took the gap out of the
+  data entirely and left the run reporting success over numbers that were wrong.
 - The script helpers split by what they know: `scripts/_hydra.py` holds the
   hydra boundary (`apply_schema`, `output_directory`, `is_multirun`),
   `scripts/_compute.py` the machine's division (`ComputeConfig`, `plan_devices`,
