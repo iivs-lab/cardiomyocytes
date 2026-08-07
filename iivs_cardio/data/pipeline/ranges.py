@@ -17,6 +17,7 @@ __all__ = (
 import json
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
+from math import isfinite
 from typing import TYPE_CHECKING, Any, Final, Protocol, Self, override
 
 from kaparoo.filesystem import (
@@ -66,6 +67,26 @@ def _entry[T](
     return value
 
 
+def _number(document: Mapping[str, Any], key: str) -> float:
+    """Read `key` from a document as a bound, refusing what only looks like one.
+
+    `bool` is an `int` to `isinstance`, so `true` would otherwise read as 1.0
+    and a pair of them as a range running backwards. A non-finite bound is
+    refused here rather than folded: `min` and `max` carry a NaN through or
+    drop it depending on where it sits, so one that got in would fold to
+    whatever the order of the parts happened to be.
+
+    Raises:
+        ValueError: If the value is absent, not a number, or not finite.
+    """
+    value = _entry(document, key, (int, float))
+    if isinstance(value, bool) or not isfinite(value):
+        msg = f"malformed range document: {key!r} is {value!r}"
+        raise ValueError(msg)
+
+    return float(value)
+
+
 def _counted(count: int, noun: str) -> str:
     """`count` of `noun`, pluralised for every count but one."""
     return f"{count} {noun}{'s' if count != 1 else ''}"
@@ -85,6 +106,19 @@ class ValueRange(ABC):
     source: str
     min_value: float
     max_value: float
+
+    def __post_init__(self) -> None:
+        """Refuse a range whose two ends are the wrong way round.
+
+        A folded range takes each end from the part that holds it, so it cannot
+        invert once its parts are this way up.
+
+        Raises:
+            ValueError: If the lowest value is above the highest.
+        """
+        if self.min_value > self.max_value:
+            msg = f"inverted range in {self.source!r}: {self} runs backwards"
+            raise ValueError(msg)
 
     def __str__(self) -> str:
         """The two bounds, shortened for reading rather than for reloading."""
@@ -123,12 +157,13 @@ class FrameRange(ValueRange):
         """Rebuild a frame range from `source`, `min_value` and `max_value`.
 
         Raises:
-            ValueError: If any of the three is absent or unreadable.
+            ValueError: If any of the three is absent or unreadable, or if the
+                two bounds run backwards.
         """
         return cls(
             _entry(document, "source", str),
-            float(_entry(document, "min_value", (int, float))),
-            float(_entry(document, "max_value", (int, float))),
+            _number(document, "min_value"),
+            _number(document, "max_value"),
         )
 
 
@@ -359,7 +394,7 @@ class SequenceRangeMeter:
             make_parents=True,
             encoding="utf-8",
         ) as file:
-            file.write(json.dumps(cache.to_dict(), indent=2))
+            file.write(json.dumps(cache.to_dict(), indent=2, allow_nan=False))
 
         self._cached = cache
 
@@ -455,7 +490,7 @@ def save_range_document(
         make_parents=True,
         encoding="utf-8",
     ) as file:
-        file.write(json.dumps(document, indent=2))
+        file.write(json.dumps(document, indent=2, allow_nan=False))
 
     return path
 
@@ -573,16 +608,24 @@ class RangeDocument:
 
         Raises:
             ValueError: If no part is there, one of them cannot be read, or one
-                is filed under a sequence other than the one it holds.
+                is filed under a sequence other than the one it holds. A part
+                that cannot be read is named, since the folder holds one file
+                per sequence and only the name says which to go and look at.
         """
         sequences = []
 
         for part in self.list_parts():
-            with part.open(encoding="utf-8") as file:
-                document = json.load(file)
+            name = self._source_of(part)
 
-            sequence = SequenceRange.from_dict(document)
-            if (name := self._source_of(part)) != sequence.source:
+            try:
+                with part.open(encoding="utf-8") as file:
+                    document = json.load(file)
+                sequence = SequenceRange.from_dict(document)
+            except (OSError, ValueError) as error:
+                msg = f"unreadable part {name!r}: {error}. Remove it, or run it again"
+                raise ValueError(msg) from error
+
+            if name != sequence.source:
                 msg = f"part {name!r} holds {sequence.source!r}: run {name!r} again"
                 raise ValueError(msg)
 

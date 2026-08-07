@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from contextlib import contextmanager
 from dataclasses import replace
 from typing import TYPE_CHECKING
@@ -390,6 +392,72 @@ def test_an_unset_worker_count_falls_back_to_the_machine(monkeypatch):
     assert len(plan_devices(ComputeConfig(device="cpu"))) == 3
     assert len(plan_devices(ComputeConfig(device="cpu", workers=None))) == 3
     assert len(plan_devices(ComputeConfig(device="cpu", workers=5))) == 5
+
+
+def test_the_default_worker_count_follows_this_process_s_own_affinity():
+    # `os.cpu_count()` answers for the machine, not for what this process may
+    # use, so a run under `taskset` or a scheduler's allocation would start a
+    # worker per core of the host and have them contend over its own few.
+    # The two agree on windows whatever the affinity mask, so only a linux run
+    # tells the constants apart -- which is where the pool is actually sized.
+    assert os.process_cpu_count() == compute.DEFAULT_WORKERS
+
+
+# ------------------------------ the progress bar -------------------------- #
+
+
+def _redirected(monkeypatch, *, tty: bool) -> None:
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: tty, raising=False)
+
+
+def test_a_redirected_run_draws_no_progress_bar(tmp_path, monkeypatch, caplog):
+    # `tqdm` renders with a carriage return, so a redirected pool writes one
+    # long line of fragments into the log it was pointed at -- at the timer's
+    # own rate, not the run's.
+    _redirected(monkeypatch, tty=False)
+    drawn = []
+    monkeypatch.setattr(
+        compute, "trange", lambda *a, **kw: drawn.append(kw) or range(*a)
+    )
+
+    config = replace(_compute(0), show_progress=True)
+    with caplog.at_level(logging.WARNING):
+        run_all(_Stages(4, tmp_path / "done"), config)
+
+    assert drawn
+    assert drawn[0]["disable"] is True
+    assert "stderr is not a terminal" in caplog.text
+
+
+def test_a_watched_run_still_draws_one(tmp_path, monkeypatch, caplog):
+    # The other half: the check must not disable the bar everywhere, which is
+    # what an assertion on the redirected case alone would let through.
+    _redirected(monkeypatch, tty=True)
+    drawn = []
+    monkeypatch.setattr(
+        compute, "trange", lambda *a, **kw: drawn.append(kw) or range(*a)
+    )
+
+    config = replace(_compute(0), show_progress=True)
+    with caplog.at_level(logging.WARNING):
+        run_all(_Stages(4, tmp_path / "done"), config)
+
+    assert drawn
+    assert drawn[0]["disable"] is False
+    assert "stderr is not a terminal" not in caplog.text
+
+
+def test_a_run_told_not_to_draw_says_nothing_about_the_terminal(
+    tmp_path, monkeypatch, caplog
+):
+    # The warning is for a run that asked and cannot have it. One that never
+    # asked would only be told something it did not want to know.
+    _redirected(monkeypatch, tty=False)
+
+    with caplog.at_level(logging.WARNING):
+        run_all(_Stages(4, tmp_path / "done"), _compute(0))
+
+    assert "stderr is not a terminal" not in caplog.text
 
 
 # ---------------------------- the configuration log ----------------------- #

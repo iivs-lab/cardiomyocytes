@@ -14,6 +14,7 @@ __all__ = (
 
 import logging
 import os
+import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Final
 
@@ -35,7 +36,9 @@ if TYPE_CHECKING:
 
     from iivs_cardio.common.pipeline import StageFactory
 
-DEFAULT_WORKERS: Final = unwrap_or_default(os.cpu_count(), 1)
+# Affinity-aware, so `taskset`, a cpuset, or a scheduler's allocation is
+# followed. A cgroup cpu quota is not visible here and is not followed.
+DEFAULT_WORKERS: Final = unwrap_or_default(os.process_cpu_count(), 1)
 
 # Named rather than left to `mpire`, which forks where the platform allows it.
 # A worker cannot inherit this process's CUDA context, only start its own.
@@ -57,7 +60,8 @@ class ComputeConfig:
         tasks_per_worker: how many items a worker takes before it is replaced,
             or `None` to keep it for the whole run.
         measure_workers: whether to ask the pool how busy each worker was.
-        show_progress: whether to draw a progress bar.
+        show_progress: whether to draw a progress bar, when there is a terminal
+            to draw it on. A redirected run says so and leaves it undrawn.
     """
 
     device: str = "cpu"
@@ -366,7 +370,12 @@ def run_all(
 
     log_level = logger.getEffectiveLevel()
     context = SharedContext(name, stages, devices, log_folder, log_level)
-    show_progress = config.show_progress and num_stages > 1
+
+    watched = sys.stderr.isatty()
+    if config.show_progress and not watched:
+        logger.warning("not drawing progress: stderr is not a terminal")
+
+    show_progress = config.show_progress and watched and num_stages > 1
 
     failed: dict[str, str] = {}
 

@@ -749,6 +749,48 @@ def test_a_malformed_document_is_refused_by_the_entry_it_stumbled_on(
         kind.from_dict(document)
 
 
+@pytest.mark.parametrize(
+    ("named", "value"), (("min_value", True), ("max_value", False))
+)
+def test_a_boolean_bound_is_refused_rather_than_read_as_one_or_zero(named, value):
+    # `isinstance(True, int)` is true, so `true` would read as 1.0 -- and the
+    # pair {"min_value": true, "max_value": false} as [1.0, 0.0], a range
+    # running backwards that nothing downstream would question.
+    document = {"source": "a", "min_value": 0.0, "max_value": 1.0, named: value}
+
+    with pytest.raises(ValueError, match=rf"malformed range document: '{named}'"):
+        FrameRange.from_dict(document)
+
+
+@pytest.mark.parametrize(
+    ("named", "value"),
+    (
+        ("min_value", float("nan")),
+        ("max_value", float("nan")),
+        ("min_value", float("-inf")),
+        ("max_value", float("inf")),
+    ),
+)
+def test_a_non_finite_bound_is_refused_where_it_is_read(named, value):
+    # `min` and `max` carry a NaN through or drop it depending on which part
+    # holds it, so a document with one folds to whatever order its parts were
+    # in. Refused at the read, since nothing this project writes holds one.
+    document = {"source": "a", "min_value": 0.0, "max_value": 1.0, named: value}
+
+    with pytest.raises(ValueError, match=rf"malformed range document: '{named}'"):
+        FrameRange.from_dict(document)
+
+
+def test_a_range_that_runs_backwards_is_refused():
+    # What a bound is for is comparison, and a pair the wrong way round answers
+    # every one of them wrongly without ever looking malformed.
+    with pytest.raises(ValueError, match=r"inverted range in 'a'"):
+        FrameRange("a", 1.0, 0.0)
+
+    with pytest.raises(ValueError, match=r"inverted range in 'a'"):
+        FrameRange.from_dict({"source": "a", "min_value": 1.0, "max_value": 0.0})
+
+
 def test_an_integer_bound_is_taken_as_the_float_it_stands_for():
     # JSON writes a whole number without its point, so a bound that happens to
     # land on one comes back as `int` and must not be refused for it.
@@ -796,3 +838,59 @@ def test_a_sequence_named_with_a_dot_still_files_and_reads_back(tmp_path, source
     ]
     assert [sequence.source for sequence in document.to_range().sequences] == [source]
     assert _saved(tmp_path)["coverage"]["skipped"] == []
+
+
+def test_a_fold_is_the_same_whichever_order_the_parts_arrive_in():
+    # The order dependence a NaN used to introduce, pinned from the other side:
+    # the same parts in any order fold to the same bounds.
+    bounds = ((2.0, 3.0), (0.5, 9.0), (1.0, 4.0))
+
+    forward = _sequence("TL_00", *bounds)
+    reversed_ = _sequence("TL_00", *reversed(bounds))
+
+    assert (forward.min_value, forward.max_value) == (0.5, 9.0)
+    assert (reversed_.min_value, reversed_.max_value) == (0.5, 9.0)
+
+
+def test_a_document_is_written_as_json_a_strict_reader_accepts(tmp_path):
+    # `json.dumps` writes `NaN` and `Infinity` by default, which are not JSON
+    # and which a strict reader refuses. Nothing here can hold one, so the
+    # guard is what says a settings block cannot smuggle one in either.
+    path = tmp_path / "value_range.json"
+    dataset = DatasetRange("plate_A", (_sequence("TL_00", (0.0, 1.0)),))
+
+    with pytest.raises(ValueError, match=r"Out of range float"):
+        save_range_document(path, dataset, settings={"threshold": float("nan")})
+
+    assert not path.exists()
+
+
+# ------------------------- a part that cannot be read --------------------- #
+
+
+def test_an_unreadable_part_says_which_one_it_was(tmp_path):
+    # The folder holds one file per sequence, so without the name there is
+    # nothing to go and look at -- and the fold reads them in sorted order,
+    # which is not the order they were written in.
+    document = RangeDocument(tmp_path / "range", sequence_names=["a", "b"], source="p")
+    _scan(_meter(tmp_path, "a"), (0.0, 1.0))
+    _scan(_meter(tmp_path, "b"), (0.0, 5.0))
+    (document.parts_root / "b.json").write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"unreadable part 'b'.*run it again"):
+        document.to_range()
+
+
+def test_a_part_holding_a_backwards_range_is_named_too(tmp_path):
+    # Malformed is not only unparseable: a part whose bounds are the wrong way
+    # round parses cleanly and is refused a layer later, and the name has to
+    # survive that far too.
+    document = RangeDocument(tmp_path / "range", sequence_names=["a"], source="p")
+    _scan(_meter(tmp_path, "a"), (0.0, 1.0))
+
+    frame = {"source": "f", "min_value": 1.0, "max_value": 0.0}
+    broken = json.dumps({"source": "a", "frames": [frame]})
+    (document.parts_root / "a.json").write_text(broken, encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"unreadable part 'a'.*inverted range"):
+        document.to_range()
