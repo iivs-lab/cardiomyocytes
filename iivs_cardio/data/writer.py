@@ -34,14 +34,15 @@ class KoalaFrameWriter[T]:
     an error, or with no frame written at all, leaves the destination as it was.
 
     Type Parameters:
-        T: what a frame is, as `save` expects it.
+        T: The type of one frame, as `save` expects it.
 
     Args:
-        root: where the finished folder goes.
-        save: writes one frame to one path.
-        stem: the part of a frame's name after its number.
-        ext: the extension a frame is written with.
-        overwrite: whether an existing folder may be replaced.
+        root: The folder the finished frames go into.
+        save: A function writing one frame to one path.
+        stem: The part of a frame's name after its number.
+        ext: The extension a frame is written with.
+        overwrite: Whether an existing folder may be replaced. Defaults to
+            False.
 
     Raises:
         FileExistsError: If the destination is there and `overwrite` is not set.
@@ -68,6 +69,9 @@ class KoalaFrameWriter[T]:
     def write(self, step: Step[T, Any]) -> None:
         """Write the frame in `step`, numbered after the last one written.
 
+        Args:
+            step: The step to write. One carrying no frame is passed over.
+
         Raises:
             ValueError: If a frame does not follow the one before it at the
                 source, since the numbering here would close the gap.
@@ -87,15 +91,22 @@ class KoalaFrameWriter[T]:
         self._source = step.index
 
     def __call__(self, step: Step[T, Any]) -> None:
-        """Write `step`, so the writer can be registered as a hook directly."""
+        """Write `step`, so the writer can be registered as a hook directly.
+
+        Args:
+            step: The step to write.
+        """
         self.write(step)
 
     def report(self) -> str | None:
-        """Return one line naming how many frames landed, or `None` before any.
+        """Return one line naming how many frames landed.
 
         Frames are staged and moved into place together, so there is nothing to
         report until that move: a sequence that was interrupted or gave up has
         no folder to point at, however many frames it had staged by then.
+
+        Returns:
+            The line, or `None` before the folder reached its destination.
         """
         if not self._committed:
             return None
@@ -112,8 +123,8 @@ class KoalaFrameWriter[T]:
         empty `<sequence>/...` in the output tree for every sequence that gave
         up, which reads as a sequence that is there. Only folders that were
         absent when this writer opened are removed, and the climb stops at the
-        first one that will not come away: a sibling landed there meanwhile, or
-        another worker sharing the ancestor took it first.
+        first one that will not come away: another sequence landed in it
+        meanwhile, or a worker sharing the ancestor took it first.
         """
         self._root.abort()
 
@@ -136,8 +147,14 @@ class KoalaFrameWriter[T]:
 
         A move that fails takes the staged folder with it. It sits beside the
         destination under a hidden name, so leaving it there puts a `.tmp` in
-        the output tree for a sequence that has none of its frames -- and the
-        only other hand on it dies with the process.
+        the output tree for a sequence that has none of its frames, and the
+        only other reference to it dies with the process.
+
+        Args:
+            exc_type: The type of what the walk ended with, or `None` if it
+                finished.
+            exc: What the walk ended with, or `None` if it finished.
+            traceback: Where it was raised, or `None` if it finished.
 
         Raises:
             ValueError: If the sequence ended without a single frame, since
