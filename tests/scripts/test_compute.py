@@ -18,7 +18,9 @@ from scripts._compute import (
     IncompleteRunError,
     SharedContext,
     WorkerLogFolder,
-    _collect_failures,
+    Outcome,
+    RunRecord,
+    _collect_outcomes,
     _init_worker,
     log_compute_config,
     log_insights,
@@ -39,10 +41,17 @@ class _Stages:
     its own copy: what a worker did to itself never comes home.
     """
 
-    def __init__(self, count: int, dest: Path, explode_at: Iterable[int] = ()) -> None:
+    def __init__(
+        self,
+        count: int,
+        dest: Path,
+        explode_at: Iterable[int] = (),
+        reuse_at: Iterable[int] = (),
+    ) -> None:
         self._count = count
         self._dest = dest
         self._explode_at = frozenset(explode_at)
+        self._reuse_at = frozenset(reuse_at)
 
     @property
     def name(self) -> str:
@@ -54,12 +63,17 @@ class _Stages:
     def get_name(self, index: int) -> str:
         return f"item{index}"
 
-    def run_stage(self, index: int, device: Device) -> None:
+    def run_stage(self, index: int, device: Device) -> bool:
         if index in self._explode_at:
             msg = f"item {index} gave up"
             raise ValueError(msg)
 
+        if index in self._reuse_at:
+            return False
+
         (self._dest / f"{index:03d}.done").write_text("", encoding="utf-8")
+
+        return True
 
     @contextmanager
     def running(self) -> Iterator[_Stages]:
@@ -153,7 +167,7 @@ def test_a_branch_that_cannot_commit_does_not_bury_what_failed(tmp_path, caplog)
     assert failure.value.failed == {"item1": "ValueError: item 1 gave up"}
 
     logged = [record.getMessage() for record in caplog.records]
-    assert "2 of 3 done" in " ".join(logged)
+    assert "2 of 3 ready" in " ".join(logged)
     assert any("could not be closed" in message for message in logged)
 
 
@@ -218,6 +232,37 @@ def test_workers_take_a_share_of_the_machine_each(restored_thread_count):
     pin_threads(4)
 
     assert torch.get_num_threads() == max(1, restored_thread_count // 4)
+
+
+class _Talkative(_Stages):
+    """A factory whose items say something only a low level lets through."""
+
+    def run_stage(self, index: int, device: Device) -> bool:
+        logging.getLogger(self.name).debug("item %d had something to say", index)
+
+        return super().run_stage(index, device)
+
+
+@pytest.mark.usefixtures("restored_root_logger")
+def test_the_level_the_parent_runs_at_reaches_the_worker_files(tmp_path):
+    # A spawned worker starts at `WARNING` with no handlers, so the level has to
+    # travel with the rest of the context. The half below covers the arrival;
+    # this covers the departure, which nothing held: `run_all` could carry a
+    # constant and every other test would still pass, leaving the per sequence
+    # lines out of the worker files exactly when a long run needs reading.
+    dest = tmp_path / "done"
+    logging.getLogger("run").setLevel(logging.DEBUG)
+
+    run_all(
+        _Talkative(2, dest),
+        _compute(2),
+        log_folder=WorkerLogFolder(tmp_path),
+    )
+
+    written = "".join(
+        path.read_text(encoding="utf-8") for path in tmp_path.glob("worker*.log")
+    )
+    assert "had something to say" in written
 
 
 @pytest.mark.usefixtures("restored_root_logger")
@@ -369,17 +414,76 @@ def test_a_failure_is_named_by_the_index_it_carries_not_by_when_it_returned(
     tmp_path, caplog
 ):
     stages = _Stages(3, tmp_path)
-    outcomes = [(2, "boom"), (0, None), (1, None)]
+    outcomes = [
+        Outcome(2, "boom"),
+        Outcome(0, None, computed=True),
+        Outcome(1, None, computed=False),
+    ]
+    record = RunRecord()
 
     with caplog.at_level(logging.INFO):
-        failed = _collect_failures(iter(outcomes), stages, logging.getLogger("run"))
+        _collect_outcomes(iter(outcomes), stages, logging.getLogger("run"), record)
 
-    assert failed == {"item2": "boom"}
+    assert record.failed == {"item2": "boom"}
+    assert record.unchanged == {"item1"}
+    assert record.returned == {"item0", "item1", "item2"}
+    assert record.ready == 2
     assert [record.getMessage() for record in caplog.records] == [
         "item2 failed (1/3)",
-        "item0 done (2/3)",
-        "item1 done (3/3)",
+        "item0 computed (2/3)",
+        "item1 unchanged (3/3)",
     ]
+
+
+def test_what_came_back_before_the_pool_died_is_kept(tmp_path, caplog):
+    # The collections belong to the caller, so a pool that dies part way leaves
+    # what it already said behind. Owning them here lost the grounds for a
+    # retry exactly when a run most needs them.
+    def outcomes():
+        yield Outcome(0, "boom")
+        yield Outcome(1, None, computed=False)
+        msg = "Worker-1 died unexpectedly"
+        raise RuntimeError(msg)
+
+    stages = _Stages(3, tmp_path)
+    record = RunRecord()
+
+    with pytest.raises(RuntimeError, match="died unexpectedly"):
+        _collect_outcomes(outcomes(), stages, logging.getLogger("run"), record)
+
+    assert record.failed == {"item0": "boom"}
+    assert record.unchanged == {"item1"}
+    assert record.returned == {"item0", "item1"}  # item2 never came back
+
+
+def test_items_the_pool_took_down_with_it_are_not_counted_ready(
+    tmp_path, caplog, monkeypatch
+):
+    # `ready` was every item the run had no failure for, which counts the ones
+    # that never ran: a pool dying after two of four said "3 of 4 ready". The
+    # difference between those two numbers is what a retry is built from.
+    # Patched at the worker, since what tears down is the pool rather than an
+    # item -- an item that raises comes back as a failure and is counted.
+    outcomes = iter([Outcome(0, "boom"), Outcome(1, None, computed=True)])
+
+    def vanish(worker_id, context, index):
+        try:
+            return next(outcomes)
+        except StopIteration:
+            msg = "Worker-1 died unexpectedly"
+            raise RuntimeError(msg) from None
+
+    monkeypatch.setattr(compute, "_run_on_worker", vanish)
+
+    with (
+        caplog.at_level(logging.INFO),
+        pytest.raises(IncompleteRunError, match=r"1 of 4 failed"),
+    ):
+        run_all(_Stages(4, tmp_path / "done"), _compute(0))
+
+    said = " ".join(caplog.messages)
+    assert "1 of 4 ready" in said
+    assert "2 never came back" in said
 
 
 def test_an_unset_worker_count_falls_back_to_the_machine(monkeypatch):
@@ -387,7 +491,7 @@ def test_an_unset_worker_count_falls_back_to_the_machine(monkeypatch):
     # came to mean. What the fallback owes is the machine's own answer, so the
     # machine is what it is checked against -- and moving that answer has to
     # move the plan with it.
-    monkeypatch.setattr(compute, "DEFAULT_WORKERS", 3)
+    monkeypatch.setattr(compute, "_DEFAULT_WORKERS", 3)
 
     assert len(plan_devices(ComputeConfig(device="cpu"))) == 3
     assert len(plan_devices(ComputeConfig(device="cpu", workers=None))) == 3
@@ -400,7 +504,7 @@ def test_the_default_worker_count_follows_this_process_s_own_affinity():
     # worker per core of the host and have them contend over its own few.
     # The two agree on windows whatever the affinity mask, so only a linux run
     # tells the constants apart -- which is where the pool is actually sized.
-    assert os.process_cpu_count() == compute.DEFAULT_WORKERS
+    assert os.process_cpu_count() == compute._DEFAULT_WORKERS
 
 
 # ------------------------------ the progress bar -------------------------- #
