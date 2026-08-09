@@ -234,9 +234,9 @@ scripts = [
 requires-dist = [
     { name = "beartype", specifier = ">=0.22.9" },
     { name = "cupy-cuda13x", specifier = ">=14.1.1" },
-    { name = "iivs-lib", extras = ["torch"], specifier = ">=0.3.1" },
+    { name = "iivs-lib", extras = ["torch"], specifier = ">=0.4.0" },
     { name = "jaxtyping", specifier = ">=0.3.11" },
-    { name = "kaparoo-python", specifier = ">=0.12.0" },
+    { name = "kaparoo-python", specifier = ">=0.13.1" },
     { name = "numpy", specifier = ">=2" },
     { name = "opencv-contrib-python", marker = "sys_platform != 'linux' and sys_platform != 'win32'" },
     { name = "opencv-contrib-python", marker = "sys_platform == 'linux'", url = "https://github.com/cudawarped/opencv-python-cuda-wheels/releases/download/4.13.0.90/opencv_contrib_python-4.13.0.90-cp37-abi3-linux_x86_64.whl" },
@@ -267,7 +267,7 @@ scripts = [
 
 [[package]]
 name = "iivs-lib"
-version = "0.3.1"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "imagecodecs" },
@@ -275,9 +275,9 @@ dependencies = [
     { name = "numpy" },
     { name = "tifffile" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1e/b8/06da3c8a0fa3471019a6fdbd5ff3db532526ea2eff99006c0a45ac42885c/iivs_lib-0.3.1.tar.gz", hash = "sha256:6f38d880908790cdde80c4e308107fa05c39641a43c42d4c2131adc76ab2bef3", size = 96930, upload-time = "2026-07-30T19:06:02.397Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b9/89/4ce826f44ad41f553dec1e0f8b1ea67368244863158c914dad119fe7cd3f/iivs_lib-0.4.0.tar.gz", hash = "sha256:d5c10a7ad380ae83fe28403e7943e1c73c84db4130406b4808f9b3652628c444", size = 97944, upload-time = "2026-08-09T09:26:36.907Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b9/5f/57557a3ca98da12bfb2d80264ef57809b9e10324d8943d0e12a9d1c2d0c5/iivs_lib-0.3.1-py3-none-any.whl", hash = "sha256:b2eb1ff1b2a1672805db6f2d07d330c9daa2cff499ed62c7754a27e593f22d24", size = 140369, upload-time = "2026-07-30T19:06:00.678Z" },
+    { url = "https://files.pythonhosted.org/packages/f8/50/9d6ec1621b5b68ac7e43006e4f60bb4983507f16aa087e65bf7f9bcac17f/iivs_lib-0.4.0-py3-none-any.whl", hash = "sha256:acce813e6a136fa2c62a1483323931616eb7712da4a6c96ac152933b1e08deef", size = 141678, upload-time = "2026-08-09T09:26:35.665Z" },
 ]
 
 [package.optional-dependencies]
@@ -361,11 +361,11 @@ wheels = [
 
 [[package]]
 name = "kaparoo-python"
-version = "0.12.0"
+version = "0.13.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/8e/fe/31c0533607de4d304fb6ab93f297e27bc6678a3d61c99085998d39baa838/kaparoo_python-0.12.0.tar.gz", hash = "sha256:eed0953d563a0a1af88f9330edcabaf78ca30119716a3f9793e3c5ffb3512cb8", size = 109501, upload-time = "2026-07-29T19:42:38.711Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9a/f5/5caff12f638b6cde7d3304c2f562596611a403aba3739b8b061af6df7162/kaparoo_python-0.13.1.tar.gz", hash = "sha256:ff988311dfdea0f262e51c8a128bd3e4a8699e6f0491463298b8e9b1a88e3f59", size = 114080, upload-time = "2026-08-09T08:55:45.211Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2a/09/ed4491d337dfc5178c94fce17331c9d56e390effc11e957f4d61f3888c88/kaparoo_python-0.12.0-py3-none-any.whl", hash = "sha256:354041fdec885d750408d393207a9832c2301175a2ca9f5256e7754db2ff152a", size = 104360, upload-time = "2026-07-29T19:42:37.128Z" },
+    { url = "https://files.pythonhosted.org/packages/1e/a9/dfc97a9d6e3fdfd9edfae1e908b8bc14a382be9f840830d115f4eb236471/kaparoo_python-0.13.1-py3-none-any.whl", hash = "sha256:aa0dcf171aeb0b2b5addc298255b3c83bb972842c061f01006a4f18a5ffe8dd3", size = 108887, upload-time = "2026-08-09T08:55:43.852Z" },
 ]
 
 [[package]]

@@ -9,33 +9,31 @@ __all__ = (
     "ShortInputPolicy",
     "UnsourcedOutputPolicy",
     "as_read_back",
-    "counted",
+    "ensure_policy",
     "find_unsourced",
-    "prune_above",
-    "read_policy",
 )
 
 import json
-from typing import TYPE_CHECKING, Final, Literal, cast, get_args
+from typing import TYPE_CHECKING, Final, Literal
 
 from kaparoo.filters import And, EndsWith, StartsWith
+from kaparoo.utils import ensure_one_of, literal_values
 
 if TYPE_CHECKING:
     from collections.abc import Container, Iterable, Mapping, Sequence
-    from pathlib import Path
 
 type ExistingOutputPolicy = Literal["error", "overwrite", "reuse"]
 type UnsourcedOutputPolicy = Literal["keep", "delete"]
 type ShortInputPolicy = Literal["take", "error"]
 
-EXISTING_OUTPUT_POLICIES: Final[tuple[ExistingOutputPolicy, ...]] = get_args(
-    ExistingOutputPolicy.__value__
+EXISTING_OUTPUT_POLICIES: Final[tuple[ExistingOutputPolicy, ...]] = literal_values(
+    ExistingOutputPolicy
 )
-UNSOURCED_OUTPUT_POLICIES: Final[tuple[UnsourcedOutputPolicy, ...]] = get_args(
-    UnsourcedOutputPolicy.__value__
+UNSOURCED_OUTPUT_POLICIES: Final[tuple[UnsourcedOutputPolicy, ...]] = literal_values(
+    UnsourcedOutputPolicy
 )
-SHORT_INPUT_POLICIES: Final[tuple[ShortInputPolicy, ...]] = get_args(
-    ShortInputPolicy.__value__
+SHORT_INPUT_POLICIES: Final[tuple[ShortInputPolicy, ...]] = literal_values(
+    ShortInputPolicy
 )
 
 STAGING: Final = And((StartsWith("."), EndsWith(".tmp")))
@@ -60,20 +58,15 @@ def as_read_back(settings: Mapping[str, object] | None) -> object:
     return json.loads(json.dumps(dict(settings), allow_nan=False))
 
 
-def counted(count: int, noun: str) -> str:
-    """Return `count` of `noun`, pluralised for every count but one.
-
-    Shared so that the lines the branches report, which a run prints one after
-    another, count the same way.
-    """
-    return f"{count} {noun}{'s' if count != 1 else ''}"
-
-
-def read_policy[T: str](value: str, allowed: Sequence[T], key: str) -> T:
+def ensure_policy[T: str](value: str, allowed: Sequence[T], key: str) -> T:
     """Read a policy a caller wrote as plain text, refusing one nobody offers.
 
     Configuration arrives as strings whatever the field is annotated as, so
     this is where a value becomes one of the policies the code branches on.
+
+    The check is `ensure_one_of`'s. What is kept here is the shape of the
+    refusal, which every other one in this package matches and which names the
+    setting rather than the argument that carried it.
 
     Args:
         value: The text the caller wrote.
@@ -86,12 +79,12 @@ def read_policy[T: str](value: str, allowed: Sequence[T], key: str) -> T:
     Raises:
         ValueError: If the value is not one of `allowed`.
     """
-    if value not in allowed:
+    try:
+        return ensure_one_of(value, allowed, name=key)
+    except ValueError:
         offered = ", ".join(repr(policy) for policy in allowed)
         msg = f"unsupported {key} {value!r}: expected {offered}"
-        raise ValueError(msg)
-
-    return cast("T", value)
+        raise ValueError(msg) from None
 
 
 def find_unsourced(present: Iterable[str], contents: Container[str]) -> list[str]:
@@ -110,29 +103,3 @@ def find_unsourced(present: Iterable[str], contents: Container[str]) -> list[str
         The names in `present` that `contents` does not hold, sorted.
     """
     return sorted(name for name in present if name not in contents)
-
-
-def prune_above(folder: Path, stop: Path) -> None:
-    """Remove `folder` and each parent it leaves empty, up to but not `stop`.
-
-    The climb ends at the first folder something else is still in, so one an
-    operator put here is not taken along with the sequence that happened to sit
-    next to it. A `folder` that is not under `stop` is left alone rather than
-    climbed from, since the guard would then be a name this walk never meets and
-    the climb would go on to the root of the filesystem.
-
-    Args:
-        folder: The folder to remove if it is empty, and to climb from.
-        stop: The folder to climb no further than, and never to remove. Nothing
-            happens unless `folder` is under it.
-    """
-    if stop not in folder.parents:
-        return
-
-    while folder != stop:
-        try:
-            folder.rmdir()
-        except OSError:  # not empty, not there, or not ours to remove
-            return
-
-        folder = folder.parent

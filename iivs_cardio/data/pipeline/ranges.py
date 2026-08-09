@@ -24,18 +24,18 @@ from kaparoo.filesystem import (
     StagedFile,
     ensure_dir_exists,
     ensure_file_extension,
+    prune_upward,
     reserve_path,
     search_files,
     stringify_path,
 )
 from kaparoo.filters import And, EndsWith, StartsWith
+from kaparoo.utils import quantify
 from kaparoo.utils.optional import unwrap_or_default
 
 from iivs_cardio.common.pipeline.branch import (
     as_read_back,
-    counted,
     find_unsourced,
-    prune_above,
 )
 from iivs_cardio.common.range import finite_range
 
@@ -395,7 +395,7 @@ class SequenceRangeMeter:
         if not self._frames:
             return None
 
-        frames = counted(len(self._frames), "frame")
+        frames = quantify(len(self._frames), "frame")
         return f"measured {self.to_range()} across {frames}"
 
     def __enter__(self) -> Self:
@@ -842,16 +842,15 @@ class RangeDocument:
         folded = set() if dataset is None else {s.source for s in dataset.sequences}
         given = set(self.selected)
 
-        covered = sum(name in folded for name in self.contents)
-        skipped = tuple(name for name in self.selected if name not in folded)
-        unselected = tuple(
-            name for name in self.contents if name not in folded and name not in given
-        )
-        reused = sum(name in folded for name in self._reused)
+        missing = [name for name in self.contents if name not in folded]
 
-        return Coverage(
-            self.found, len(self.selected), covered, reused, skipped, unselected
-        )
+        selected = len(self.selected)
+        covered = sum(name in folded for name in self.contents)
+        reused = sum(name in folded for name in self._reused)
+        skipped = tuple(name for name in self.selected if name not in folded)
+        unselected = tuple(name for name in missing if name not in given)
+
+        return Coverage(self.found, selected, covered, reused, skipped, unselected)
 
     def save(self) -> Path:
         """Fold the parts and write the document, coverage included.
@@ -898,7 +897,7 @@ class RangeDocument:
         dataset = self._saved
         coverage = self.get_coverage(dataset)
 
-        sequences = counted(coverage.found, "sequence")
+        sequences = quantify(coverage.found, "sequence")
         if coverage.covered != coverage.found:
             sequences = f"{coverage.covered} of {sequences}"
 
@@ -962,7 +961,7 @@ class RangeDocument:
                 stale.unlink()
 
         for folder in emptied:
-            prune_above(folder, self.parts_root)
+            prune_upward(folder, self.parts_root)
 
         return self
 
@@ -991,7 +990,7 @@ class RangeDocument:
         for name in self.list_unsourced():
             part = self.parts_root / f"{name}{DOCUMENT_EXT}"
             part.unlink()
-            prune_above(part.parent, self.parts_root)
+            prune_upward(part.parent, self.parts_root)
             dropped.append(name)
 
         return dropped

@@ -6,6 +6,7 @@ import logging
 from contextlib import AbstractContextManager, contextmanager
 from typing import TYPE_CHECKING, Any, Self
 
+from kaparoo.utils import quantify
 from kaparoo.utils.timer import Timer
 
 from iivs_cardio.common.logging import log_indented
@@ -187,7 +188,9 @@ class PhaseStageFactory:
             return
 
         listed = ", ".join(sorted(named))
-        self._log("%d output(s) have no source: %s", len(named), listed, nested=False)
+        outputs = quantify(len(named), "output")
+
+        self._log("%s with no source: %s", outputs, listed, nested=False)
 
     @contextmanager
     def running(self) -> Iterator[Self]:

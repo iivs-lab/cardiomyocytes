@@ -17,10 +17,8 @@ __all__ = (
     "UnsourcedOutputPolicy",
     "as_read_back",
     "close_together",
-    "counted",
+    "ensure_policy",
     "find_unsourced",
-    "prune_above",
-    "read_policy",
 )
 
 from iivs_cardio.common.pipeline.base import (
@@ -44,8 +42,6 @@ from iivs_cardio.common.pipeline.branch import (
     ShortInputPolicy,
     UnsourcedOutputPolicy,
     as_read_back,
-    counted,
+    ensure_policy,
     find_unsourced,
-    prune_above,
-    read_policy,
 )

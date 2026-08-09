@@ -4,10 +4,10 @@ __all__ = ("DEVICE_KINDS", "Device", "DeviceKind", "DeviceLike")
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import TYPE_CHECKING, Final, Literal, get_args
+from typing import TYPE_CHECKING, Final, Literal
 
 import torch
-from kaparoo.utils import unwrap_or_default
+from kaparoo.utils import literal_values, unwrap_or_default
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -17,10 +17,8 @@ type DeviceKind = Literal["cpu", "cuda"]
 # What a caller may write for a device; `Device` is the form it is stored as.
 type DeviceLike = str | torch.device | Device
 
-# Taken off the alias rather than written twice. `get_args` reads a
-# `TypeAliasType` as having no arguments of its own, so it is asked about the
-# `Literal` the alias stands for instead.
-DEVICE_KINDS: Final[frozenset[DeviceKind]] = frozenset(get_args(DeviceKind.__value__))
+# Taken off the alias rather than written twice.
+DEVICE_KINDS: Final[frozenset[DeviceKind]] = frozenset(literal_values(DeviceKind))
 
 
 def _cuda_count() -> int:

@@ -25,12 +25,13 @@ from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import PhaseFileFolder, PhaseUnit, search_phase_bin_folders
 from kaparoo.filesystem import (
     UnsupportedExtensionError,
-    dir_exists,
+    contains,
     ensure_file_extension,
+    is_spec_file,
     select,
     stringify_path,
 )
-from kaparoo.utils import unwrap_or_default
+from kaparoo.utils import quantify, unwrap_or_default
 from omegaconf import MISSING
 
 from iivs_cardio.common.logging import log_indented
@@ -38,8 +39,7 @@ from iivs_cardio.common.pipeline import (
     EXISTING_OUTPUT_POLICIES,
     SHORT_INPUT_POLICIES,
     UNSOURCED_OUTPUT_POLICIES,
-    counted,
-    read_policy,
+    ensure_policy,
 )
 from iivs_cardio.data.phase import PhaseFilteredSequence
 from iivs_cardio.data.pipeline import (
@@ -252,13 +252,12 @@ def _range_file(target_config: TargetConfig) -> Path:
 
 
 SELECTION_LIMIT: Final = 5
-SELECTION_SPECS: Final = (".json", ".txt")
 
 
 def _log_selection(logger: Logger, verb: str, value: list[str] | str) -> None:
     """Log a selection, listing it only while a list is short enough to read."""
     if isinstance(value, str):
-        if value.endswith(SELECTION_SPECS):
+        if is_spec_file(value):
             log_indented(logger, "%s as listed in %s", verb, value)
         else:
             log_indented(logger, "%s %s", verb, value)
@@ -305,7 +304,7 @@ def _log_frames(source_config: SourceConfig, logger: Logger) -> None:
     shown = [start + index * step for index in range(3)][: count or 3]
     listed = ", ".join(str(index) for index in shown)
     tail = "" if count is not None and count <= len(shown) else ", ..."
-    held = "" if count is None else f" (at most {counted(count, 'frame')})"
+    held = "" if count is None else f" (at most {quantify(count, 'frame')})"
     log_indented(logger, "reading frames %s%s%s", listed, tail, held)
 
     if count is not None and source_config.if_frames_short == "error":
@@ -427,19 +426,20 @@ def _log_short(
     if count is None:
         return
 
-    short = [
-        f"{sequence.name} ({len(contents[sequence.name])})"
-        for sequence in sequences
-        if len(contents[sequence.name]) < count
-    ]
+    short = []
+    for sequence in sequences:
+        held = len(contents[sequence.name])
+        if held < count:
+            short.append(f"{sequence.name} ({held})")
+
     if not short:
         return
 
     logger = logging.getLogger(name)
     listed = ", ".join(short)
-    logger.warning(
-        "%s gave fewer than %d: %s", counted(len(short), "sequence"), count, listed
-    )
+
+    label = quantify(len(short), "sequence")
+    logger.warning("%s gave fewer than %d: %s", label, count, listed)
 
 
 # One folder per sequence taken, against the contents of the dataset they came from.
@@ -469,12 +469,12 @@ def _source_key(config: SourceConfig) -> tuple[object, ...]:
 def _search_sources(config: SourceConfig) -> SearchResult:
     """Walk the root, open every sequence it holds, and keep the ones taken."""
     subpath = config.resolve_subpath()
+    holds_frames = contains(subpath, kind="dir")
 
-    folders = search_phase_bin_folders(
-        config.root,
-        subpath=subpath,
-        exclude=lambda folder: dir_exists(folder.parent / subpath),
-    )
+    def descend(folder: Path) -> bool:
+        return not holds_frames(folder)
+
+    folders = search_phase_bin_folders(config.root, subpath=subpath, descend=descend)
 
     if (num_folders := len(folders)) == 0:
         msg = f"no time-lapse holds a {subpath!r} folder: {config.root}"
@@ -512,7 +512,7 @@ def _search_sources(config: SourceConfig) -> SearchResult:
     }
 
     if config.frame_count is not None:
-        policy = read_policy(
+        policy = ensure_policy(
             config.if_frames_short, SHORT_INPUT_POLICIES, "if_frames_short"
         )
         short = {
@@ -522,7 +522,7 @@ def _search_sources(config: SourceConfig) -> SearchResult:
         }
         if short and policy == "error":
             name, held = next(iter(short.items()))
-            asked = counted(config.frame_count, "frame")
+            asked = quantify(config.frame_count, "frame")
             short_of = f"short of the {asked} asked for"
             msg = f"{name}: {held} frames after the stride, {short_of}"
             raise ValueError(msg)
@@ -641,7 +641,7 @@ def build_branches(
     branches = []
 
     subpath = source_config.resolve_subpath()
-    source_policy = read_policy(
+    source_policy = ensure_policy(
         target_config.if_sources_gone, UNSOURCED_OUTPUT_POLICIES, "if_sources_gone"
     )
 
@@ -657,7 +657,7 @@ def build_branches(
 
     if target_config.save_frames:
         target_subpath = target_config.resolve_subpath(subpath)
-        frame_policy = read_policy(
+        frame_policy = ensure_policy(
             target_config.if_frames_exist, FRAME_POLICIES, "if_frames_exist"
         )
         branches.append(
@@ -675,7 +675,7 @@ def build_branches(
     if target_config.save_ranges:
         path = Path(output_root, target_config.range_file)
         source = source_config.root
-        range_policy = read_policy(
+        range_policy = ensure_policy(
             target_config.if_ranges_exist, EXISTING_OUTPUT_POLICIES, "if_ranges_exist"
         )
 

@@ -22,12 +22,10 @@ __all__ = (
     "all_finite",
     "as_read_back",
     "close_together",
-    "counted",
+    "ensure_policy",
     "find_unsourced",
     "finite_range",
     "log_indented",
-    "prune_above",
-    "read_policy",
 )
 
 from iivs_cardio.common.device import DEVICE_KINDS, Device, DeviceKind, DeviceLike
@@ -51,9 +49,7 @@ from iivs_cardio.common.pipeline import (
     UnsourcedOutputPolicy,
     as_read_back,
     close_together,
-    counted,
+    ensure_policy,
     find_unsourced,
-    prune_above,
-    read_policy,
 )
 from iivs_cardio.common.range import all_finite, finite_range

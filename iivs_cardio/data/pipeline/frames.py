@@ -9,17 +9,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Self
 
-from kaparoo.filesystem import dir_exists, search_dirs
+from kaparoo.filesystem import contains, prune_upward, search_dirs
+from kaparoo.utils import quantify
 from kaparoo.utils.optional import unwrap_or_default
 
 from iivs_cardio.common.pipeline.branch import (
     EXISTING_OUTPUT_POLICIES,
     STAGING,
     as_read_back,
-    counted,
+    ensure_policy,
     find_unsourced,
-    prune_above,
-    read_policy,
 )
 from iivs_cardio.data.phase import phase_frame_writer
 from iivs_cardio.data.writer import RECORD_FILE
@@ -94,7 +93,7 @@ class FrameTree:
     _dropped: list[str] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        read_policy(self.if_frames_exist, FRAME_POLICIES, "if_frames_exist")
+        ensure_policy(self.if_frames_exist, FRAME_POLICIES, "if_frames_exist")
 
         names = unwrap_or_default(self.selected, tuple(self.contents))
         if unknown := [name for name in names if name not in self.contents]:
@@ -164,11 +163,11 @@ class FrameTree:
         if not root.is_dir():
             return []
 
-        subpath = self.subpath
+        holds_frames = contains(self.subpath, kind="dir")
         found = search_dirs(
             root,
-            predicate=lambda folder: dir_exists(folder / subpath),
-            exclude=lambda folder: dir_exists(folder.parent / subpath),
+            predicate=holds_frames,
+            descend=lambda folder: not holds_frames(folder),
             ordered=False,
         )
 
@@ -244,7 +243,7 @@ class FrameTree:
         for name in self.list_unsourced():
             folder = root / name
             shutil.rmtree(folder)
-            prune_above(folder.parent, root)
+            prune_upward(folder.parent, root)
             dropped.append(name)
 
         self._dropped.extend(dropped)
@@ -267,7 +266,7 @@ class FrameTree:
 
         for folder in search_dirs(root, name_filter=STAGING):
             shutil.rmtree(folder, ignore_errors=True)
-            prune_above(folder.parent, root)
+            prune_upward(folder.parent, root)
 
     def report(self) -> str | None:
         """Return one line naming what was kept and removed, or `None` if neither.
@@ -279,13 +278,11 @@ class FrameTree:
         """
         said = []
         if self._reused:
-            said.append(
-                f"kept {counted(len(self._reused), 'sequence')} already written"
-            )
+            kept = quantify(len(self._reused), "sequence")
+            said.append(f"kept {kept} already written")
         if self._dropped:
-            said.append(
-                f"removed {counted(len(self._dropped), 'folder')} with no source"
-            )
+            gone = quantify(len(self._dropped), "folder")
+            said.append(f"removed {gone} with no source")
 
         return ", ".join(said) or None
 
@@ -306,11 +303,10 @@ class FrameTree:
                 this run would write already has a folder here.
         """
         if self.if_frames_exist == "reuse":
-            self._reused.update(
-                name for name in self._written() if self._still_describes(name)
-            )
+            here = self._written()
+            self._reused.update(name for name in here if self._still_describes(name))
         elif self.if_frames_exist == "error" and (written := self._written()):
-            counts = counted(len(written), "sequence")
+            counts = quantify(len(written), "sequence")
             fix = "set `if_frames_exist` to 'overwrite' or 'reuse'"
             msg = f"{counts} already written, from {written[0]!r}: {fix}"
             raise FileExistsError(msg)

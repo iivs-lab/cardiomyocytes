@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Final, Self
 
 from iivs.dhm.data.koala import koala_frame_name
 from kaparoo.filesystem import StagedDirectory
+from kaparoo.utils import quantify
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -132,9 +133,7 @@ class KoalaFrameWriter[T]:
         if not self._committed:
             return None
 
-        count = self._written + 1
-
-        return f"wrote {count} frame{'s' if count != 1 else ''}"
+        return f"wrote {quantify(self._written + 1, 'frame')}"
 
     def _file_record(self) -> None:
         """Write what the folder says about itself, into the staged folder.

@@ -5,11 +5,12 @@ __all__ = ("KernelShape", "MedianConfig", "MedianKernel")
 import logging
 from dataclasses import dataclass
 from itertools import product
-from typing import TYPE_CHECKING, ClassVar, Final, Literal, get_args, override
+from typing import TYPE_CHECKING, ClassVar, Final, Literal, override
 
 import torch
 from beartype import beartype
 from jaxtyping import jaxtyped
+from kaparoo.utils import literal_values
 from torch.nn.functional import pad
 
 from iivs_cardio.data.transforms.filtering.kernel.base import (
@@ -28,10 +29,8 @@ if TYPE_CHECKING:
 
 type KernelShape = Literal["ellipsoid", "cuboid"]
 
-# Taken off the alias rather than written twice. `get_args` reads a
-# `TypeAliasType` as having no arguments of its own, so it is asked about the
-# `Literal` the alias stands for instead.
-KERNEL_SHAPES: Final[tuple[KernelShape, ...]] = get_args(KernelShape.__value__)
+# Taken off the alias rather than written twice.
+KERNEL_SHAPES: Final[tuple[KernelShape, ...]] = literal_values(KernelShape)
 
 # Where CUDA's `sort` and `topk` each leave a faster shared-memory path.
 _SHARED_TIERS: Final = (32, 128)

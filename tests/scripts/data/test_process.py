@@ -944,7 +944,7 @@ def test_a_run_says_which_outputs_have_no_sequence_behind_them(phase_tree, caplo
         _run_nothing(stages)
 
     said = [record.getMessage() for record in caplog.records]
-    assert "1 output(s) have no source: plate/TL_09" in said
+    assert "1 output with no source: plate/TL_09" in said
 
 
 def test_a_run_says_it_removed_them_and_not_only_that_they_were_due(
@@ -964,7 +964,7 @@ def test_a_run_says_it_removed_them_and_not_only_that_they_were_due(
         _run_nothing(_factory(phase_tree, tree))
 
     said = [record.getMessage() for record in caplog.records]
-    assert "1 output(s) have no source: plate/TL_09" in said
+    assert "1 output with no source: plate/TL_09" in said
     assert "removed 1 folder with no source" in said
     assert not (out / "plate").exists()
 
