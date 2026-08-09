@@ -845,6 +845,118 @@ class DualTVL1Config(EstimatorConfig):
 `create(device)`를 새로 쓰는 김에 **읽지 않는 필드를 명시적으로 지정하면 거절하거나 로그로
 말하게** 할 수 있다. (1)의 `if_frames_short`가 「짧으면 말한다」로 처리한 것과 같은 자리다.
 
+## 결정 — 곁가지 둘은 (1)의 것을 물려받는다. 이음매는 각각 하나다
+
+(2)도 곁가지가 둘이다. **프레임을 쓰는 것**과 **문서를 쓰는 것**, (1)의 `FrameTree`·
+`RangeDocument`와 같은 짝이다. 새로 짓지 않고 물려받는다.
+
+### 값으로 설정하고, 타입으로 특수화한다
+
+바로 위에서 추정기의 자식 클래스를 버리기로 했는데 여기서는 자식을 두자는 것이 모순처럼
+보인다. 규칙은 하나다.
+
+**추정기의 변종은 사용자가 고르는 값**이다. hydra가 이름으로 Farneback과 DualTVL1을 고르고
+각자 파라미터를 든다. 그래서 값으로 끼운다.
+
+**곁가지의 변종은 자기가 어느 단계인가**다. 파라미터가 없고, 설정에 나타나지 않고, 브랜치를
+만드는 코드가 정한다. 전처리 실행이 흐름을 쓸 일은 없다. 그래서 타입으로 가른다.
+
+### 프레임 곁가지 — 갈리는 것은 `get_hook` 하나뿐이다
+
+`FrameTree`의 14개 중 위상에 묶인 것은 `get_hook`뿐이다. `list_sequences`·`_still_describes`·
+`_count_frames`·`list_unsourced`·`drop_unsourced`·`clear_staging`·`report`·`__enter__`·
+`__exit__`·`_written`·`_replacing`·`__post_init__`은 폴더와 기록만 다룬다.
+
+`get_hook`을 세 줄로 줄이고 그 아래 하나만 추상으로 남긴다.
+
+```python
+def get_hook(self, source: S) -> KoalaFrameWriter[T] | None:
+    if source.name in self._reused:
+        return None
+
+    record = None
+    if self.settings is not None:
+        record = {"settings": dict(self.settings), "source": source.name}
+
+    dest = Path(self.root, source.name, self.subpath)
+
+    return self._make_writer(dest, source, overwrite=self._replacing, record=record)
+```
+
+흐름 쪽 `_make_writer`는 위상 쪽보다 **짧다** — 헤더가 없다.
+
+```python
+KoalaFrameWriter(dest, save_flow_npy, stem="flow", ext="npy", overwrite=..., record=...)
+```
+
+`KoalaFrameWriter`는 이미 `T`와 저장 함수에 대해 일반적이고, `koala_frame_name`이
+`00000_flow.npy`를 내므로 이름 규약도 그대로 이어진다.
+
+### 문서 곁가지 — 18개 중 13개가 이미 값에 무관하다
+
+`RangeDocument`에서 값 타입을 언급하는 것은 `get_hook`·`_read_valid`·`to_range`·
+`get_coverage`·`_still_describes` 다섯뿐이다. `list_parts`·`_list_staging`·`_read_part`·
+`_source_of`·`save`·`report`·`__enter__`·`__exit__`·`found`·`_replacing`은 파트 파일과
+스테이징만 다룬다. **`Coverage`는 이름만 세므로 그대로 쓴다.**
+
+`PartDocument[S, D]`를 뽑고 셋만 추상으로 남긴다.
+
+```
+_make_meter(source)      한 시퀀스를 재는 훅
+_parse(document) -> S    파트 하나를 읽어 들이는 것
+_fold(parts) -> D | None 전체로 접는 것
+```
+
+`RangeDocument`와 `FlowMetricsDocument`가 그 자식이 된다.
+
+### 값 타입은 공유하지 않는다 — 접는 방식이 다르다
+
+`CompositeRange.__post_init__`은 **min/max로 접는다.** 결합적이고 가중치가 없다. 지표는
+평균으로 접어야 하고 **평균은 그렇지 않다.**
+
+**이 데이터셋에서 실제로 문제가 된다.** 600프레임 시퀀스와 1200프레임 시퀀스가 섞여 있으므로
+시퀀스 평균들을 다시 평균내면 짧은 쪽이 두 배로 세어진다. `DatasetMetrics`는 프레임 수를
+들고 **가중 평균**을 내야 한다.
+
+PSNR은 이미 결정돼 있다. `_metrics`의 주석이 「per sample로 재고 나서 평균낸다, 배치 전체의
+오차 하나에 log를 씌우는 pooled 형태는 다른 양이다」라고 못박았으므로, 문서의 데이터셋 수치도
+**프레임 수로 가중한 프레임 평균**이다.
+
+그러니 `ValueRange` 계열을 억지로 일반화하지 않는다. `FrameMetrics`·`SequenceMetrics`·
+`DatasetMetrics`를 따로 두되 **모양은 같게** 한다(`Frame<X>` → `Sequence<X>` → `Dataset<X>`).
+공유하는 것은 문서 기계이지 값이 아니다.
+
+### 두 곁가지가 함께 밟는 것 — 재사용 판정이 1:1을 전제한다
+
+```python
+frames = record.get("frames")
+if tuple(frames) != tuple(self.contents[name]):
+    return False
+return self._count_frames(folder) == len(frames)
+```
+
+`record["frames"]`는 **쓴 프레임마다 하나씩** 쌓인다(`KoalaFrameWriter.write`가
+`step.value is None`을 먼저 걸러낸 뒤에 append한다). (1)은 필터링이 1:1이라 이것과
+`contents[name]`이 둘 다 N개다.
+
+**(2)는 N개를 먹고 N-1개를 낸다.** 첫 비교가 `N-1 != N`으로 항상 실패하므로 **흐름 캐시도
+평가 파트도 절대 재사용되지 않는다.** 틀린 답을 내는 것이 아니라 조용히 낭비하는 쪽이라 늦게
+발견된다. 문서 쪽 `_still_describes`도 프레임 이름 목록을 같은 방식으로 비교하므로 같은 함정에
+빠진다.
+
+§「캐시 폴더는 자기가 어디서부터 시작하는지 말하지 않는다」와 **뿌리가 같다.** 한 번에 고칠
+것: 판정이 「소스가 든 것」이 아니라 **「이 단계가 그 소스로부터 내야 하는 것」**과 비교해야
+한다. 단이 그 수를 아는 유일한 곳이므로, 길이를 단에게 묻는 자리가 필요하다.
+
+### 평가 훅이 무엇을 받는지 확인할 것
+
+범위 훅은 프레임 하나면 되지만 **워프 일관성은 `frame1`·`frame2`·`flow` 셋이 필요하다.**
+`Step`이 「값과, 스트림이 소비하지 않는 것」을 나른다고 되어 있으므로 그 `extra`에 실릴 수
+있어 보이지만, **(2) 스테이지를 배선할 때 실제로 확인할 것.**
+
+점수는 흐름을 계산한 그 uint8 프레임 위에서 매긴다. 그러면 `data_range`가 dtype에서 나오므로
+명시할 필요가 없다 — float 프레임에 대해 `_resolve_data_range`가 요구하는 그것이다.
+
 ## 열린 것
 
 - **캐시 폴더는 자기가 어디서부터 시작하는지 말하지 않는다.** `KoalaFrameWriter`는 도착한
