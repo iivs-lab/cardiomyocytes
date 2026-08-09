@@ -251,6 +251,18 @@ force          4     3, 4, 5 → acceleration 4
   121 seq」와 「completed 3 seq」에도 쓰인다. 산문을 완전한 낱말로 하려면 막대의 단위와
   가르고(`unit` + `noun`) 복수형을 붙여야 한다.
 
+- **막대가 닫히는 자리가 두 실행 경로에서 다르다.** `_run_in_process`는 `trange`가 곧 루프라
+  막대 한 칸 = 항목 하나 = 로그 한 줄이고, 막대는 늘 마지막 줄에 머물다 루프 끝에서 닫힌다.
+  `_run_in_pool`은 `mpire`가 그리는데 그쪽이 세는 것은 `tasks_completed`, 즉 워커가 끝났다고
+  보고한 개수다(`mpire/progress_bar.py:171`). 로그 줄은 메인 프로세스가 `imap`에서 결과를 꺼낼
+  때 나가므로 시계가 둘이 되고, 계산이 없는 실행에서는 막대가 `10/10`으로 닫힌 뒤에 결과 네
+  줄이 더 찍혔다(서버 실측, 재사용 실행).
+
+  실제 실행에서는 수거가 계산에 비해 무시할 수준이라 둘이 겹치므로 급하지 않다. 고치려면
+  `progress_bar=False`로 두고 수거 쪽을 우리 `trange`로 감싸면 경로 둘이 시계를 하나만 쓴다.
+  대신 막대가 「계산 진행」이 아니라 「수거 진행」을 뜻하게 되는데, 보고 싶은 쪽은 보통
+  전자다. (4) 이후로 미룸.
+
 - **복수형 처리가 아직 세 곳에 복제돼 있다.** `_counted`는 `common/pipeline/branch.py`의
   공개 `counted`가 되었고 `RangeDocument`·`FrameTree`가 공유한다. 남은 셋은
   `data/writer.py`의 `f"wrote {count} frame{...}"`, `scripts/_compute.py`의
