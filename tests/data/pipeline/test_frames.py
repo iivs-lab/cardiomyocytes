@@ -125,14 +125,39 @@ def test_a_folder_holding_fewer_frames_than_its_record_is_written_again(tmp_path
     assert short.report() is None
 
 
+def test_something_that_is_not_a_frame_cannot_stand_in_for_one(tmp_path):
+    # The count is what catches a half removed folder, so anything counted
+    # that is not a frame lets a missing one through: one frame beside one
+    # directory is the two a two-frame record expects.
+    folder = _sequence(tmp_path, "TL_00")
+    (folder / "00001_phase.bin").write_bytes(b"")
+    contents = {"TL_00": ("00000_phase.bin", "00001_phase.bin")}
+    record = {"settings": None, "frames": list(contents["TL_00"])}
+    (folder / RECORD_FILE).write_text(json.dumps(record), encoding="utf-8")
+
+    (folder / "00001_phase.bin").unlink()
+    (folder / "leftover").mkdir()
+
+    tree = FrameTree(tmp_path, PHASE_FLOAT_BIN, contents, if_frames_exist="reuse")
+    with tree:
+        pass
+
+    assert tree.report() is None
+
+
 def test_a_sequence_the_run_was_not_given_is_not_in_its_way(tmp_path):
     # `error` is about what this run would write, so a folder outside the
     # selection is not a collision: a retry of one sequence must not be
     # refused by the ones that already succeeded.
-    _sequence(tmp_path, "plate/TL_00")
+    written = _sequence(tmp_path, "plate/TL_00")
+    tree = _tree(tmp_path, "plate/TL_00", "plate/TL_01", selected=["plate/TL_01"])
 
-    with _tree(tmp_path, "plate/TL_00", "plate/TL_01", selected=["plate/TL_01"]):
+    with tree:
         pass
+
+    assert tree.list_sequences() == ["plate/TL_00"]  # untouched, not claimed
+    assert (written / "00000_phase.bin").exists()
+    assert tree.report() is None
 
 
 def test_a_folder_inside_a_sequence_is_not_a_sequence_of_its_own(tmp_path):

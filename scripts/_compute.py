@@ -446,7 +446,8 @@ def _run_in_pool(
 
     Args:
         context: The state handed to every worker when the pool starts.
-        config: What to report, and how long a worker lives.
+        config: The settings saying what to report and how long a worker
+            lives.
         record: The record to fill as the items come back.
         unit: The name for one item, used in the progress bar and the insights.
         show_progress: Whether to draw the progress bar.

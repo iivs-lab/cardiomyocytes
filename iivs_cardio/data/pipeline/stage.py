@@ -85,7 +85,7 @@ class PhaseStageFactory:
 
         Args:
             index: The sequence to build the stage for.
-            device: Where the sequence is to be filtered.
+            device: The device the sequence is to be filtered on.
 
         Returns:
             The stage, or `None` when no branch wants this sequence. Reading it
@@ -126,7 +126,7 @@ class PhaseStageFactory:
 
         Args:
             index: The sequence to carry out.
-            device: Where to filter it.
+            device: The device to filter it on.
 
         Returns:
             Whether the sequence was computed. One that no branch wants a hook

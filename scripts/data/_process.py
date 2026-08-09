@@ -523,7 +523,8 @@ def search_sources(
         if short and policy == "error":
             name, held = next(iter(short.items()))
             asked = counted(config.frame_count, "frame")
-            msg = f"{name}: {held} frames after the stride, short of the {asked} asked for"
+            short_of = f"short of the {asked} asked for"
+            msg = f"{name}: {held} frames after the stride, {short_of}"
             raise ValueError(msg)
 
     return taken, contents

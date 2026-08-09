@@ -50,7 +50,7 @@ class Step[T, E = None]:
 
     Attributes:
         index: The index of the stage this step is.
-        value: What was computed there, or `None` where there was nothing.
+        value: The result computed there, or `None` where there was none.
         extra: The side information about the value, such as where it came
             from. Defaults to None.
     """
@@ -205,7 +205,7 @@ class StageFactory(Protocol):
 
         Args:
             index: The item to carry out.
-            device: Where to carry it out.
+            device: The device to carry it out on.
 
         Returns:
             Whether the item was computed. One that every branch already holds
@@ -458,8 +458,8 @@ def close_together(
 
     Args:
         opened: The context managers to close, in the order they were opened.
-        error: What the block they bracket ended with, or `None` if it
-            finished.
+        error: The exception the block they bracket ended with, or `None`
+            if it finished.
 
     Raises:
         BaseException: What closing raised, once everything has been closed

@@ -3,6 +3,7 @@ from __future__ import annotations
 __all__ = ("FRAME_POLICIES", "FrameTree")
 
 import json
+import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -206,8 +207,17 @@ class FrameTree:
 
     @staticmethod
     def _count_frames(folder: Path) -> int:
-        """Count what the folder holds beside the record it carries."""
-        return sum(1 for path in folder.iterdir() if path.name != RECORD_FILE)
+        """Count the files the folder holds beside the record it carries.
+
+        Files only. Anything else in there is not a frame, and counting one
+        would let it stand in for a frame that has gone: a folder holding one
+        frame and one directory counts as two, which is exactly the number a
+        two-frame record expects.
+        """
+        with os.scandir(folder) as entries:
+            return sum(
+                1 for entry in entries if entry.is_file() and entry.name != RECORD_FILE
+            )
 
     def list_unsourced(self) -> list[str]:
         """Return the sequences this tree holds that the source has lost, sorted.

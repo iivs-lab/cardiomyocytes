@@ -41,9 +41,7 @@ class KoalaFrameWriter[T]:
     Renumbering is what makes the folder readable again, and it is also what
     loses the source. Given a `record`, the writer files what it was told plus
     the source name of every frame it took, in the order it took them, so the
-    nth frame here can be traced back to the one it was made from. It goes
-    inside the folder, which is what makes it appear and disappear with the
-    frames rather than outliving them.
+    nth frame here can be traced back to the one it was made from.
 
     Type Parameters:
         T: The type of one frame, as `save` expects it.
@@ -55,9 +53,9 @@ class KoalaFrameWriter[T]:
         ext: The extension a frame is written with.
         overwrite: Whether an existing folder may be replaced. Defaults to
             False.
-        record: What the folder should say about itself, beside the source
-            names the writer collects. Defaults to `None`, which files nothing
-            and asks nothing of the steps.
+        record: The block the folder should carry about itself, beside the
+            source names the writer collects. Defaults to `None`, which files
+            nothing and asks nothing of the steps.
 
     Raises:
         FileExistsError: If the destination is there and `overwrite` is not set.
@@ -191,8 +189,9 @@ class KoalaFrameWriter[T]:
         Args:
             exc_type: The type of what the walk ended with, or `None` if it
                 finished.
-            exc: What the walk ended with, or `None` if it finished.
-            traceback: Where it was raised, or `None` if it finished.
+            exc: The exception the walk ended with, or `None` if it
+                finished.
+            traceback: The place it was raised, or `None` if it finished.
 
         Raises:
             ValueError: If the sequence ended without a single frame, since

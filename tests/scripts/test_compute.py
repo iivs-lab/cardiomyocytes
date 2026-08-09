@@ -488,7 +488,7 @@ def test_items_the_pool_took_down_with_it_are_not_counted_ready(
 
 
 def test_an_unset_worker_count_falls_back_to_the_machine(monkeypatch):
-    # Comparing against `DEFAULT_WORKERS` could not fail, whatever that constant
+    # Comparing against `_DEFAULT_WORKERS` could not fail, whatever that constant
     # came to mean. What the fallback owes is the machine's own answer, so the
     # machine is what it is checked against, and moving that answer has to
     # move the plan with it.

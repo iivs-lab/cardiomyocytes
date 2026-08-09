@@ -91,8 +91,8 @@ def phase_frame_writer(
         unit: The meaning the values carry. Defaults to `PhaseUnit.RADIANS`.
         overwrite: Whether an existing folder may be replaced. Defaults to
             `False`.
-        record: What the folder should say about itself. Defaults to `None`,
-            which files nothing.
+        record: The block the folder should carry about itself. Defaults to
+            `None`, which files nothing.
 
     Returns:
         A writer ready to be registered as a hook.

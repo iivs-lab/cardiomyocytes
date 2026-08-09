@@ -934,14 +934,6 @@ class RangeDocument:
         A worker holds a copy of this branch and nothing it learns comes home,
         so a part judged there could not be counted.
 
-        Folders a clearing emptied go with it, since a sequence dropped from
-        the dataset would otherwise go on looking present in the tree, but
-        only those, so a folder someone else left empty here is not this run's
-        to take.
-
-        Opening is what makes the folder this run's, so it happens once: a
-        second one would clear the parts the first has already gathered.
-
         Raises:
             FileExistsError: If the document is already there and this one was
                 not told it may replace it.

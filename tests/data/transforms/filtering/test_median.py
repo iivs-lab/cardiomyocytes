@@ -198,7 +198,8 @@ def test_the_rejection_message_names_both_valid_shapes():
 def test_params_reject_a_bad_shape_when_built():
     # `MedianConfig` only records the fields; the check belongs to the kernel,
     # so a config's typo surfaces at `build()` rather than being carried along.
-    config = MedianConfig((1, 1, 1), shape="sphere")  # ty: ignore[invalid-argument-type]
+    shape = "sphere"  # ty: ignore[invalid-argument-type]
+    config = MedianConfig((1, 1, 1), shape=shape)
 
     with pytest.raises(ValueError, match="unsupported shape"):
         config.build()
