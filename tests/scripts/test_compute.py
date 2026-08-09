@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -22,6 +22,7 @@ from scripts._compute import (
     SharedContext,
     WorkerLogFolder,
     _collect_outcomes,
+    _drawing,
     _init_worker,
     log_compute_config,
     log_insights,
@@ -563,6 +564,56 @@ def test_a_run_told_not_to_draw_says_nothing_about_the_terminal(
         run_all(_Stages(4, tmp_path / "done"), _compute(0))
 
     assert "stderr is not a terminal" not in caplog.text
+
+
+def test_a_drawn_bar_takes_console_logging_over(restored_root_logger):
+    # `tqdm` draws with a carriage return, so a handler writing straight to the
+    # stream lands on the bar's own line. The bar is left behind as a frozen
+    # copy and a fresh one appears below, once per line the run logs.
+    handler = logging.StreamHandler()
+    restored_root_logger.addHandler(handler)
+
+    with _drawing(progress=True):
+        during = list(restored_root_logger.handlers)
+
+    assert handler not in during
+    assert handler in restored_root_logger.handlers
+
+
+def test_a_run_with_no_bar_leaves_console_logging_alone(restored_root_logger):
+    # Routing a run that draws nothing would move its output through `tqdm` for
+    # no reason, and a redirected run is exactly the one whose log is read.
+    handler = logging.StreamHandler()
+    restored_root_logger.addHandler(handler)
+
+    with _drawing(progress=False):
+        assert handler in restored_root_logger.handlers
+
+    assert handler in restored_root_logger.handlers
+
+
+@pytest.mark.parametrize("tty", (True, False))
+def test_the_bar_and_the_console_agree_on_whether_one_is_drawn(
+    tmp_path, monkeypatch, tty
+):
+    # The two answers come from one decision, so a run cannot end up routing
+    # its console around a bar it never drew, or drawing one it then tears.
+    _redirected(monkeypatch, tty=tty)
+    drawn, routed = [], []
+    monkeypatch.setattr(
+        compute, "trange", lambda *a, **kw: drawn.append(kw) or range(*a)
+    )
+    monkeypatch.setattr(
+        compute,
+        "_drawing",
+        lambda *, progress: routed.append(progress) or nullcontext(),
+    )
+
+    config = replace(_compute(0), show_progress=True)
+    run_all(_Stages(4, tmp_path / "done"), config)
+
+    assert routed == [tty]
+    assert drawn[0]["disable"] is not tty
 
 
 # ---------------------------- the configuration log ----------------------- #

@@ -17,6 +17,7 @@ __all__ = (
 import logging
 import os
 import sys
+from contextlib import nullcontext
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Final, NamedTuple
 
@@ -25,12 +26,14 @@ from kaparoo.filesystem import ensure_dir_exists
 from kaparoo.utils import Timer, unwrap_or_default
 from mpire import WorkerPool
 from tqdm import trange
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 from iivs_cardio.common.device import Device
 from iivs_cardio.common.logging import log_indented
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
+    from contextlib import AbstractContextManager
     from logging import Logger
     from pathlib import Path
 
@@ -412,6 +415,17 @@ def _collect_outcomes(
         logger.info("%s %s (%d/%d)", name, verdict, count, total)
 
 
+def _drawing(*, progress: bool) -> AbstractContextManager[None]:
+    """Return a context in which a log line does not tear the bar it lands on.
+
+    Console handlers are routed through `tqdm.write`, which clears the bar
+    before the line and draws it again after. File handlers are left alone, so
+    what reaches the log on disk is unchanged. With no bar there is nothing to
+    tear, and nothing is done.
+    """
+    return logging_redirect_tqdm() if progress else nullcontext()
+
+
 def _run_in_process(
     context: SharedContext, record: RunRecord, *, unit: str, show_progress: bool
 ) -> None:
@@ -532,7 +546,7 @@ def run_all(
     record = RunRecord()
 
     try:
-        with Timer("s") as timer, stages.running():
+        with _drawing(progress=progress), Timer("s") as timer, stages.running():
             if in_process:
                 _run_in_process(context, record, unit=unit, show_progress=progress)
             else:
