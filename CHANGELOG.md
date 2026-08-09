@@ -187,8 +187,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   they answer different questions -- what to do with the output of a sequence
   being written, and what to do with one nothing will be written for -- and
   because only the second can destroy something the source can no longer
-  remake. A frame cache carries no record of how it was made, so `reuse` is not
-  offered for it until one does.
+  remake.
 - A range document counts against the whole dataset rather than against the run
   that wrote it. `RangeDocument` takes a contents of every sequence the source
   holds against the frames each would be measured over, and `selected` names
@@ -352,3 +351,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   at the source and 39 to 7 ms at the output. The source pays the listing once
   more when `PhaseBinFolder` opens each folder for its frames, which is the one
   that is needed.
+- `if_frames_exist` takes `reuse`. A tree opening under it reads each written
+  sequence's `source.json` and keeps the folder when three things still hold:
+  the settings match, the source names match, and the folder holds as many
+  frames as its record says. The third has no counterpart in a range part,
+  which is one file and so is either there or not; a folder can be half
+  removed, and reusing that would leave a short sequence reading as a whole
+  one. Judging happens when the tree opens, in one process with the whole
+  dataset in view, for the same reason the document judges there.
+- `if_frames_exist: error` refuses when the tree opens rather than when the
+  writer meets the folder. The writer meets them one at a time, so a run over
+  500 sequences whose 300th was already written paid for 299 of them first.
+  `FrameTree` takes `selected` for this, so a retry of one sequence is not
+  refused by the ones that already succeeded.

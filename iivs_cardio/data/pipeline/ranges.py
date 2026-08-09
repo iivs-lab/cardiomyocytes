@@ -31,7 +31,12 @@ from kaparoo.filesystem import (
 from kaparoo.filters import And, EndsWith, StartsWith
 from kaparoo.utils.optional import unwrap_or_default
 
-from iivs_cardio.common.pipeline.branch import counted, find_unsourced, prune_above
+from iivs_cardio.common.pipeline.branch import (
+    as_written,
+    counted,
+    find_unsourced,
+    prune_above,
+)
 from iivs_cardio.common.range import finite_range
 
 if TYPE_CHECKING:
@@ -88,20 +93,6 @@ def _number(document: Mapping[str, Any], key: str) -> float:
         raise ValueError(msg)
 
     return float(value)
-
-
-def _as_written(settings: Mapping[str, object] | None) -> object:
-    """Return `settings` as a part on disk will hold them.
-
-    A recorded setting is compared against what a part carries, and what a part
-    carries has been through JSON: a tuple comes back a list, and the two are
-    not equal. Comparing the two directly finds every part stale, this run's
-    own included, and the document then folds nothing at all.
-    """
-    if settings is None:
-        return None
-
-    return json.loads(json.dumps(dict(settings), allow_nan=False))
 
 
 # ========================== #
@@ -663,7 +654,7 @@ class RangeDocument:
             msg = f"selected {unknown[0]!r}, which the source does not hold"
             raise ValueError(msg)
 
-        self._recorded = _as_written(settings)
+        self._recorded = as_written(settings)
         self._entered = False
         self._reused: frozenset[str] = frozenset()
         self._saved: DatasetRange | None = None

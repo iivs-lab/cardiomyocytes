@@ -6,18 +6,20 @@ __all__ = (
     "UNSOURCED_OUTPUT_POLICIES",
     "ExistingOutputPolicy",
     "UnsourcedOutputPolicy",
+    "as_written",
     "counted",
     "find_unsourced",
     "prune_above",
     "read_policy",
 )
 
+import json
 from typing import TYPE_CHECKING, Final, Literal, cast, get_args
 
 from kaparoo.filters import And, EndsWith, StartsWith
 
 if TYPE_CHECKING:
-    from collections.abc import Container, Iterable, Sequence
+    from collections.abc import Container, Iterable, Mapping, Sequence
     from pathlib import Path
 
 type ExistingOutputPolicy = Literal["error", "overwrite", "reuse"]
@@ -31,6 +33,24 @@ UNSOURCED_OUTPUT_POLICIES: Final[tuple[UnsourcedOutputPolicy, ...]] = get_args(
 )
 
 STAGING: Final = And((StartsWith("."), EndsWith(".tmp")))
+
+
+def as_written(settings: Mapping[str, object] | None) -> object:
+    """Return `settings` as an output on disk will hold them.
+
+    A recorded setting is compared against what an output carries, and what an
+    output carries has been through JSON: a tuple comes back a list, and the
+    two are not equal. Comparing the two directly finds every output stale,
+    this run's own included, and nothing is ever reused.
+
+    Shared because both branches record the same block and both compare it
+    back, so a difference between the two ways of reading it would show up as
+    one output reusing what the other rewrote.
+    """
+    if settings is None:
+        return None
+
+    return json.loads(json.dumps(dict(settings), allow_nan=False))
 
 
 def counted(count: int, noun: str) -> str:

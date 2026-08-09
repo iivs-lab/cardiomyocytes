@@ -2,6 +2,7 @@ from __future__ import annotations
 
 __all__ = ("FRAME_POLICIES", "FrameTree")
 
+import json
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,13 +12,16 @@ from kaparoo.filesystem import dir_exists, search_dirs
 from kaparoo.utils.optional import unwrap_or_default
 
 from iivs_cardio.common.pipeline.branch import (
+    EXISTING_OUTPUT_POLICIES,
     STAGING,
+    as_written,
     counted,
     find_unsourced,
     prune_above,
     read_policy,
 )
 from iivs_cardio.data.phase import phase_frame_writer
+from iivs_cardio.data.writer import RECORD_FILE
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -33,9 +37,7 @@ if TYPE_CHECKING:
     from iivs_cardio.data.phase import PhaseFilteredSequence
     from iivs_cardio.data.writer import KoalaFrameWriter
 
-# A tree is written whole and carries no record of how it was made, so a later
-# run cannot tell whether one already there still describes it.
-FRAME_POLICIES: Final[tuple[ExistingOutputPolicy, ...]] = ("error", "overwrite")
+FRAME_POLICIES: Final[tuple[ExistingOutputPolicy, ...]] = EXISTING_OUTPUT_POLICIES
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,35 +67,74 @@ class FrameTree:
             phase header carries no time and no source name, so without this a
             written sequence cannot be traced back to the acquisition it came
             from. Defaults to `None`, which files nothing.
+        selected: The sequences of the contents this run was given to write.
+            Repeats count once. Defaults to `None`, which takes all of them.
         if_frames_exist: The policy for a sequence that already has a folder
-            here. `"reuse"` is refused until a tree can be added to. Defaults
-            to `"error"`.
+            here. `"reuse"` keeps one whose record still describes this run and
+            writes the rest. Defaults to `"error"`.
         if_sources_gone: The policy for a folder whose sequence the source has
             lost. Defaults to `"keep"`.
 
     Raises:
-        ValueError: If `if_frames_exist` is `"reuse"`.
+        ValueError: If `if_frames_exist` is not a policy a tree offers, or if
+            `selected` names something the contents does not hold.
     """
 
     root: StrPath
     subpath: str
     contents: Mapping[str, Sequence[str]]
     settings: Mapping[str, object] | None = None
+    selected: Sequence[str] | None = field(default=None, kw_only=True)
     if_frames_exist: ExistingOutputPolicy = field(default="error", kw_only=True)
     if_sources_gone: UnsourcedOutputPolicy = field(default="keep", kw_only=True)
+    _taken: frozenset[str] = field(init=False, repr=False)
+    _recorded: object = field(init=False, repr=False)
+    _reused: set[str] = field(default_factory=set, init=False, repr=False)
     _dropped: list[str] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
         read_policy(self.if_frames_exist, FRAME_POLICIES, "if_frames_exist")
 
-    def get_hook(self, source: PhaseFilteredSequence) -> KoalaFrameWriter[Tensor]:
-        """Return the writer for `source`, placed where the source sits.
+        names = unwrap_or_default(self.selected, tuple(self.contents))
+        if unknown := [name for name in names if name not in self.contents]:
+            msg = f"selected {unknown[0]!r}, which the source does not hold"
+            raise ValueError(msg)
+
+        object.__setattr__(self, "_taken", frozenset(names))
+        object.__setattr__(self, "_recorded", as_written(self.settings))
+
+    @property
+    def _replacing(self) -> bool:
+        """Whether a folder already there may be written over.
+
+        `"reuse"` replaces as readily as `"overwrite"` does: what it keeps it
+        keeps by never making a writer for it, so a writer that was made has
+        already been told the folder does not describe this run.
+        """
+        return self.if_frames_exist != "error"
+
+    def get_hook(
+        self, source: PhaseFilteredSequence
+    ) -> KoalaFrameWriter[Tensor] | None:
+        """Return the writer for `source`, or `None` to keep what is there.
+
+        Whether a folder still stands for this run was settled when the tree
+        opened, where the whole dataset was in view; this only looks the answer
+        up. A sequence nothing has to write costs no frames at all, which is
+        what reuse is for.
 
         The record the writer files names the sequence as the dataset does, so
         a folder read on its own says which acquisition it came from. The root
         it sat under is left out: an absolute path does not survive the move
         from this machine to the server, and a wrong one is worse than none.
+
+        Returns:
+            The writer, placed where the source sits, or `None` when a folder
+            already there was found to still describe this run.
         """
+        if source.name in self._reused:
+            return None
+
         origin = source.origin
         header = origin.header
 
@@ -106,7 +147,7 @@ class FrameTree:
             pixel_size=header.pixel_size,
             height_scale=header.height_scale,
             unit=unwrap_or_default(origin.target_unit, header.unit),
-            overwrite=self.if_frames_exist == "overwrite",
+            overwrite=self._replacing,
             record=record,
         )
 
@@ -131,6 +172,42 @@ class FrameTree:
         )
 
         return sorted(folder.relative_to(root).as_posix() for folder in found)
+
+    def _still_describes(self, name: str) -> bool:
+        """Whether the folder already written for `name` stands for this run.
+
+        Three things can have moved since it was written, and none of them
+        shows in the folder's name: the settings that shaped the frames, which
+        frames the source holds, and whether the folder still holds all of what
+        its record says it does. The third has no counterpart in a range part,
+        which is one file and so is either there or not; a folder can be half
+        removed, and reusing that would leave a short sequence reading as a
+        whole one.
+        """
+        folder = Path(self.root, name, self.subpath)
+
+        try:
+            read = (folder / RECORD_FILE).read_text(encoding="utf-8")
+            record = json.loads(read)
+        except (OSError, ValueError):
+            return False
+
+        if not isinstance(record, dict):
+            return False
+
+        if record.get("settings") != self._recorded:
+            return False
+
+        frames = record.get("frames")
+        if not isinstance(frames, list) or tuple(frames) != tuple(self.contents[name]):
+            return False
+
+        return self._count_frames(folder) == len(frames)
+
+    @staticmethod
+    def _count_frames(folder: Path) -> int:
+        """Count what the folder holds beside the record it carries."""
+        return sum(1 for path in folder.iterdir() if path.name != RECORD_FILE)
 
     def list_unsourced(self) -> list[str]:
         """Return the sequences this tree holds that the source has lost, sorted.
@@ -183,19 +260,56 @@ class FrameTree:
             prune_above(folder.parent, root)
 
     def report(self) -> str | None:
-        """Return one line naming what was removed, or `None` if nothing was.
+        """Return one line naming what was kept and removed, or `None` if neither.
 
-        Only removals: the frames a run writes are counted by the document that
-        indexes them, and a tree that wrote every one of them and took nothing
-        away has nothing here that is not said better elsewhere.
+        What was written is not counted here: the run's own summary already
+        says how many sequences it computed, and the document that indexes the
+        frames counts them again. What is left is the two a tree alone knows,
+        both of them about folders it did not write this time.
         """
-        if not self._dropped:
-            return None
+        said = []
+        if self._reused:
+            said.append(
+                f"kept {counted(len(self._reused), 'sequence')} already written"
+            )
+        if self._dropped:
+            said.append(
+                f"removed {counted(len(self._dropped), 'folder')} with no source"
+            )
 
-        return f"removed {counted(len(self._dropped), 'folder')} with no source"
+        return ", ".join(said) or None
 
     def __enter__(self) -> Self:
+        """Settle what is already here before a single frame is read.
+
+        Judging happens here, with the whole dataset in view and in one
+        process. A worker holds a copy of this branch and nothing it learns
+        comes home, so a folder judged there could not be counted.
+
+        `"error"` refuses here too, rather than leaving it to the writer that
+        meets the folder: the writer meets them one at a time, so a run over
+        500 sequences whose 300th is already written pays for 299 of them
+        first. What the writer refuses is the same thing, a moment too late.
+
+        Raises:
+            FileExistsError: If `if_frames_exist` is `"error"` and a sequence
+                this run would write already has a folder here.
+        """
+        if self.if_frames_exist == "reuse":
+            self._reused.update(
+                name for name in self._written() if self._still_describes(name)
+            )
+        elif self.if_frames_exist == "error" and (written := self._written()):
+            counts = counted(len(written), "sequence")
+            fix = "set `if_frames_exist` to 'overwrite' or 'reuse'"
+            msg = f"{counts} already written, from {written[0]!r}: {fix}"
+            raise FileExistsError(msg)
+
         return self
+
+    def _written(self) -> list[str]:
+        """Return the sequences this run would write that already have a folder."""
+        return [name for name in self.list_sequences() if name in self._taken]
 
     def __exit__(
         self,

@@ -15,9 +15,11 @@ from iivs.dhm.data.phase import (
     read_phase_bin_header,
     save_phase_bin,
 )
+from omegaconf import OmegaConf
 
 from iivs_cardio.common.device import Device
 from iivs_cardio.data.pipeline import FrameTree, PhaseStageFactory, RangeDocument
+from iivs_cardio.data.transforms.filtering.kernel import MedianConfig
 from iivs_cardio.data.writer import RECORD_FILE
 from scripts._compute import ComputeConfig, IncompleteRunError, run_all
 from scripts.data._filtering import parse_filter_config
@@ -457,6 +459,84 @@ def test_a_written_sequence_says_which_frames_it_was_made_from(phase_tree, tmp_p
     kept = range(0, FRAMES, 2)
     assert record["frames"] == [f"{index:05d}_phase.bin" for index in kept]
     assert len(PhaseBinFolder(folder)) == len(record["frames"])
+
+
+def _cache(phase_tree: Path, dest: Path, **target: object) -> None:
+    """Run a frames-only pass, so a second one has something to reuse."""
+    source = SourceConfig(root=str(phase_tree))
+    config = TargetConfig(
+        root=str(dest), subpath=FILTERED, save_frames=True, save_ranges=False, **target
+    )
+    compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
+
+    run_all(build_phase_stages(source, config, name=STAGE, output_root=dest), compute)
+
+
+def _mtimes(dest: Path) -> dict[str, float]:
+    return {
+        path.relative_to(dest).as_posix(): path.stat().st_mtime
+        for path in sorted(dest.rglob("*.bin"))
+    }
+
+
+def test_a_second_run_keeps_the_frames_the_first_one_wrote(
+    phase_tree, tmp_path, caplog
+):
+    # The whole point: 470 GB of reading and writing, and nothing about the
+    # sequences changed. Compared by mtime rather than by content, since
+    # rewriting the same bytes is exactly the work being avoided.
+    dest = tmp_path / "out"
+    _cache(phase_tree, dest)
+    before = _mtimes(dest)
+
+    with caplog.at_level(logging.INFO):
+        _cache(phase_tree, dest, if_frames_exist="reuse")
+
+    assert _mtimes(dest) == before
+    said = [record.getMessage() for record in caplog.records]
+    assert f"kept {SEQUENCES} sequences already written" in said
+    assert f"{SEQUENCES} of {SEQUENCES} ready" in " ".join(said)
+
+
+def test_a_sequence_whose_filter_changed_is_written_again(phase_tree, tmp_path):
+    # The record is what tells them apart: same frames, different settings, so
+    # the folder describes numbers this run would not produce.
+    dest = tmp_path / "out"
+    _cache(phase_tree, dest)
+    before = _mtimes(dest)
+
+    source = SourceConfig(root=str(phase_tree))
+    config = TargetConfig(
+        root=str(dest),
+        subpath=FILTERED,
+        save_frames=True,
+        save_ranges=False,
+        if_frames_exist="reuse",
+    )
+    filtered = {
+        "_target_": f"{MedianConfig.__module__}.MedianConfig",
+        "radius": [1, 1, 0],
+    }
+    compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
+    stages = build_phase_stages(
+        source, config, OmegaConf.create(filtered), name=STAGE, output_root=dest
+    )
+
+    run_all(stages, compute)
+
+    assert _mtimes(dest) != before
+
+
+def test_a_folder_missing_a_frame_is_not_reused(phase_tree, tmp_path):
+    # A range part is one file and so is there or not; a folder can be half
+    # removed. Reusing that leaves a short sequence reading as a whole one.
+    dest = tmp_path / "out"
+    _cache(phase_tree, dest)
+    (dest / "TL_01" / FILTERED / f"{FRAMES - 1:05d}_phase.bin").unlink()
+
+    _cache(phase_tree, dest, if_frames_exist="reuse")
+
+    assert len(PhaseBinFolder(dest / "TL_01" / FILTERED)) == FRAMES
 
 
 def test_a_tree_told_no_settings_leaves_the_folder_saying_nothing(phase_tree, tmp_path):

@@ -150,8 +150,9 @@ class TargetConfig(TreeConfig):
         range_file: The name that document is given, given `.json` if it has no
             extension. Defaults to `"value_range"`.
         if_frames_exist: The policy for a sequence that already has a frame
-            folder. `"reuse"` needs a record of how the folder was made, which
-            a cache does not yet carry. Defaults to `"error"`.
+            folder. `"reuse"` keeps the ones an earlier run left whose record
+            still describes this one, and writes the rest. Defaults to
+            `"error"`.
         if_ranges_exist: The policy for a sequence that already has a range
             part. `"reuse"` keeps the ones an earlier run left that still
             describe this one, and measures the rest. Defaults to `"error"`.
@@ -519,6 +520,7 @@ def build_branches(
                 target_subpath,
                 contents,
                 settings,
+                selected=selected,
                 if_frames_exist=frame_policy,
                 if_sources_gone=source_policy,
             )

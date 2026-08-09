@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import pytest
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 
 from iivs_cardio.data.pipeline import FrameTree
+from iivs_cardio.data.writer import RECORD_FILE
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -40,11 +42,97 @@ def test_a_tree_names_the_sequences_it_holds_rather_than_the_folders(tmp_path):
     assert _tree(tmp_path).list_sequences() == ["plate/TL_00", "plate/TL_01"]
 
 
-def test_a_tree_refuses_the_policy_it_cannot_yet_carry_out(tmp_path):
-    # `ExistingOutputPolicy` offers three and a tree can do two: without this
-    # the third arrives as `overwrite=False` and quietly behaves as 'error'.
-    with pytest.raises(ValueError, match="expected 'error', 'overwrite'"):
-        _tree(tmp_path, if_frames_exist="reuse")
+def test_a_tree_refuses_a_policy_nobody_offers(tmp_path):
+    # Config arrives as text whatever the field says, so a typo has to be
+    # caught where the setting's own name can still be named.
+    with pytest.raises(ValueError, match=r"unsupported if_frames_exist 'sync'"):
+        _tree(tmp_path, if_frames_exist="sync")
+
+
+def test_a_selection_naming_what_the_source_lacks_is_refused(tmp_path):
+    # The contents is the dataset, so a selection outside it is the caller
+    # having built one of the two from somewhere else.
+    with pytest.raises(ValueError, match=r"selected 'TL_99'"):
+        _tree(tmp_path, "TL_00", selected=["TL_99"])
+
+
+def test_a_sequence_already_written_is_refused_before_a_frame_is_read(tmp_path):
+    # The writer refuses the same thing, one sequence at a time, so a run over
+    # 500 whose 300th is already there paid for 299 of them first. Here the
+    # whole tree is in view and nothing has been read yet.
+    _sequence(tmp_path, "plate/TL_00")
+    tree = _tree(tmp_path, "plate/TL_00", "plate/TL_01")
+
+    with pytest.raises(FileExistsError, match=r"1 sequence already written"):
+        tree.__enter__()
+
+
+@pytest.mark.parametrize(
+    ("written", "why"),
+    (
+        ("{ not json", "unreadable"),
+        ('["a", "b"]', "not a mapping"),
+        ('{"settings": null}', "no frames listed"),
+        ('{"settings": null, "frames": "00000_phase.bin"}', "frames not a list"),
+        (
+            '{"settings": {"filter": 1}, "frames": ["00000_phase.bin"]}',
+            "other settings",
+        ),
+        ('{"settings": null, "frames": ["00099_phase.bin"]}', "other frames"),
+    ),
+)
+def test_a_record_that_cannot_be_believed_is_written_again(tmp_path, written, why):
+    # Judging is not reading: a record that says nothing usable means the run
+    # cannot tell, and the safe answer to "cannot tell" is to write it again.
+    _sequence(tmp_path, "TL_00")
+    (tmp_path / "TL_00" / PHASE_FLOAT_BIN / RECORD_FILE).write_text(
+        written, encoding="utf-8"
+    )
+    tree = FrameTree(
+        tmp_path,
+        PHASE_FLOAT_BIN,
+        {"TL_00": ("00000_phase.bin",)},
+        if_frames_exist="reuse",
+    )
+
+    with tree:
+        pass
+
+    assert tree.report() is None, why
+
+
+def test_a_folder_holding_fewer_frames_than_its_record_is_written_again(tmp_path):
+    # A range part is one file and so is there or not; a folder can be half
+    # removed, and reusing that leaves a short sequence reading as a whole one.
+    folder = _sequence(tmp_path, "TL_00")
+    (folder / "00001_phase.bin").write_bytes(b"")
+    contents = {"TL_00": ("00000_phase.bin", "00001_phase.bin")}
+    record = {"settings": None, "frames": list(contents["TL_00"])}
+    (folder / RECORD_FILE).write_text(json.dumps(record), encoding="utf-8")
+
+    with FrameTree(
+        tmp_path, PHASE_FLOAT_BIN, contents, if_frames_exist="reuse"
+    ) as kept:
+        pass
+
+    (folder / "00001_phase.bin").unlink()
+    with FrameTree(
+        tmp_path, PHASE_FLOAT_BIN, contents, if_frames_exist="reuse"
+    ) as short:
+        pass
+
+    assert kept.report() == "kept 1 sequence already written"
+    assert short.report() is None
+
+
+def test_a_sequence_the_run_was_not_given_is_not_in_its_way(tmp_path):
+    # `error` is about what this run would write, so a folder outside the
+    # selection is not a collision: a retry of one sequence must not be
+    # refused by the ones that already succeeded.
+    _sequence(tmp_path, "plate/TL_00")
+
+    with _tree(tmp_path, "plate/TL_00", "plate/TL_01", selected=["plate/TL_01"]):
+        pass
 
 
 def test_a_folder_inside_a_sequence_is_not_a_sequence_of_its_own(tmp_path):
@@ -81,7 +169,7 @@ def test_a_folder_the_source_has_lost_stays_unless_the_policy_says_otherwise(tmp
     _sequence(tmp_path, "kept")
     _sequence(tmp_path, "gone")
 
-    with _tree(tmp_path, "kept"):
+    with _tree(tmp_path, "kept", if_frames_exist="overwrite"):
         pass
 
     assert (tmp_path / "gone" / PHASE_FLOAT_BIN).is_dir()
@@ -91,7 +179,7 @@ def test_a_folder_the_source_has_lost_goes_when_the_policy_says_so(tmp_path):
     _sequence(tmp_path, "kept")
     _sequence(tmp_path, "gone")
 
-    with _tree(tmp_path, "kept", if_sources_gone="delete"):
+    with _tree(tmp_path, "kept", if_frames_exist="overwrite", if_sources_gone="delete"):
         pass
 
     assert not (tmp_path / "gone").exists()
@@ -104,7 +192,9 @@ def test_a_removal_is_said_to_have_happened_and_not_only_to_have_been_due(tmp_pa
     # anything was acted on. Destructive, and only its failure was ever loud.
     _sequence(tmp_path, "kept")
     _sequence(tmp_path, "gone")
-    tree = _tree(tmp_path, "kept", if_sources_gone="delete")
+    tree = _tree(
+        tmp_path, "kept", if_frames_exist="overwrite", if_sources_gone="delete"
+    )
 
     assert tree.report() is None
 
@@ -116,7 +206,9 @@ def test_a_removal_is_said_to_have_happened_and_not_only_to_have_been_due(tmp_pa
 
 def test_a_tree_that_took_nothing_away_reports_nothing(tmp_path):
     _sequence(tmp_path, "kept")
-    tree = _tree(tmp_path, "kept", if_sources_gone="delete")
+    tree = _tree(
+        tmp_path, "kept", if_frames_exist="overwrite", if_sources_gone="delete"
+    )
 
     with tree:
         pass
@@ -133,7 +225,7 @@ def test_the_job_s_own_directory_survives_the_clearing(tmp_path):
     (tmp_path / "left_by_hand").mkdir()
     _sequence(tmp_path, "kept")
 
-    with _tree(tmp_path, "kept"):
+    with _tree(tmp_path, "kept", if_frames_exist="overwrite"):
         pass
 
     assert (tmp_path / ".hydra" / "config.yaml").exists()
@@ -147,7 +239,12 @@ def test_dropping_a_nested_unsourced_folder_takes_what_it_empties(tmp_path):
     _sequence(tmp_path, "plate/2026.03.11/kept")
     _sequence(tmp_path, "plate/2026.03.12/gone")
 
-    with _tree(tmp_path, "plate/2026.03.11/kept", if_sources_gone="delete"):
+    with _tree(
+        tmp_path,
+        "plate/2026.03.11/kept",
+        if_frames_exist="overwrite",
+        if_sources_gone="delete",
+    ):
         pass
 
     assert not (tmp_path / "plate" / "2026.03.12").exists()
@@ -163,7 +260,7 @@ def test_what_a_killed_worker_staged_is_collected_by_the_next_run(tmp_path):
     staged.mkdir(parents=True)
     (staged / "00000_phase.bin").write_bytes(b"")
 
-    with _tree(tmp_path, "kept", "died"):
+    with _tree(tmp_path, "kept", "died", if_frames_exist="overwrite"):
         pass
 
     assert not (tmp_path / "died").exists()
