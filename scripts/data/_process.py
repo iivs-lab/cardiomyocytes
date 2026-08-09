@@ -161,6 +161,11 @@ class SourceConfig(TreeConfig):
 class TargetConfig(TreeConfig):
     """What a run writes, and where.
 
+    Both `"reuse"` policies judge by the settings and by the source frames'
+    names, never by what those frames hold. A source re-exported under the same
+    names is kept rather than written again, so a run that follows one takes
+    `"overwrite"` instead.
+
     Attributes:
         root: The folder the run's outputs land under.
         subpath: The path a written sequence keeps its frames at inside its own

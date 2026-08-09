@@ -380,3 +380,75 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   being stale rather than as a wrong index. They were two independent
   expressions of the same slice, which one more setting each would have made
   three ways to disagree.
+- `kaparoo-python` moves to `>=0.13.1` and `iivs-lib` to `>=0.4.0`. Between them
+  they answer every request the two handoff documents made, and several helpers
+  written here are deleted for the upstream equivalent (see Removed). `descend`,
+  new in kaparoo 0.13.1 and reaching the phase searches through iivs-lib 0.4.0,
+  replaces the rule that pruned a sequence's subtree by testing each directory's
+  parent: the walk now says what it means, which is not to look inside a folder
+  that holds frames.
+- `read_policy` is `ensure_policy`, and hands its check to
+  `kaparoo.utils.ensure_one_of`, which 0.13.0 taught to return the `Literal` it
+  validated rather than `str`. The `cast` goes with it. The refusal keeps its own
+  shape (`unsupported <key> '<value>': expected ...`), which every other refusal
+  in this package matches, and `from None` keeps a config typo to one traceback.
+- A selection is recognised as a spec file by `is_spec_file` rather than by
+  `str.endswith`, so `.JSON` counts and a file named `.json` does not. That is
+  the test `select` itself applies, so the log now agrees with the selection it
+  describes.
+- A stage that finds outputs with no source says `1 output with no source`
+  rather than `1 output(s) have no source`, matching the line `FrameTree`
+  already writes beside it.
+- The progress bar counts what the parent has collected rather than what the
+  workers reported finishing. Both run paths draw it and `mpire` is no longer
+  asked to draw one of its own: the two counted different things, and on a run
+  that computed nothing the pool's bar reached the end and closed while four
+  more results were still being logged beneath it. The bar now trails a slow
+  item, since `imap` returns in order, and catches up by the end.
+
+### Removed
+
+- `counted` and `prune_above` from `iivs_cardio.common.pipeline`, and
+  `SELECTION_SPECS` from the preprocess script, for `kaparoo.utils.quantify`,
+  `kaparoo.filesystem.prune_upward` and `kaparoo.filesystem.is_spec_file`.
+  `quantify` also takes a `plural`, which the local one could not, and it
+  reaches `writer.py` and `stage.py` without either importing a pipeline module
+  for a text helper.
+- `get_args(X.__value__)` at five sites, for `kaparoo.utils.literal_values(X)`,
+  which raises on anything that does not resolve to a `Literal` rather than
+  reporting it as empty. `get_args` on a PEP 695 alias returns an empty tuple,
+  which every membership check downstream then accepts.
+
+### Fixed
+
+- A frame folder half removed no longer reads as complete. `_count_frames`
+  counted directories as well as files, so a folder holding one frame and one
+  directory answered two, which is exactly the number a two-frame record
+  expects.
+- A sequence passed over says why. `nothing to compute: every branch already
+  holds this sequence` named a cause that is not there when the run writes
+  nothing at all, which now says so instead.
+- A log line no longer tears the progress bar it lands on. `hydra` attaches a
+  `StreamHandler` to the root logger and `tqdm` draws on that same stderr with a
+  carriage return, so every line overwrote the bar's own and a fresh bar
+  appeared below it, once per line. Console handlers route through `tqdm.write`
+  while a bar is drawn; file handlers are untouched, so the log on disk is
+  unchanged.
+- `scripts/env/` is visible to git again. `.gitignore`'s `env/` matches at every
+  depth, and on a case-insensitive filesystem `ENV/` matches the same folder a
+  second time, so anything added there read as committed locally and was absent
+  on the server. The five virtualenv directory patterns are anchored to the root.
+
+### Performance
+
+- A sweep searches the dataset once rather than once per filter. Every job of a
+  `--multirun` runs in one process and differs only in the filter, yet each
+  rebuilt the same answer: on 440 sequences and 448,800 frames the search, the
+  frame-number check and the contents together come to about 16 s, and 16 chunks
+  by 11 filters would have paid it 176 times. `search_sources` holds its newest
+  answer, keyed on the whole of `SourceConfig` and on the working directory,
+  which a relative `root` or `include` needs since `hydra.job.chdir` can move it.
+  Only the newest is held, so a caller asking for anything else pays what it paid
+  before.
+- `validate(level="names")` costs about 0.5 us a file rather than 8.8, from
+  iivs-lib 0.4.0, measured here over 40,000 frames.

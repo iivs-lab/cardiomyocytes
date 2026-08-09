@@ -178,8 +178,8 @@ class FrameTree:
 
         Three things can have moved since it was written, and none of them
         shows in the folder's name: the settings that shaped the frames, which
-        frames the source holds, and whether the folder still holds all of what
-        its record says it does. The third has no counterpart in a range part,
+        frames the source holds by name, and whether the folder still holds all
+        of what its record says it does. The third has no counterpart in a part,
         which is one file and so is either there or not; a folder can be half
         removed, and reusing that would leave a short sequence reading as a
         whole one.

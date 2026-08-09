@@ -718,8 +718,8 @@ class RangeDocument:
 
         Two things can have moved since it was written, and neither shows in
         the part's own name: the settings that shaped its numbers, and which
-        frames the source holds. A part failing either is stale rather than
-        broken, so it is passed over rather than refused.
+        frames the source holds by name. A part failing either is stale rather
+        than broken, so it is passed over rather than refused.
 
         Args:
             document: The part as it was read, for the settings it records.
