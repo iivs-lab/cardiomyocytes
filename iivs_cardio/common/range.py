@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("finite_range",)
+__all__ = ("all_finite", "finite_range")
 
 from typing import TYPE_CHECKING
 
@@ -10,8 +10,26 @@ if TYPE_CHECKING:
     from torch import Tensor
 
 
+def all_finite(frame: Tensor) -> bool:
+    """Test whether every value in `frame` is finite, in one fused pass.
+
+    `aminmax` reads the frame once and betrays a non-finite value on the way,
+    the same way `finite_range` uses it: NaN propagates through both bounds and
+    an infinity lands on the one it belongs to. `isfinite().all()` reaches the
+    same answer through a mask the size of the frame, which on a hot path is
+    the allocation this avoids. An empty frame holds nothing to be non-finite,
+    and `aminmax` has no bounds to take from one.
+    """
+    if frame.numel() == 0:
+        return True
+
+    low, high = torch.aminmax(frame)
+
+    return bool(low.isfinite() and high.isfinite())
+
+
 def finite_range(frame: Tensor) -> tuple[float, float] | None:
-    """The `(min, max)` of `frame`'s finite values, or None when it has none.
+    """Return the `(min, max)` of `frame`'s finite values, or `None` if it has none.
 
     Non-finite values are ignored rather than propagated, so a masked frame's NaN
     background does not swallow the range. An empty frame and an entirely

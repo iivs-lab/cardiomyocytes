@@ -19,6 +19,17 @@ from iivs_cardio.data.pipeline.ranges import (
 )
 
 
+def _contents(*names: str, frames: int = 1) -> dict[str, tuple[str, ...]]:
+    """Every sequence the source holds, against the frames each would measure.
+
+    `_Frames` names its frames the way a phase folder does, so the contents a
+    document is given lines up with what a meter records under each part.
+    """
+    listed = tuple(f"{index:05d}_phase.bin" for index in range(frames))
+
+    return dict.fromkeys(names, listed)
+
+
 def _sequence(source: str, *bounds: tuple[float, float]) -> SequenceRange:
     frames = tuple(
         FrameRange(f"{index:05d}_phase.bin", low, high)
@@ -59,7 +70,7 @@ def test_a_tie_is_reported_against_the_earliest_part():
 def test_the_dataset_bound_indexes_a_sequence_rather_than_a_frame():
     # Each level folds only its own parts, so a dataset index names a sequence.
     # The extremes are in the last sequence, whose own extremes are frames 1
-    # and 0 -- numbers that must not leak upwards.
+    # and 0, numbers that must not leak upwards.
     dataset = DatasetRange(
         "plate_A",
         (
@@ -94,7 +105,7 @@ def test_a_level_holding_nothing_is_refused_by_name(build, named):
 
 def test_every_level_leads_with_the_source_it_names():
     # The source is what a reader scans for, and it leads at every level without
-    # the document being reordered on the way out -- `CompositeRange` declaring
+    # the document being reordered on the way out: `CompositeRange` declaring
     # it ahead of the four folded numbers is what buys that.
     dataset = DatasetRange("plate_A", (_sequence("TL_00", (0.0, 1.0)),))
 
@@ -151,8 +162,8 @@ class _Frames:
         return Path(f"{index:05d}_phase.bin")
 
 
-def _meter(tmp_path, source: str = "seq") -> SequenceRangeMeter:
-    return SequenceRangeMeter(tmp_path / "range.parts", source)
+def _meter(tmp_path, source: str = "seq", settings=None) -> SequenceRangeMeter:
+    return SequenceRangeMeter(tmp_path / "range.parts", source, settings)
 
 
 def _range(*bounds: tuple[float, float]) -> _Frames:
@@ -253,10 +264,10 @@ def test_a_meter_that_saw_nothing_is_refused_by_name(tmp_path):
 
 def test_the_parts_folder_sits_beside_the_document(tmp_path):
     named = RangeDocument(
-        tmp_path / "phase_range.json", sequence_names=["a"], source="plate_A"
+        tmp_path / "phase_range.json", contents=_contents("a"), source="plate_A"
     )
     bare = RangeDocument(
-        tmp_path / "phase_range", sequence_names=["a"], source="plate_A"
+        tmp_path / "phase_range", contents=_contents("a"), source="plate_A"
     )
 
     assert named.parts_root == bare.parts_root == tmp_path / "phase_range.parts"
@@ -270,7 +281,7 @@ def test_a_document_asks_a_sequence_only_what_it_is_called(tmp_path):
         name: str
 
     meter = RangeDocument(
-        tmp_path / "range", sequence_names=["plate/TL_00"], source="plate_A"
+        tmp_path / "range", contents=_contents("plate/TL_00"), source="plate_A"
     ).get_hook(_Named("plate/TL_00"))
     with meter:
         meter(Step(0, torch.tensor([[0.0, 1.0]]), Path("00000_phase.bin")))
@@ -280,7 +291,7 @@ def test_a_document_asks_a_sequence_only_what_it_is_called(tmp_path):
 
 def test_a_document_folds_the_parts_in_name_order(tmp_path):
     document = RangeDocument(
-        tmp_path / "range", sequence_names=["a", "b"], source="plate_A"
+        tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
     )
     with document:
         _scan(_meter(tmp_path, "b"), (0.0, 5.0))
@@ -296,30 +307,47 @@ def test_a_document_folds_the_parts_in_name_order(tmp_path):
 def test_a_document_writes_the_settings_it_was_given(tmp_path):
     with RangeDocument(
         tmp_path / "range",
+        contents=_contents("a"),
         settings={"filter": "identity"},
-        sequence_names=["a"],
         source="plate_A",
     ):
-        _scan(_meter(tmp_path, "a"), (-1.0, 2.0))
+        _scan(_meter(tmp_path, "a", {"filter": "identity"}), (-1.0, 2.0))
 
     document = json.loads((tmp_path / "range.json").read_text(encoding="utf-8"))
     assert document["settings"]["filter"] == "identity"
     assert document["dataset"]["max_value"] == 2.0
 
 
-def test_a_document_that_gathered_nothing_is_refused_by_name(tmp_path):
-    with (
-        pytest.raises(ValueError, match="DatasetRange holds nothing"),
-        RangeDocument(tmp_path / "range", sequence_names=["a"], source="plate_A"),
-    ):
+def test_a_document_that_gathered_nothing_says_so_rather_than_not_being_written(
+    tmp_path,
+):
+    # `coverage: 0 of N` is wanted most exactly when every sequence failed, and
+    # refusing to write is what used to take it away. There are no bounds to
+    # invent, so the document carries what it covers and no `dataset` block.
+    with RangeDocument(tmp_path / "range", contents=_contents("a"), source="plate_A"):
         pass
 
+    document = _saved(tmp_path)
 
-def test_a_run_that_died_writes_no_document(tmp_path):
-    # The parts it did finish stay: they are what a re-run does not have to redo.
+    assert "dataset" not in document
+    assert document["coverage"] == {
+        "found": 1,
+        "selected": 1,
+        "covered": 0,
+        "reused": 0,
+        "skipped": ["a"],
+        "unselected": [],
+    }
+
+
+def test_a_run_that_died_still_folds_the_parts_that_finished(tmp_path):
+    # The healthy parts were on disk and nothing read them: a worker dying took
+    # the document with it, so a run that measured 90 of 121 left no record of
+    # the 90. What it covers is `coverage`'s to say, not a reason to write
+    # nothing.
     def die() -> None:
         with RangeDocument(
-            tmp_path / "range", sequence_names=["a", "b"], source="plate_A"
+            tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
         ):
             _scan(_meter(tmp_path, "a"), (0.0, 1.0))
             msg = "the run gave up"
@@ -328,13 +356,17 @@ def test_a_run_that_died_writes_no_document(tmp_path):
     with pytest.raises(RuntimeError, match="the run gave up"):
         die()
 
-    assert not (tmp_path / "range.json").exists()
+    document = _saved(tmp_path)
+
     assert (tmp_path / "range.parts" / "a.json").exists()
+    assert document["dataset"]["sequences"][0]["source"] == "a"
+    assert document["coverage"]["covered"] == 1
+    assert document["coverage"]["skipped"] == ["b"]
 
 
 def test_a_document_reports_only_once_it_has_saved(tmp_path):
     document = RangeDocument(
-        tmp_path / "range", sequence_names=["a", "b"], source="plate_A"
+        tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
     )
 
     assert document.report() is None  # a worker's copy never folds anything
@@ -348,13 +380,18 @@ def test_a_document_reports_only_once_it_has_saved(tmp_path):
 
 def test_entering_drops_what_an_earlier_run_left(tmp_path):
     # `output_directory` is pinned rather than timestamped, so a re-run lands in
-    # the same folder -- and a stale part would fold in as if it were this run's.
-    with RangeDocument(tmp_path / "range", sequence_names=["a", "b"], source="plate_A"):
+    # the same folder, and a stale part would fold in as if it were this run's.
+    with RangeDocument(
+        tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
+    ):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
         _scan(_meter(tmp_path, "b"), (0.0, 5.0))
 
     with RangeDocument(
-        tmp_path / "range", sequence_names=["a"], overwrite=True, source="plate_A"
+        tmp_path / "range",
+        contents=_contents("a"),
+        if_ranges_exist="overwrite",
+        source="plate_A",
     ):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
 
@@ -365,12 +402,12 @@ def test_entering_drops_what_an_earlier_run_left(tmp_path):
 def test_entering_leaves_an_empty_folder_it_did_not_empty(tmp_path):
     # The tree is cleared so a sequence dropped from the dataset stops looking
     # present, which is about folders this clearing emptied. One that was
-    # already empty is somebody else's -- a place held for a plate still being
-    # copied, most likely -- and taking it is not this run's to do.
+    # already empty is somebody else's, a place held for a plate still being
+    # copied most likely, and taking it is not this run's to do.
     mine = tmp_path / "range.parts" / "mine"
     mine.mkdir(parents=True)
 
-    with RangeDocument(tmp_path / "range", sequence_names=["a"], source="plate_A"):
+    with RangeDocument(tmp_path / "range", contents=_contents("a"), source="plate_A"):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
 
     assert mine.is_dir()
@@ -378,7 +415,7 @@ def test_entering_leaves_an_empty_folder_it_did_not_empty(tmp_path):
 
 def test_a_meter_will_not_replace_a_part_it_did_not_write(tmp_path):
     # Its own run empties the folder on the way in, so a part sitting under this
-    # name belongs to something else -- two sequences whose names came out the
+    # name belongs to something else: two sequences whose names came out the
     # same, most likely. Replacing it silently lost one of the two.
     meter = _meter(tmp_path, "a")
     (tmp_path / "range.parts" / "a.json").write_text("{}", encoding="utf-8")
@@ -391,8 +428,10 @@ def test_a_meter_will_not_replace_a_part_it_did_not_write(tmp_path):
 
 def test_a_document_is_opened_once(tmp_path):
     # Opening is what makes the folder this run's, and it clears the folder to
-    # do it -- so a second one would drop the parts the first has gathered.
-    document = RangeDocument(tmp_path / "range", sequence_names=["a"], source="plate_A")
+    # do it, so a second one would drop the parts the first has gathered.
+    document = RangeDocument(
+        tmp_path / "range", contents=_contents("a"), source="plate_A"
+    )
 
     with document:
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
@@ -406,9 +445,11 @@ def test_a_document_is_opened_once(tmp_path):
 def test_a_document_it_may_not_replace_is_refused_before_anything_is_dropped(tmp_path):
     # Clearing cannot be undone and the document is only written once every
     # sequence has run, so refusing at the end meant paying for the whole
-    # dataset -- hours of it -- and dropping the earlier run's parts on the way
-    # in. The place is taken first, which costs nothing and settles it at once.
-    with RangeDocument(tmp_path / "range", sequence_names=["a", "b"], source="plate_A"):
+    # dataset, hours of it, and dropping the earlier run's parts on the way in.
+    # The place is taken first, which costs nothing and settles it at once.
+    with RangeDocument(
+        tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
+    ):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
         _scan(_meter(tmp_path, "b"), (0.0, 5.0))
 
@@ -416,7 +457,7 @@ def test_a_document_it_may_not_replace_is_refused_before_anything_is_dropped(tmp
 
     with (
         pytest.raises(FileExistsError),
-        RangeDocument(tmp_path / "range", sequence_names=["a"], source="plate_A"),
+        RangeDocument(tmp_path / "range", contents=_contents("a"), source="plate_A"),
     ):
         pytest.fail("the run started over a document it may not replace")
 
@@ -429,13 +470,13 @@ def test_entering_collects_what_an_interrupted_run_only_staged(tmp_path):
     # moved into place on a clean close, so a worker killed part way leaves one
     # there. `list_parts` cannot see it, the only other hand on it died with
     # that process, and the folder it sits in cannot be cleared while it is
-    # there -- so it accumulates, one per interrupted run.
+    # there, so it accumulates, one per interrupted run.
     staged = tmp_path / "range.parts" / "plate_A" / ".TL_00.json.ctgx5mjr.tmp"
     staged.parent.mkdir(parents=True)
     staged.write_text("half a part", encoding="utf-8")
 
     with RangeDocument(
-        tmp_path / "range", sequence_names=["plate_A/TL_00"], source="plate_A"
+        tmp_path / "range", contents=_contents("plate_A/TL_00"), source="plate_A"
     ):
         _scan(_meter(tmp_path, "plate_A/TL_00"), (0.0, 1.0))
 
@@ -444,13 +485,18 @@ def test_entering_collects_what_an_interrupted_run_only_staged(tmp_path):
 
 def test_entering_drops_the_folders_that_layout_left_too(tmp_path):
     # A mirrored part nests, so clearing the files alone would keep every folder
-    # the source ever had -- and a plate dropped from the dataset would go on
+    # the source ever had, and a plate dropped from the dataset would go on
     # looking present to anyone reading the tree.
-    with RangeDocument(tmp_path / "range", sequence_names=["a", "b"], source="plate_A"):
+    with RangeDocument(
+        tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
+    ):
         _scan(_meter(tmp_path, "plate_A/TL_00"), (0.0, 1.0))
 
     with RangeDocument(
-        tmp_path / "range", sequence_names=["a"], overwrite=True, source="plate_A"
+        tmp_path / "range",
+        contents=_contents("a"),
+        if_ranges_exist="overwrite",
+        source="plate_A",
     ):
         _scan(_meter(tmp_path, "plate_B/TL_00"), (0.0, 1.0))
 
@@ -466,7 +512,9 @@ def test_entering_leaves_alone_what_it_did_not_write(tmp_path):
     (parts / "plate_A").mkdir(parents=True)
     (parts / "plate_A" / "notes.txt").write_text("mine", encoding="utf-8")
 
-    with RangeDocument(tmp_path / "range", sequence_names=["a", "b"], source="plate_A"):
+    with RangeDocument(
+        tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
+    ):
         _scan(_meter(tmp_path, "plate_B/TL_00"), (0.0, 1.0))
 
     assert (parts / "plate_A" / "notes.txt").read_text(encoding="utf-8") == "mine"
@@ -479,8 +527,10 @@ def _saved(tmp_path) -> dict:
     return json.loads((tmp_path / "range.json").read_text(encoding="utf-8"))
 
 
-def test_a_document_told_its_roster_says_what_it_covered(tmp_path):
-    with RangeDocument(tmp_path / "range", sequence_names=["a", "b"], source="plate_A"):
+def test_a_document_told_its_contents_says_what_it_covered(tmp_path):
+    with RangeDocument(
+        tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
+    ):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
         _scan(_meter(tmp_path, "b"), (0.0, 5.0))
 
@@ -488,7 +538,9 @@ def test_a_document_told_its_roster_says_what_it_covered(tmp_path):
         "found": 2,
         "selected": 2,
         "covered": 2,
+        "reused": 0,
         "skipped": [],
+        "unselected": [],
     }
 
 
@@ -496,7 +548,7 @@ def test_a_document_names_the_sequences_that_left_nothing(tmp_path):
     # Bounds folded over a subset are not the dataset's, and a consumer setting
     # a normalization policy from them would read a hole as data.
     with RangeDocument(
-        tmp_path / "range", sequence_names=["a", "b", "c"], source="plate_A"
+        tmp_path / "range", contents=_contents("a", "b", "c"), source="plate_A"
     ):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
 
@@ -504,16 +556,20 @@ def test_a_document_names_the_sequences_that_left_nothing(tmp_path):
         "found": 3,
         "selected": 3,
         "covered": 1,
+        "reused": 0,
         "skipped": ["b", "c"],
+        "unselected": [],
     }
 
 
 def test_a_part_filed_under_the_wrong_sequence_is_refused_by_name(tmp_path):
     # The path says which sequence a part belongs to and the body says it again;
     # nothing compared them, so a part sorted under one name and counted under
-    # another produced "covered everything, skipped one" -- a document that
+    # another produced "covered everything, skipped one": a document that
     # contradicts itself in a way no number in it points at.
-    with RangeDocument(tmp_path / "range", sequence_names=["a", "b"], source="plate_A"):
+    with RangeDocument(
+        tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
+    ):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
         _scan(_meter(tmp_path, "b"), (0.0, 5.0))
 
@@ -524,16 +580,19 @@ def test_a_part_filed_under_the_wrong_sequence_is_refused_by_name(tmp_path):
 
     with pytest.raises(ValueError, match=r"part 'b' holds 'a'"):
         RangeDocument(
-            tmp_path / "range", sequence_names=["a", "b"], source="plate_A"
+            tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
         ).to_range()
 
 
 def test_a_document_that_could_not_be_written_reports_nothing(tmp_path):
     # What was folded was remembered before the file reached disk, so a refused
-    # write still said "wrote range.json from 1 sequence: [...]" -- a line about
+    # write still said "wrote range.json from 1 sequence: [...]", a line about
     # a document that is not there, and about bounds nobody can read back.
     document = RangeDocument(
-        tmp_path / "range", sequence_names=["a"], source="plate_A", overwrite=False
+        tmp_path / "range",
+        contents=_contents("a"),
+        source="plate_A",
+        if_ranges_exist="error",
     )
     _scan(_meter(tmp_path, "a"), (0.0, 1.0))
     (tmp_path / "range.json").write_text("{}", encoding="utf-8")
@@ -546,13 +605,16 @@ def test_a_document_that_could_not_be_written_reports_nothing(tmp_path):
 
 
 def test_a_document_says_how_much_of_the_source_the_run_took(tmp_path):
-    # The one a retry produced: `include` narrows the roster, so a run over one
+    # The one a retry produced: `include` narrows the contents, so a run over one
     # of four covered all it was given and the block read as complete. Nothing
     # else in the file could tell "a dataset of one" from "one of four" --
     # `settings` leaves the selection out on purpose, since recording it there
     # would refuse reuse to a run that narrowed.
     with RangeDocument(
-        tmp_path / "range", sequence_names=["b"], source="plate_A", found=4
+        tmp_path / "range",
+        contents=_contents("a", "b", "c", "d"),
+        source="plate_A",
+        selected=["b"],
     ) as document:
         _scan(_meter(tmp_path, "b"), (0.0, 1.0))
 
@@ -560,18 +622,20 @@ def test_a_document_says_how_much_of_the_source_the_run_took(tmp_path):
         "found": 4,
         "selected": 1,
         "covered": 1,
+        "reused": 0,
         "skipped": [],
+        "unselected": ["a", "c", "d"],
     }
     assert document.report() == (
-        "wrote range.json from 1 sequence, selected from 4: [0, 1]"
+        "wrote range.json from 1 of 4 sequences, 3 not taken: [0, 1]"
     )
 
 
-def test_a_run_that_narrowed_nothing_says_the_roster_was_all_there_was(tmp_path):
+def test_a_run_that_narrowed_nothing_says_the_contents_was_all_there_was(tmp_path):
     # Written whichever way round, so an absent `found` can never be read as
     # "unknown". A caller that did not narrow says so by not saying anything.
     with RangeDocument(
-        tmp_path / "range", sequence_names=["a", "b"], source="plate_A"
+        tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
     ) as document:
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
         _scan(_meter(tmp_path, "b"), (2.0, 3.0))
@@ -580,57 +644,66 @@ def test_a_run_that_narrowed_nothing_says_the_roster_was_all_there_was(tmp_path)
     assert "selected from" not in (document.report() or "")
 
 
-def test_a_roster_larger_than_what_was_found_is_refused(tmp_path):
-    # No selection can leave more than there was, so this is the caller having
-    # passed the wrong number -- and it has to fail where that is still visible
-    # rather than as a coverage nobody can explain.
-    with pytest.raises(ValueError, match=r"selected 2 of the 1"):
+def test_a_selection_naming_what_the_source_lacks_is_refused(tmp_path):
+    # The contents is the dataset, so a selection outside it is the caller having
+    # built one of the two from somewhere else, and it has to fail where that
+    # is still visible rather than as a coverage nobody can explain.
+    with pytest.raises(ValueError, match=r"selected 'c', which the source does not"):
         RangeDocument(
-            tmp_path / "range", sequence_names=["a", "b"], source="plate_A", found=1
+            tmp_path / "range",
+            contents=_contents("a", "b"),
+            source="plate_A",
+            selected=["a", "c"],
         )
 
 
 def test_a_coverage_that_does_not_add_up_cannot_be_built(tmp_path):
     # `covered` was counted off disk while `total` and `skipped` came from the
-    # roster, so the three could disagree. The type refuses the arithmetic now,
+    # contents, so the three could disagree. The type refuses the arithmetic now,
     # which is what keeps a future caller from writing one.
     with pytest.raises(ValueError, match=r"coverage does not add up"):
         Coverage(found=2, selected=2, covered=3, skipped=("b",))
 
     with pytest.raises(ValueError, match=r"selected 2 of the 1 found"):
-        Coverage(found=1, selected=2, covered=2, skipped=())
+        Coverage(found=1, selected=2, covered=1, skipped=())
+
+    with pytest.raises(ValueError, match=r"reused 2 of the 1 covered"):
+        Coverage(found=1, selected=1, covered=1, reused=2)
 
 
 def test_coverage_sits_ahead_of_the_numbers_it_qualifies(tmp_path):
     # A reader who takes the bounds and stops has to have passed this on the way.
     with RangeDocument(
         tmp_path / "range",
+        contents=_contents("a"),
         settings={"filter": "identity"},
-        sequence_names=["a"],
         source="plate_A",
     ):
-        _scan(_meter(tmp_path, "a"), (0.0, 1.0))
+        _scan(_meter(tmp_path, "a", {"filter": "identity"}), (0.0, 1.0))
 
     assert list(_saved(tmp_path)) == ["settings", "coverage", "dataset"]
 
 
 def test_a_document_with_no_sequence_to_cover_is_refused(tmp_path):
     # `search_sources` refuses a root holding nothing and a selection that kept
-    # nothing, so a run cannot reach here with an empty roster. Refused at the
+    # nothing, so a run cannot reach here with an empty contents. Refused at the
     # door anyway: a document that cannot name what it set out to cover would
     # write a `coverage` that reads as "complete" rather than "unknown".
     with pytest.raises(ValueError, match=r"no sequence to cover"):
-        RangeDocument(tmp_path / "range", sequence_names=[], source="plate_A")
+        RangeDocument(tmp_path / "range", contents={}, source="plate_A")
 
 
-def test_a_roster_naming_one_sequence_twice_counts_it_once(tmp_path):
+def test_a_selection_naming_one_sequence_twice_counts_it_once(tmp_path):
     # `covered` reads the parts back as a set, and a name can leave only one
     # part, so a repeated name would hold `covered` below `selected` for a run
-    # that measured everything -- and report the sequence as skipped besides.
+    # that measured everything, and report the sequence as skipped besides.
     with RangeDocument(
-        tmp_path / "range", sequence_names=["a", "b", "a"], source="plate_A"
+        tmp_path / "range",
+        contents=_contents("a", "b"),
+        source="plate_A",
+        selected=["a", "b", "a"],
     ) as document:
-        assert document.sequence_names == ("a", "b")
+        assert document.selected == ("a", "b")
 
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
         _scan(_meter(tmp_path, "b"), (2.0, 3.0))
@@ -639,38 +712,45 @@ def test_a_roster_naming_one_sequence_twice_counts_it_once(tmp_path):
         "found": 2,
         "selected": 2,
         "covered": 2,
+        "reused": 0,
         "skipped": [],
+        "unselected": [],
     }
 
 
-def test_the_roster_keeps_the_order_it_was_first_given_in(tmp_path):
-    # `skipped` is reported in roster order, so the survivor of a repeat has to
-    # be the first sighting rather than the last.
+def test_the_selection_keeps_the_order_it_was_first_given_in(tmp_path):
+    # `skipped` is reported in the order the run was going to take, so the
+    # survivor of a repeat has to be the first sighting rather than the last.
     document = RangeDocument(
-        tmp_path / "range", sequence_names=["b", "a", "b", "c"], source="plate_A"
+        tmp_path / "range",
+        contents=_contents("a", "b", "c"),
+        source="plate_A",
+        selected=["b", "a", "b", "c"],
     )
 
-    assert document.sequence_names == ("b", "a", "c")
+    assert document.selected == ("b", "a", "c")
 
 
 def test_every_document_carries_its_coverage(tmp_path):
     # Always written, never omitted: an absent block would leave a reader
     # guessing whether it means complete or unknown.
-    with RangeDocument(tmp_path / "range", sequence_names=["a"], source="plate_A"):
+    with RangeDocument(tmp_path / "range", contents=_contents("a"), source="plate_A"):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
 
     assert _saved(tmp_path)["coverage"] == {
         "found": 1,
         "selected": 1,
         "covered": 1,
+        "reused": 0,
         "skipped": [],
+        "unselected": [],
     }
 
 
 def test_a_partial_document_reads_differently_from_a_whole_one(tmp_path):
     # A count that usually matches is a number nobody checks, so the partial
     # line is shaped differently rather than carrying the same one.
-    whole = RangeDocument(tmp_path / "range", sequence_names=["a"], source="plate_A")
+    whole = RangeDocument(tmp_path / "range", contents=_contents("a"), source="plate_A")
     with whole:
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
 
@@ -678,8 +758,8 @@ def test_a_partial_document_reads_differently_from_a_whole_one(tmp_path):
 
     partial = RangeDocument(
         tmp_path / "range",
-        sequence_names=["a", "b", "c"],
-        overwrite=True,
+        contents=_contents("a", "b", "c"),
+        if_ranges_exist="overwrite",
         source="plate_A",
     )
     with partial:
@@ -691,11 +771,52 @@ def test_a_partial_document_reads_differently_from_a_whole_one(tmp_path):
     )
 
 
-def test_the_skipped_list_keeps_the_roster_s_own_order(tmp_path):
-    # Not the folded order and not sorted: the roster is what a caller reads the
+def test_the_line_says_how_much_of_it_cost_nothing(tmp_path):
+    # The whole point of the second run, and the number that says the reuse
+    # worked: without it a run that measured two and a run that measured none
+    # write the same line.
+    settings = {"filter": {"kind": "identity"}}
+    first = RangeDocument(
+        tmp_path / "range",
+        contents=_contents("a", "b"),
+        source="plate_A",
+        settings=settings,
+    )
+    with first:
+        _scan(_meter(tmp_path, "a", settings), (0.0, 1.0))
+        _scan(_meter(tmp_path, "b", settings), (2.0, 3.0))
+
+    again = RangeDocument(
+        tmp_path / "range",
+        contents=_contents("a", "b"),
+        source="plate_A",
+        settings=settings,
+        if_ranges_exist="reuse",
+    )
+    with again:
+        pass
+
+    assert again.report() == "wrote range.json from 2 sequences, 2 reused: [0, 3]"
+
+
+def test_a_document_that_covered_none_names_no_bounds(tmp_path):
+    # A run whose every sequence failed has nothing to take bounds from, and
+    # the line has to stop rather than reach for a range that is not there.
+    document = RangeDocument(
+        tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
+    )
+    with document:
+        pass
+
+    assert "dataset" not in _saved(tmp_path)
+    assert document.report() == "wrote range.json from 0 of 2 sequences, 2 skipped"
+
+
+def test_the_skipped_list_keeps_the_contents_s_own_order(tmp_path):
+    # Not the folded order and not sorted: the contents is what a caller reads the
     # list back against, and it is the order the run was going to take.
     document = RangeDocument(
-        tmp_path / "range", sequence_names=["c", "a", "b"], source="plate_A"
+        tmp_path / "range", contents=_contents("c", "a", "b"), source="plate_A"
     )
     with document:
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
@@ -743,7 +864,7 @@ def test_a_malformed_document_is_refused_by_the_entry_it_stumbled_on(
     kind, document, named
 ):
     # A part is read back by the same code that wrote it, so the realistic cause
-    # is a hand edit or a version skew -- either way the message has to say which
+    # is a hand edit or a version skew: either way the message has to say which
     # entry, since the file is what the reader will go and look at.
     with pytest.raises(ValueError, match=rf"malformed range document: '{named}'"):
         kind.from_dict(document)
@@ -753,7 +874,7 @@ def test_a_malformed_document_is_refused_by_the_entry_it_stumbled_on(
     ("named", "value"), (("min_value", True), ("max_value", False))
 )
 def test_a_boolean_bound_is_refused_rather_than_read_as_one_or_zero(named, value):
-    # `isinstance(True, int)` is true, so `true` would read as 1.0 -- and the
+    # `isinstance(True, int)` is true, so `true` would read as 1.0, and the
     # pair {"min_value": true, "max_value": false} as [1.0, 0.0], a range
     # running backwards that nothing downstream would question.
     document = {"source": "a", "min_value": 0.0, "max_value": 1.0, named: value}
@@ -801,8 +922,8 @@ def test_an_integer_bound_is_taken_as_the_float_it_stands_for():
 
 
 def test_a_document_written_without_coverage_leaves_the_block_out(tmp_path):
-    # The writer keeps `coverage` optional for a caller that has no roster to
-    # measure against -- a merge over several documents, whose own coverage is
+    # The writer keeps `coverage` optional for a caller that has no contents to
+    # measure against: a merge over several documents, whose own coverage is
     # the union of theirs and has to be recomputed rather than carried over.
     dataset = DatasetRange("plate_A", (_sequence("TL_00", (0.0, 1.0)),))
 
@@ -821,11 +942,11 @@ def test_a_sequence_named_with_a_dot_still_files_and_reads_back(tmp_path, source
     class _Named:
         name: str
 
-    # A time-lapse folder may carry a dot -- a date, a magnification, a repeat
-    # marker -- and the tail after it is part of the name, not an extension the
-    # part file has to justify.
+    # A time-lapse folder may carry a dot: a date, a magnification, a repeat
+    # marker. The tail after it is part of the name, not an extension the part
+    # file has to justify.
     document = RangeDocument(
-        tmp_path / "range", sequence_names=[source], source="plate_A"
+        tmp_path / "range", contents=_contents(source), source="plate_A"
     )
     with document:
         meter = document.get_hook(_Named(source))
@@ -870,9 +991,11 @@ def test_a_document_is_written_as_json_a_strict_reader_accepts(tmp_path):
 
 def test_an_unreadable_part_says_which_one_it_was(tmp_path):
     # The folder holds one file per sequence, so without the name there is
-    # nothing to go and look at -- and the fold reads them in sorted order,
+    # nothing to go and look at, and the fold reads them in sorted order,
     # which is not the order they were written in.
-    document = RangeDocument(tmp_path / "range", sequence_names=["a", "b"], source="p")
+    document = RangeDocument(
+        tmp_path / "range", contents=_contents("a", "b"), source="p"
+    )
     _scan(_meter(tmp_path, "a"), (0.0, 1.0))
     _scan(_meter(tmp_path, "b"), (0.0, 5.0))
     (document.parts_root / "b.json").write_text("{not json", encoding="utf-8")
@@ -885,7 +1008,7 @@ def test_a_part_holding_a_backwards_range_is_named_too(tmp_path):
     # Malformed is not only unparseable: a part whose bounds are the wrong way
     # round parses cleanly and is refused a layer later, and the name has to
     # survive that far too.
-    document = RangeDocument(tmp_path / "range", sequence_names=["a"], source="p")
+    document = RangeDocument(tmp_path / "range", contents=_contents("a"), source="p")
     _scan(_meter(tmp_path, "a"), (0.0, 1.0))
 
     frame = {"source": "f", "min_value": 1.0, "max_value": 0.0}
@@ -896,7 +1019,7 @@ def test_a_part_holding_a_backwards_range_is_named_too(tmp_path):
         document.to_range()
 
 
-def test_a_meter_takes_its_part_back_when_a_sibling_cannot_commit(tmp_path):
+def test_a_meter_takes_its_part_back_when_another_branch_fails(tmp_path):
     # The document counts a sequence as covered when its part is there, so a
     # part outliving the frames it was measured beside would be counted while
     # nothing of that sequence is on disk.
@@ -912,7 +1035,7 @@ def test_a_meter_takes_its_part_back_when_a_sibling_cannot_commit(tmp_path):
 
 def test_a_meter_that_wrote_nothing_reverts_to_nothing(tmp_path):
     # A meter closed after an error writes no part, so reverting has nothing of
-    # its own to remove -- and must not reach for a name someone else holds.
+    # its own to remove, and must not reach for a name someone else holds.
     meter = _meter(tmp_path, "a")
     (tmp_path / "range.parts").mkdir(parents=True, exist_ok=True)
     (tmp_path / "range.parts" / "a.json").write_text("theirs", encoding="utf-8")
@@ -920,3 +1043,356 @@ def test_a_meter_that_wrote_nothing_reverts_to_nothing(tmp_path):
     meter.revert()
 
     assert (tmp_path / "range.parts" / "a.json").read_text(encoding="utf-8") == "theirs"
+
+
+# ------------------------------- reusing parts ---------------------------- #
+
+SETTINGS = {"filter": {"kind": "identity"}}
+
+
+def _measured(document: RangeDocument, tmp_path, name: str, *bounds) -> bool:
+    """Range `name` through the document, saying whether it had to be measured."""
+    hook = document.get_hook(_Named(name))
+    if hook is None:
+        return False
+
+    _scan(hook, *bounds)
+
+    return True
+
+
+class _Named:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+def _reusing(tmp_path, *names: str, settings=SETTINGS) -> RangeDocument:
+    return RangeDocument(
+        tmp_path / "range",
+        contents=_contents(*names),
+        settings=settings,
+        source="plate_A",
+        if_ranges_exist="reuse",
+    )
+
+
+def test_a_part_that_still_describes_the_run_is_kept_rather_than_measured(tmp_path):
+    # What reuse is for is the frames it does not read, so the meter being absent
+    # is the assertion: a document that handed one out would have re-read the
+    # sequence whatever the numbers came out as.
+    with _reusing(tmp_path, "a", "b") as first:
+        assert _measured(first, tmp_path, "a", (0.0, 1.0))
+        assert _measured(first, tmp_path, "b", (2.0, 3.0))
+
+    with _reusing(tmp_path, "a", "b") as second:
+        assert not _measured(second, tmp_path, "a", (9.0, 9.0))
+        assert not _measured(second, tmp_path, "b", (9.0, 9.0))
+
+    assert _saved(tmp_path)["coverage"]["reused"] == 2
+    assert _saved(tmp_path)["dataset"]["max_value"] == 3.0  # not the 9.0 above
+
+
+def test_a_part_left_under_other_settings_is_measured_again(tmp_path):
+    # The numbers a part holds are the ones its settings produced, so a run that
+    # filters differently cannot stand on them, and the stale part must not
+    # reach the fold either, or the document would mix two filters.
+    with _reusing(tmp_path, "a") as first:
+        _measured(first, tmp_path, "a", (0.0, 1.0))
+
+    changed = {"filter": {"kind": "median", "radius": [1, 1, 1]}}
+    with _reusing(tmp_path, "a", settings=changed) as second:
+        assert _measured(second, tmp_path, "a", (4.0, 5.0))
+
+    assert _saved(tmp_path)["dataset"]["max_value"] == 5.0
+    assert _saved(tmp_path)["settings"] == changed
+
+
+def test_a_sequence_whose_frames_changed_is_measured_again(tmp_path):
+    # Same name, same settings, different frames: the part describes a read the
+    # source would no longer produce. Only the contents knows, which is why it
+    # carries the frame names rather than the count.
+    with _reusing(tmp_path, "a") as first:
+        _measured(first, tmp_path, "a", (0.0, 1.0))
+
+    grown = RangeDocument(
+        tmp_path / "range",
+        contents=_contents("a", frames=2),
+        settings=SETTINGS,
+        source="plate_A",
+        if_ranges_exist="reuse",
+    )
+    with grown as second:
+        assert _measured(second, tmp_path, "a", (0.0, 1.0), (2.0, 3.0))
+
+    assert _saved(tmp_path)["coverage"]["reused"] == 0
+
+
+def test_a_part_the_source_has_lost_stays_out_of_the_document(tmp_path):
+    # Folding it would widen the bounds with a sequence nobody can go and look
+    # at. Left on disk, since a half mounted share makes the same absence.
+    with _reusing(tmp_path, "a", "gone") as first:
+        _measured(first, tmp_path, "a", (0.0, 1.0))
+        _measured(first, tmp_path, "gone", (-9.0, 9.0))
+
+    with _reusing(tmp_path, "a") as second:
+        assert second.list_unsourced() == ["gone"]
+
+    assert (tmp_path / "range.parts" / "gone.json").exists()
+    assert _saved(tmp_path)["dataset"]["max_value"] == 1.0
+    assert _saved(tmp_path)["coverage"]["found"] == 1
+
+
+def test_a_part_the_source_has_lost_goes_when_the_policy_says_so(tmp_path):
+    with _reusing(tmp_path, "a", "gone") as first:
+        _measured(first, tmp_path, "a", (0.0, 1.0))
+        _measured(first, tmp_path, "gone", (-9.0, 9.0))
+
+    dropping = RangeDocument(
+        tmp_path / "range",
+        contents=_contents("a"),
+        settings=SETTINGS,
+        source="plate_A",
+        if_ranges_exist="reuse",
+        if_sources_gone="delete",
+    )
+    with dropping:
+        pass
+
+    assert not (tmp_path / "range.parts" / "gone.json").exists()
+    assert (tmp_path / "range.parts" / "a.json").exists()
+
+
+def test_a_narrowed_run_leaves_the_parts_it_was_not_given(tmp_path):
+    # The retry: name the one that failed and keep the rest. Clearing what the
+    # contents does not name would take them, which is why the contents is the
+    # dataset and the selection is a separate thing.
+    with _reusing(tmp_path, "a", "b", "c") as first:
+        for name, low in (("a", 0.0), ("b", 2.0), ("c", 4.0)):
+            _measured(first, tmp_path, name, (low, low + 1.0))
+
+    retry = RangeDocument(
+        tmp_path / "range",
+        contents=_contents("a", "b", "c"),
+        settings=SETTINGS,
+        source="plate_A",
+        selected=["b"],
+        if_ranges_exist="reuse",
+    )
+    with retry:
+        assert not _measured(retry, tmp_path, "b", (0.0, 0.0))
+
+    coverage = _saved(tmp_path)["coverage"]
+    assert coverage == {
+        "found": 3,
+        "selected": 1,
+        "covered": 3,
+        "reused": 3,
+        "skipped": [],
+        "unselected": [],
+    }
+
+
+@pytest.mark.parametrize("policy", ("error", "overwrite"))
+def test_the_other_policies_still_clear_the_folder(tmp_path, policy):
+    # Reuse is what stopped the clearing, so the two that did not ask for it
+    # must still get a folder holding only what this run put there.
+    with _reusing(tmp_path, "a", "b") as first:
+        _measured(first, tmp_path, "a", (0.0, 1.0))
+        _measured(first, tmp_path, "b", (2.0, 3.0))
+
+    fresh = RangeDocument(
+        tmp_path / "range",
+        contents=_contents("a", "b"),
+        settings=SETTINGS,
+        source="plate_A",
+        if_ranges_exist=policy,
+    )
+    if policy == "error":
+        (tmp_path / "range.json").unlink()
+
+    with fresh:
+        assert _measured(fresh, tmp_path, "a", (5.0, 6.0))
+        assert not (tmp_path / "range.parts" / "b.json").exists()
+
+    assert _saved(tmp_path)["coverage"]["reused"] == 0
+    assert _saved(tmp_path)["coverage"]["skipped"] == ["b"]
+
+
+def test_a_part_that_is_not_a_mapping_at_all_is_refused(tmp_path):
+    # JSON at the top may be a list or a bare number, and `.get` on either is an
+    # attribute error several frames later rather than a malformed document.
+    document = _reusing(tmp_path, "a")
+    document.parts_root.mkdir(parents=True, exist_ok=True)
+    (document.parts_root / "a.json").write_text("[1, 2]", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"unreadable part 'a'.*list at the top"):
+        document.to_range()
+
+
+def test_a_part_that_cannot_be_read_is_measured_again_rather_than_reused(tmp_path):
+    # The judgement is "does this still describe the run", and one that cannot
+    # be parsed cannot describe anything, so it is not reusable, and the fold
+    # is where it becomes an error.
+    document = _reusing(tmp_path, "a")
+    document.parts_root.mkdir(parents=True, exist_ok=True)
+    (document.parts_root / "a.json").write_text("{not json", encoding="utf-8")
+
+    with document:
+        assert _measured(document, tmp_path, "a", (0.0, 1.0))
+
+    assert _saved(tmp_path)["coverage"]["reused"] == 0
+
+
+def test_a_part_filed_under_another_sequence_is_not_reused(tmp_path):
+    # It parses and its settings match, but the name it is filed under is not
+    # the one it holds, so nothing about it can be trusted to describe this
+    # sequence. Measuring it again is also what repairs it: the fold would
+    # otherwise refuse the whole document over one part.
+    with _reusing(tmp_path, "a", "b") as first:
+        _measured(first, tmp_path, "a", (0.0, 1.0))
+        _measured(first, tmp_path, "b", (2.0, 3.0))
+
+    part = tmp_path / "range.parts" / "b.json"
+    body = json.loads(part.read_text(encoding="utf-8"))
+    body["source"] = "a"
+    part.write_text(json.dumps(body), encoding="utf-8")
+
+    with _reusing(tmp_path, "a", "b") as second:
+        assert _measured(second, tmp_path, "b", (4.0, 5.0))
+
+    assert _saved(tmp_path)["coverage"]["reused"] == 1  # 'a', not 'b'
+    assert _saved(tmp_path)["dataset"]["max_value"] == 5.0
+
+
+def test_dropping_the_unsourced_names_what_it_removed(tmp_path):
+    with _reusing(tmp_path, "a", "gone") as first:
+        _measured(first, tmp_path, "a", (0.0, 1.0))
+        _measured(first, tmp_path, "gone", (2.0, 3.0))
+
+    assert _reusing(tmp_path, "a").drop_unsourced() == ["gone"]
+    assert _reusing(tmp_path, "a").drop_unsourced() == []
+
+
+def test_a_stale_part_nobody_re_measured_stays_out_of_the_fold(tmp_path):
+    # Change the filter and narrow at once: the sequences left out keep parts
+    # the new settings did not produce, and nothing in this run will overwrite
+    # them. Folding them would put two filters in one document.
+    with _reusing(tmp_path, "a", "b") as first:
+        _measured(first, tmp_path, "a", (0.0, 1.0))
+        _measured(first, tmp_path, "b", (8.0, 9.0))
+
+    changed = {"filter": {"kind": "median", "radius": [1, 1, 1]}}
+    narrowed = RangeDocument(
+        tmp_path / "range",
+        contents=_contents("a", "b"),
+        settings=changed,
+        source="plate_A",
+        selected=["a"],
+        if_ranges_exist="reuse",
+    )
+    with narrowed:
+        assert _measured(narrowed, tmp_path, "a", (2.0, 3.0))
+
+    assert (tmp_path / "range.parts" / "b.json").exists()  # left alone
+    assert _saved(tmp_path)["dataset"]["max_value"] == 3.0  # not b's 9.0
+    assert _saved(tmp_path)["coverage"]["unselected"] == ["b"]
+
+
+def test_settings_are_compared_as_a_part_on_disk_holds_them(tmp_path):
+    # A tuple is written as a list and read back as one, so comparing what is
+    # held against what was written finds every part stale: this run's own
+    # included, which leaves the document folding nothing at all.
+    tupled = {"filter": {"kind": "median", "radius": (1, 1, 1)}}
+    document = RangeDocument(
+        tmp_path / "range",
+        contents=_contents("a"),
+        settings=tupled,
+        source="plate_A",
+        if_ranges_exist="reuse",
+    )
+    with document:
+        assert _measured(document, tmp_path, "a", (0.0, 1.0))
+
+    assert _saved(tmp_path)["dataset"]["sequences"][0]["source"] == "a"
+    assert _saved(tmp_path)["coverage"]["covered"] == 1
+
+
+def test_a_stale_part_is_left_out_of_the_fold_as_well_as_of_the_reuse(tmp_path):
+    # Judging and folding ask the same question, so a part whose frames have
+    # moved is passed over by both. Folding it would put a range measured over
+    # a different read of the sequence into the document, with nothing saying so.
+    settings = {"filter": {"kind": "identity"}}
+    with RangeDocument(
+        tmp_path / "range",
+        contents=_contents("a", "b"),
+        settings=settings,
+        source="plate_A",
+        if_ranges_exist="reuse",
+    ) as first:
+        _measured(first, tmp_path, "a", (0.0, 1.0))
+        _measured(first, tmp_path, "b", (8.0, 9.0))
+
+    # `b` grew a frame and is not selected, so nothing this run does can refresh it.
+    grown = RangeDocument(
+        tmp_path / "range",
+        contents={"a": _contents("a")["a"], "b": _contents("b", frames=2)["b"]},
+        settings=settings,
+        source="plate_A",
+        selected=["a"],
+        if_ranges_exist="reuse",
+    )
+    with grown:
+        pass
+
+    assert (tmp_path / "range.parts" / "b.json").exists()
+    assert _saved(tmp_path)["dataset"]["max_value"] == 1.0  # not b's 9.0
+    assert _saved(tmp_path)["coverage"]["unselected"] == ["b"]
+
+
+def test_a_document_is_written_even_when_the_unsourced_cannot_be_dropped(
+    tmp_path, monkeypatch
+):
+    # Removing them is tidying rather than part of the answer, so a folder that
+    # will not come away must not cost the run its document, which is exactly
+    # what refusing to write left behind before.
+    with _reusing(tmp_path, "a", "gone") as first:
+        _measured(first, tmp_path, "a", (0.0, 1.0))
+        _measured(first, tmp_path, "gone", (2.0, 3.0))
+
+    dropping = RangeDocument(
+        tmp_path / "range",
+        contents=_contents("a"),
+        settings=SETTINGS,
+        source="plate_A",
+        if_ranges_exist="reuse",
+        if_sources_gone="delete",
+    )
+
+    def refuse(self) -> list[str]:
+        msg = "it will not come away"
+        raise OSError(msg)
+
+    monkeypatch.setattr(type(dropping), "drop_unsourced", refuse)
+
+    with pytest.raises(OSError, match="will not come away"), dropping:
+        pass
+
+    assert _saved(tmp_path)["coverage"]["covered"] == 1
+
+
+def test_dropping_a_nested_unsourced_part_takes_what_it_empties(tmp_path):
+    document = RangeDocument(
+        tmp_path / "range",
+        contents=_contents("plate/2026.03.11/kept"),
+        settings=SETTINGS,
+        source="plate_A",
+        if_ranges_exist="reuse",
+        if_sources_gone="delete",
+    )
+    part = document.parts_root / "plate" / "2026.03.12" / "gone.json"
+    part.parent.mkdir(parents=True)
+    part.write_text('{"source": "x", "frames": []}', encoding="utf-8")
+
+    document.drop_unsourced()
+
+    assert not (document.parts_root / "plate" / "2026.03.12").exists()

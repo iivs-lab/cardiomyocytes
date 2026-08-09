@@ -23,12 +23,13 @@ def log_indented(
     nothing is formatted when the line is not going to be written.
 
     Args:
-        logger: where the line goes.
-        message: the line, with placeholders for `args`.
-        args: what fills those placeholders.
-        indent: how many spaces one step in is worth.
-        depth: how many steps in the line sits, where zero heads a block.
-        level: the logging severity, such as `logging.INFO`.
+        logger: The logger the line goes to.
+        message: The line, with placeholders for `args`.
+        args: The values those placeholders take.
+        indent: The number of spaces one step in is worth. Defaults to 2.
+        depth: The number of steps in the line sits, where zero heads a block.
+            Defaults to 1.
+        level: The severity to log at. Defaults to `logging.INFO`.
 
     Raises:
         ValueError: If `indent` or `depth` is negative.

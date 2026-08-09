@@ -11,11 +11,11 @@ from jaxtyping import Float32
 from torch import Tensor
 
 # The stored form is always the triple; `RadiusLike` is what a caller may write.
-RadiusType = tuple[int, int, int]
-RadiusLike = int | tuple[int, int] | RadiusType
+type RadiusType = tuple[int, int, int]
+type RadiusLike = int | tuple[int, int] | RadiusType
 
-FrameType = Float32[Tensor, "H W"]
-WindowType = Float32[Tensor, "T H W"]
+type FrameType = Float32[Tensor, "H W"]
+type WindowType = Float32[Tensor, "T H W"]
 
 
 def _normalize_triple[T](
@@ -42,7 +42,8 @@ def _normalize_triple[T](
     elif not isinstance(value, str | bytes):
         return value, value, value
 
-    msg = f"invalid {name} {value!r}: expected a scalar, (spatial, temporal), or (x, y, z)"
+    shapes = "a scalar, (spatial, temporal), or (x, y, z)"
+    msg = f"invalid {name} {value!r}: expected {shapes}"
     raise ValueError(msg)
 
 
@@ -54,8 +55,9 @@ def _normalize_radius(radius: RadiusLike) -> RadiusType:
     frames and so tracks the frame rate.
 
     Args:
-        radius: `r` for every axis, `(r_spatial, r_temporal)` to set the two
-            in-plane axes together, or an explicit `(rx, ry, rz)`.
+        radius: The half-extent per axis, as `r` for every axis,
+            `(r_spatial, r_temporal)` to set the two in-plane axes together, or
+            an explicit `(rx, ry, rz)`.
 
     Returns:
         The half-extent per axis, in `(rx, ry, rz)` order.
@@ -90,10 +92,10 @@ class FilterKernel(ABC):
     buffering, and the window arithmetic untouched.
 
     Args:
-        radius: half-extent per axis, so an axis spans `2r + 1` samples and `0`
-            disables it. Written as `r`, `(r_spatial, r_temporal)`, or an
-            explicit `(rx, ry, rz)`; stored normalized to the triple. Subclasses
-            may derive it rather than take it directly.
+        radius: The half-extent per axis, so an axis spans `2r + 1` samples
+            and `0` disables it. Written as `r`, `(r_spatial, r_temporal)`, or
+            an explicit `(rx, ry, rz)`; stored normalized to the triple.
+            Subclasses may derive it rather than take it directly.
 
     Raises:
         ValueError: If `radius` is not one of those shapes, holds a non-`int`,
@@ -124,8 +126,8 @@ class FilterKernel(ABC):
         behind it.
 
         Args:
-            window: `(T, H, W)` consecutive float32 frames.
-            target: index in `window` of the frame to filter.
+            window: The `(T, H, W)` consecutive float32 frames to read.
+            target: The index in `window` of the frame to filter.
 
         Returns:
             The `(H, W)` filtered frame.

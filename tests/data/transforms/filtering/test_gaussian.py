@@ -199,7 +199,7 @@ def test_a_spike_is_spread_over_its_neighbourhood_not_deleted():
 
 def test_gaussian_matches_a_brute_force_weighted_mean():
     # The separable pass, with time collapsed first and one final division, must
-    # equal the full 3D normalized weighting -- not a per-axis approximation.
+    # equal the full 3D normalized weighting, not a per-axis approximation.
     frames = _frames(5)
     kernel = GaussianKernel((1.0, 1.0, 1.0), truncate=1.5)
     window = torch.from_numpy(frames)

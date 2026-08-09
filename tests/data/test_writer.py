@@ -168,7 +168,7 @@ def test_a_failure_part_way_leaves_no_folder(tmp_path: Path) -> None:
 
 def test_a_failure_leaves_no_empty_shell_of_a_sequence_behind(tmp_path: Path) -> None:
     # Staging needs a parent to sit in, so the whole `<sequence>/Phase/Float`
-    # was made before a single frame was written -- and the abort dropped only
+    # was made before a single frame was written, and the abort dropped only
     # the staged folder. A run over a dataset then left one empty shell per
     # failed sequence in the output tree, each reading as a sequence that is
     # there.
@@ -185,8 +185,8 @@ def test_a_failure_leaves_no_empty_shell_of_a_sequence_behind(tmp_path: Path) ->
 def test_a_failure_stops_climbing_at_what_it_did_not_empty(tmp_path: Path) -> None:
     # The climb walks the folders this writer's own opening made, which reaches
     # up to the sequence. Anything that landed under one of them meanwhile is
-    # not this writer's to take -- a second cache of the same time-lapse, or
-    # whatever else shares the ancestor -- so the climb stops there.
+    # not this writer's to take, whether a second cache of the same time-lapse
+    # or whatever else shares the ancestor, so the climb stops there.
     out = tmp_path / "out"
     out.mkdir()
     sequence = out / "TL_00"
@@ -208,7 +208,7 @@ def test_a_move_that_fails_leaves_no_staging_behind(
     # The staged folder sits beside the destination under a hidden name, so a
     # move that fails left a `.tmp` in the output tree for a sequence with none
     # of its frames. The finalizer is the only other hand on it, and it dies
-    # with the process -- so a run killed here left it for good. The writer is
+    # with the process, so a run killed here left it for good. The writer is
     # kept alive here for that reason: let it fall out of scope and the
     # finalizer clears up, which is the very thing a killed run cannot do.
     def refuse(self: StagedDirectory) -> None:
@@ -286,7 +286,7 @@ def test_a_writer_reports_what_it_committed(tmp_path):
 def test_a_writer_that_gave_up_reports_nothing(tmp_path):
     # The count was read off what had been staged, which survives the abort, so
     # a sequence that lost its folder still said "wrote 2 frames". A branch with
-    # nothing committed reports `None` -- that is the contract the block relies
+    # nothing committed reports `None`, which is the contract the block relies
     # on to leave the line out rather than print an empty one.
     dest = tmp_path / "out"
     writer = KoalaFrameWriter(dest, _refuse_the_third, stem="frame", ext="txt")

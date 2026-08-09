@@ -180,7 +180,7 @@ def test_activate_on_the_cpu_binds_nothing(monkeypatch):
     not torch.cuda.is_available(), reason="no CUDA-capable GPU detected"
 )
 def test_activate_leaves_the_libraries_agreeing():
-    # Trivially true on a single-GPU host -- every index is 0 either way. It is
+    # Trivially true on a single-GPU host: every index is 0 either way. It is
     # the multi-GPU host this is written for; the spy test above covers the rest.
     import cupy as cp
     import cv2
@@ -254,7 +254,7 @@ def test_visible_cuda_devices_agree_with_the_driver():
 
 def test_counting_the_devices_does_not_initialize_cuda_here(monkeypatch):
     # `is_available()` initializes CUDA in whoever calls it, and a pool that
-    # forks after that gives every worker a context it cannot use -- which is a
+    # forks after that gives every worker a context it cannot use, which is a
     # run that walks the whole dataset and fails every item of it. Planning the
     # devices happens before the pool starts, so the count has to come from the
     # driver query, which answers the same without initializing anything.

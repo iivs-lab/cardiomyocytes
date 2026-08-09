@@ -9,6 +9,7 @@ import torch
 from kaparoo.data.sequences import DataSequence, SlicedSequence
 
 from iivs_cardio.common.device import Device
+from iivs_cardio.common.range import all_finite
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -41,16 +42,17 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
     at `step=2` is the source's frame 2.
 
     Type Parameters:
-        S: the source's own type, which `origin` gives back unchanged.
-        M: the source's per frame metadata, which filtering passes through.
-        T: the source's numpy dtype, any real kind. Frames are read as float32,
+        S: The source's own type, which `origin` gives back unchanged.
+        M: The source's per frame metadata, which filtering passes through.
+        T: The source's numpy dtype, any real kind. Frames are read as float32,
             since that is what a kernel reduces and what the output carries.
 
     Args:
-        source: the sequence to read frames from.
-        kernel: the reduction to apply over each window.
-        step: take every `step`th frame of the source, before filtering.
-        device: where the frames are filtered.
+        source: The sequence to read frames from.
+        kernel: The reduction to apply over each window.
+        step: The stride to read the source at, applied before filtering.
+            Defaults to 1.
+        device: The device the frames are filtered on. Defaults to `"cpu"`.
 
     Raises:
         ValueError: If `step` is less than one.
@@ -182,7 +184,7 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
         if missing := [i for i in indices if i not in self._buffer]:
             for i, frame in zip(missing, self._source.get_items(missing), strict=True):
                 held = torch.from_numpy(frame).to(torch.float32, copy=True)
-                if not held.isfinite().all():
+                if not all_finite(held):
                     msg = f"non-finite value in {self._source.get_meta(i)}"
                     raise ValueError(msg)
 

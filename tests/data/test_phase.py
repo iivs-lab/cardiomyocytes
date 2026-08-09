@@ -71,7 +71,7 @@ def test_the_header_carries_the_scale_it_was_given(tmp_path):
 def test_nanometres_are_normalized_to_metres(tmp_path):
     # The `.bin` header cannot hold NANOMETERS, so the writer converts values and
     # records METERS. A caller therefore states the unit its frames are in and
-    # does not pre-convert -- doing both would scale twice.
+    # does not pre-convert, and doing both would scale twice.
     dest = tmp_path / "Bin"
     frame = np.array([[1000.0]], dtype=np.float32)  # nanometres
 
@@ -123,7 +123,7 @@ def test_an_empty_sequence_is_rejected(tmp_path):
 @pytest.mark.parametrize("bad", (np.nan, np.inf, -np.inf))
 def test_a_nonfinite_frame_is_refused_rather_than_cached(tmp_path, bad):
     # What this writes is the cache the next stage reads, and the format itself
-    # stores a NaN happily -- so a value let through here is one the run that
+    # stores a NaN happily, so a value let through here is one the run that
     # meets it has no way to trace back. The folder is left uncommitted.
     dest = tmp_path / "Bin"
     frame = _frames(1)[0]

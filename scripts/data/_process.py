@@ -21,24 +21,34 @@ from typing import TYPE_CHECKING, ClassVar, Final
 
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import PhaseFileFolder, PhaseUnit, search_phase_bin_folders
-from kaparoo.filesystem import ensure_file_extension, stringify_path
-from kaparoo.filesystem.exceptions import UnsupportedExtensionError
-from kaparoo.filesystem.search import select
-from kaparoo.utils.optional import unwrap_or_default
+from kaparoo.filesystem import (
+    UnsupportedExtensionError,
+    dir_exists,
+    ensure_file_extension,
+    select,
+    stringify_path,
+)
+from kaparoo.utils import unwrap_or_default
 from omegaconf import MISSING
 
 from iivs_cardio.common.logging import log_indented
+from iivs_cardio.common.pipeline import (
+    EXISTING_OUTPUT_POLICIES,
+    UNSOURCED_OUTPUT_POLICIES,
+    read_policy,
+)
+from iivs_cardio.data.phase import PhaseFilteredSequence
 from iivs_cardio.data.pipeline import (
     DOCUMENT_EXT,
+    FRAME_POLICIES,
     FrameTree,
-    PhaseFilteredSequence,
     PhaseStageFactory,
     RangeDocument,
 )
 from scripts.data._filtering import describe_filter_kernel, parse_filter_config
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
     from logging import Logger
 
     from kaparoo.filesystem.types import StrPath
@@ -49,8 +59,9 @@ if TYPE_CHECKING:
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
 
 
-SELECTION_LIMIT: Final = 5
-SELECTION_SPECS: Final = (".json", ".txt")
+# ========================== #
+#          Settings          #
+# ========================== #
 
 
 @dataclass
@@ -63,10 +74,10 @@ class TreeConfig:
     an unset `subpath` comes to when the caller offers nothing to follow.
 
     Attributes:
-        root: the folder the sequences sit under.
-        subpath: where a sequence's frames sit inside its own folder, or `None`
-            to follow what the caller offers, and this end's own layout when it
-            offers nothing.
+        root: The folder the sequences sit under.
+        subpath: The path to a sequence's frames inside its own folder. Defaults
+            to `None`, which follows what the caller offers and falls back to
+            this end's own layout when it offers nothing.
     """
 
     DEFAULT_SUBPATH: ClassVar[str]
@@ -82,9 +93,9 @@ class TreeConfig:
         outside would leave whatever compares them looking at the wrong pair.
 
         Args:
-            follow: what an unset `subpath` takes, such as where the other end
-                of the stage keeps its own. `None` leaves it to
-                `DEFAULT_SUBPATH`, which is this end's own layout.
+            follow: The layout an unset `subpath` takes, such as the one the
+                other end of the stage keeps its frames in. Defaults to `None`,
+                which leaves it to `DEFAULT_SUBPATH`.
 
         Raises:
             ValueError: If the answer would reach outside a sequence's folder.
@@ -105,13 +116,14 @@ class SourceConfig(TreeConfig):
     """Which sequences a run reads, and how much of each.
 
     Attributes:
-        root: the dataset folder to search for sequences.
-        subpath: where a sequence's frames sit inside its time lapse, or `None`
-            for the usual one.
-        include: the sequences to take, as names or as a path to a file listing
-            them; `None` takes all of them.
-        exclude: the same, for sequences to leave out.
-        frame_step: take every `frame_step`th frame of each sequence.
+        root: The dataset folder to search for sequences.
+        subpath: The path to a sequence's frames inside its time lapse. Defaults
+            to `None`, which takes the usual one.
+        include: The sequences to take, as names or as a path to a file listing
+            them. Defaults to `None`, which takes all of them.
+        exclude: The same, for sequences to leave out. Defaults to `None`.
+        frame_step: The stride to read each sequence at, so that every
+            `frame_step`th frame is taken. Defaults to 1.
     """
 
     DEFAULT_SUBPATH: ClassVar[str] = PHASE_FLOAT_BIN
@@ -126,25 +138,36 @@ class TargetConfig(TreeConfig):
     """What a run writes, and where.
 
     Attributes:
-        root: where the run's outputs land.
-        subpath: where a written sequence keeps its frames inside its own
-            folder, or `None` to put them where the source keeps its own.
-            Naming one is what lets a run write beside the frames it read
-            rather than over them.
-        overwrite: whether what is already there may be replaced.
-        save_frames: whether to write the filtered frames, laid out like the
-            source.
-        save_ranges: whether to write the value ranges as one document.
-        range_file: what that document is called, given `.json` if it has no
-            extension.
+        root: The folder the run's outputs land under.
+        subpath: The path a written sequence keeps its frames at inside its own
+            folder. Naming one is what lets a run write beside the frames it
+            read rather than over them. Defaults to `None`, which puts them
+            where the source keeps its own.
+        save_frames: Whether to write the filtered frames, laid out like the
+            source. Defaults to `False`.
+        save_ranges: Whether to write the value ranges as one document. Defaults
+            to `True`.
+        range_file: The name that document is given, given `.json` if it has no
+            extension. Defaults to `"value_range"`.
+        if_frames_exist: The policy for a sequence that already has a frame
+            folder. `"reuse"` needs a record of how the folder was made, which
+            a cache does not yet carry. Defaults to `"error"`.
+        if_ranges_exist: The policy for a sequence that already has a range
+            part. `"reuse"` keeps the ones an earlier run left that still
+            describe this one, and measures the rest. Defaults to `"error"`.
+        if_sources_gone: The policy for an output whose sequence the source no
+            longer holds. Defaults to `"keep"`: the same absence is what a half
+            mounted share looks like, and what is kept is always said out loud.
     """
 
     DEFAULT_SUBPATH: ClassVar[str] = PHASE_FLOAT_BIN
 
-    overwrite: bool = False
     save_frames: bool = False
     save_ranges: bool = True
     range_file: str = "value_range"
+    if_frames_exist: str = "error"
+    if_ranges_exist: str = "error"
+    if_sources_gone: str = "keep"
 
 
 def _validate_output(
@@ -196,6 +219,15 @@ def _range_file(target_config: TargetConfig) -> Path:
     except UnsupportedExtensionError as error:
         msg = f"invalid `target.range_file` {target_config.range_file!r}: {error}"
         raise ValueError(msg) from error
+
+
+# ========================== #
+#          Logging           #
+# ========================== #
+
+
+SELECTION_LIMIT: Final = 5
+SELECTION_SPECS: Final = (".json", ".txt")
 
 
 def _log_selection(logger: Logger, verb: str, value: list[str] | str) -> None:
@@ -253,12 +285,13 @@ def log_target_config(
     """Log what a run writes and where, naming each output it will produce.
 
     Args:
-        target_config: what the run was told to write.
-        logger: where the lines go.
-        output_root: where the branches actually write, which is not
+        target_config: The settings saying what the run was told to write.
+        logger: The logger the lines go to.
+        output_root: The folder the branches actually write under, which is not
             `target.root`: that setting places the job's directory, and a sweep
             gives each of its jobs one of its own beneath it.
-        subpath: how a written sequence is laid out, when frames are written.
+        subpath: The layout a written sequence is given, when frames are
+            written. Defaults to `None`, which leaves the layout unnamed.
     """
     log_indented(logger, "target: %s", output_root, depth=0)
 
@@ -273,8 +306,24 @@ def log_target_config(
     if not (target_config.save_frames or target_config.save_ranges):
         log_indented(logger, "writing nothing")
 
-    if target_config.overwrite:
-        log_indented(logger, "replacing what is already there")
+    if target_config.save_frames:
+        _log_policy(logger, "frames", target_config.if_frames_exist)
+
+    if target_config.save_ranges:
+        _log_policy(logger, "ranges", target_config.if_ranges_exist)
+
+    if target_config.if_sources_gone != "keep":
+        log_indented(logger, "dropping outputs whose sequence the source has lost")
+
+
+def _log_policy(logger: Logger, what: str, policy: str) -> None:
+    """Say what a run does where that output is already there, unless it refuses."""
+    said = {
+        "overwrite": f"replacing the {what} already there",
+        "reuse": f"keeping the {what} already there that still describe this run",
+    }
+    if (line := said.get(policy)) is not None:
+        log_indented(logger, "%s", line)
 
 
 def log_configs(
@@ -309,7 +358,14 @@ def log_configs(
             logger.warning("the cache renumbers the frames it keeps: %s", fix)
 
 
-def search_sources(config: SourceConfig) -> tuple[list[PhaseFileFolder], int]:
+# ========================== #
+#          Building          #
+# ========================== #
+
+
+def search_sources(
+    config: SourceConfig,
+) -> tuple[list[PhaseFileFolder], dict[str, tuple[str, ...]]]:
     """Find the sequences a run reads, narrowed by what it was told to take.
 
     Every sequence taken is checked for a missing frame before any of them is
@@ -317,11 +373,17 @@ def search_sources(config: SourceConfig) -> tuple[list[PhaseFileFolder], int]:
     A gap otherwise opens as an ordinary shorter sequence, and what is written
     back out is numbered without one, so nothing downstream can tell.
 
+    Nothing inside a time-lapse is descended into. Opening one lists its frames
+    already, and the walk has no reason to list them a second time looking for
+    a time-lapse that cannot be nested there.
+
     Returns:
-        One folder per sequence, each set to give its frames in radians, and
-        how many the root held before the selection narrowed them. The second
-        is what lets a document say it describes part of a dataset rather than
-        the whole of a smaller one.
+        One folder per sequence taken, each set to give its frames in radians,
+        and a contents of every sequence the root holds against the frames the
+        run would measure it over. The contents covers what the selection left
+        out too, which is what lets a document say it describes part of a
+        dataset rather than the whole of a smaller one, and what an output with
+        no sequence behind it is measured against.
 
     Raises:
         ValueError: If the root holds no sequence at all, if the selection
@@ -331,7 +393,12 @@ def search_sources(config: SourceConfig) -> tuple[list[PhaseFileFolder], int]:
     """
     subpath = config.resolve_subpath()
 
-    folders = search_phase_bin_folders(config.root, subpath=subpath)
+    folders = search_phase_bin_folders(
+        config.root,
+        subpath=subpath,
+        exclude=lambda folder: dir_exists(folder.parent / subpath),
+    )
+
     if (num_folders := len(folders)) == 0:
         msg = f"no time-lapse holds a {subpath!r} folder: {config.root}"
         raise ValueError(msg)
@@ -359,22 +426,28 @@ def search_sources(config: SourceConfig) -> tuple[list[PhaseFileFolder], int]:
             msg = f"{folder_subpath(source)}: {error}"
             raise ValueError(msg) from error
 
-    return taken, num_folders
+    step = config.frame_step
+    contents = {
+        folder_subpath(folder): tuple(file.name for file in folder.files[::step])
+        for folder in folders
+    }
+
+    return taken, contents
 
 
 def build_sequences(
     source_config: SourceConfig, kernel_config: KernelConfig
-) -> tuple[list[PhaseFilteredSequence], int]:
+) -> tuple[list[PhaseFilteredSequence], dict[str, tuple[str, ...]]]:
     """Build one filtered view per sequence, all sharing a single kernel.
 
     A kernel holds only the shape it reads, never frames, so one serves every
     sequence of the run.
 
     Returns:
-        The sequences, in the order the search found them, and how many the
-        root held before the selection narrowed them.
+        The sequences, in the order the search found them, and the contents of
+        the whole dataset they were selected from.
     """
-    sources, found = search_sources(source_config)
+    sources, contents = search_sources(source_config)
     subpath = source_config.resolve_subpath()
 
     kernel = kernel_config.build()
@@ -388,7 +461,7 @@ def build_sequences(
             step=source_config.frame_step,
         )
 
-    return [build_sequence(source) for source in sources], found
+    return [build_sequence(source) for source in sources], contents
 
 
 def build_branches(
@@ -396,38 +469,54 @@ def build_branches(
     target_config: TargetConfig,
     kernel_config: KernelConfig,
     output_root: StrPath,
-    sequence_names: Sequence[str],
-    found: int | None = None,
+    contents: Mapping[str, Sequence[str]],
+    selected: Sequence[str] | None = None,
 ) -> list[SideBranch[PhaseFilteredSequence, Tensor, Path]]:
     """Build the branches a target describes, in the order they will watch.
 
     Args:
-        source_config: what the run reads, recorded in what the branches write.
-        target_config: what the run writes.
-        kernel_config: the filter, recorded for a later run to compare against.
-        output_root: where the branches write.
-        sequence_names: every sequence the run set out to cover.
-        found: how many the source held before the selection narrowed it, or
-            `None` when nothing narrowed it.
+        source_config: The settings the run reads by, recorded in what the
+            branches write.
+        target_config: The settings saying what the run writes.
+        kernel_config: The filter, recorded for a later run to compare against.
+        output_root: The folder the branches write under.
+        contents: Every sequence the source holds, against the frames each would
+            be measured over.
+        selected: The sequences of those this run was given. Defaults to `None`,
+            which takes all of them.
 
     Returns:
         The branches, empty of neither output when the target asks for both.
 
     Raises:
         ValueError: If the target writes nothing, which is a mistake rather
-            than a way to ask for a run that only reads, or if the frames it
-            writes would land on the source they are read from.
+            than a way to ask for a run that only reads, if the frames it
+            writes would land on the source they are read from, or if a policy
+            names something no branch offers.
     """
     _validate_output(source_config, target_config, output_root)
 
     branches = []
 
     subpath = source_config.resolve_subpath()
-    overwrite = target_config.overwrite
+    source_policy = read_policy(
+        target_config.if_sources_gone, UNSOURCED_OUTPUT_POLICIES, "if_sources_gone"
+    )
 
     if target_config.save_frames:
-        written_at = target_config.resolve_subpath(subpath)
-        branches.append(FrameTree(output_root, written_at, overwrite=overwrite))
+        target_subpath = target_config.resolve_subpath(subpath)
+        frame_policy = read_policy(
+            target_config.if_frames_exist, FRAME_POLICIES, "if_frames_exist"
+        )
+        branches.append(
+            FrameTree(
+                output_root,
+                target_subpath,
+                contents,
+                if_frames_exist=frame_policy,
+                if_sources_gone=source_policy,
+            )
+        )
 
     if target_config.save_ranges:
         path = Path(output_root, target_config.range_file)
@@ -436,15 +525,19 @@ def build_branches(
             "source": {"subpath": subpath, "frame_step": source_config.frame_step},
             "filter": describe_filter_kernel(kernel_config),
         }
+        range_policy = read_policy(
+            target_config.if_ranges_exist, EXISTING_OUTPUT_POLICIES, "if_ranges_exist"
+        )
 
         branches.append(
             RangeDocument(
                 path,
                 source,
-                sequence_names,
+                contents,
                 settings,
-                found=found,
-                overwrite=overwrite,
+                selected=selected,
+                if_ranges_exist=range_policy,
+                if_sources_gone=source_policy,
             )
         )
 
@@ -467,12 +560,14 @@ def build_phase_stages(
     before the search costs anything.
 
     Args:
-        source_config: which sequences to read, and how much of each.
-        target_config: what to write, or `None` for a run that only reads.
-        filter_config: the filter to apply, or `None` to leave frames as they
-            are.
-        output_root: where the branches write.
-        name: what the run is called.
+        source_config: The settings saying which sequences to read, and how
+            much of each.
+        target_config: The settings saying what to write. Defaults to `None`,
+            for a run that only reads.
+        filter_config: The filter to apply. Defaults to `None`, which leaves the
+            frames as they are.
+        output_root: The folder the branches write under.
+        name: The name the run is called by.
 
     Returns:
         The factory a driver runs the sequences through.
@@ -488,7 +583,7 @@ def build_phase_stages(
     if target_config is not None:
         _validate_output(source_config, target_config, output_root)
 
-    sequences, found = build_sequences(source_config, kernel_config)
+    sequences, contents = build_sequences(source_config, kernel_config)
     branches = []
 
     if target_config is not None:
@@ -497,8 +592,8 @@ def build_phase_stages(
             target_config,
             kernel_config,
             output_root,
+            contents,
             [sequence.name for sequence in sequences],
-            found,
         )
 
     return PhaseStageFactory(sequences, *branches, name=name)

@@ -1,11 +1,7 @@
 __all__ = (
-    "DEVICE_KINDS",
     "EXISTING_OUTPUT_POLICIES",
     "STAGING",
     "UNSOURCED_OUTPUT_POLICIES",
-    "Device",
-    "DeviceKind",
-    "DeviceLike",
     "ExistingOutputPolicy",
     "Holding",
     "Hook",
@@ -17,23 +13,14 @@ __all__ = (
     "StageFactory",
     "Step",
     "UnsourcedOutputPolicy",
-    "all_finite",
     "close_together",
     "counted",
     "find_unsourced",
-    "finite_range",
-    "log_indented",
     "prune_above",
     "read_policy",
 )
 
-from iivs_cardio.common.device import DEVICE_KINDS, Device, DeviceKind, DeviceLike
-from iivs_cardio.common.logging import log_indented
-from iivs_cardio.common.pipeline import (
-    EXISTING_OUTPUT_POLICIES,
-    STAGING,
-    UNSOURCED_OUTPUT_POLICIES,
-    ExistingOutputPolicy,
+from iivs_cardio.common.pipeline.base import (
     Holding,
     Hook,
     Reporting,
@@ -43,11 +30,16 @@ from iivs_cardio.common.pipeline import (
     Stage,
     StageFactory,
     Step,
-    UnsourcedOutputPolicy,
     close_together,
+)
+from iivs_cardio.common.pipeline.branch import (
+    EXISTING_OUTPUT_POLICIES,
+    STAGING,
+    UNSOURCED_OUTPUT_POLICIES,
+    ExistingOutputPolicy,
+    UnsourcedOutputPolicy,
     counted,
     find_unsourced,
     prune_above,
     read_policy,
 )
-from iivs_cardio.common.range import all_finite, finite_range

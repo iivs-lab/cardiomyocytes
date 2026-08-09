@@ -10,7 +10,7 @@ from iivs_cardio.common.logging import log_indented
 @pytest.mark.parametrize(("depth", "margin"), ((0, ""), (1, "  "), (3, "      ")))
 def test_each_depth_costs_one_indent(caplog, depth, margin):
     # A block's head and the lines hanging under it share this helper, so `depth`
-    # has to reach 0 as well -- the head is the same call with no margin.
+    # has to reach 0 as well: the head is the same call with no margin.
     with caplog.at_level(logging.INFO):
         log_indented(logging.getLogger("stage"), "filtering %d frames", 5, depth=depth)
 
@@ -29,7 +29,7 @@ def test_the_indent_is_the_width_of_one_level(caplog, indent, margin):
 
 def test_the_arguments_stay_unformatted_until_a_handler_asks(caplog):
     # Indenting rewrites the template, so it has to leave the `%s` standing rather
-    # than fold the arguments in -- `ruff`'s `G` rules refuse eager formatting
+    # than fold the arguments in, since `ruff`'s `G` rules refuse eager formatting
     # because it costs the call even when the level is off.
     with caplog.at_level(logging.INFO):
         log_indented(logging.getLogger("stage"), "done in %.1fs", 3.5)

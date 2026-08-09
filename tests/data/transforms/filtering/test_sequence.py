@@ -129,7 +129,7 @@ def test_frames_come_back_as_float32_tensors():
 def test_a_non_float32_source_is_read_as_float32_and_filtered_the_same():
     # A uint8 phase-image source is as valid as a float32 one; the kernel reduces
     # float32 regardless, and an even-count median lands on a half no integer
-    # dtype could hold -- so casting must happen before the reduction, not after.
+    # dtype could hold, so casting must happen before the reduction, not after.
     frames = (_frames(4) * 255).astype(np.uint8)
     filtered = FilteredSequence(_Frames(frames), MedianKernel((1, 1, 1)))
     reference = MedianKernel((1, 1, 1)).apply(torch.from_numpy(frames).float(), 0)
@@ -183,7 +183,7 @@ def test_from_params_builds_the_kernel_it_describes():
 
 def test_from_params_passes_a_short_radius_through_to_the_kernel():
     # The record holds the radius verbatim, so this is the only step that
-    # expands it -- and the one a config-driven caller depends on.
+    # expands it, and the one a config-driven caller depends on.
     built = FilteredSequence.from_config(_Frames(_frames(4)), MedianConfig((1, 0)))
 
     assert built.kernel.radius == (1, 1, 0)
@@ -212,7 +212,7 @@ def test_step_leaves_the_metadata_naming_the_source_frame():
     # both are right, and position is what joins them.
     sequence = FilteredSequence(_Frames(_frames(6)), IdentityKernel(), step=2)
 
-    # View 0, 1, 2 are source 0, 2, 4 -- whose metadata is 0, 20, 40.
+    # View 0, 1, 2 are source 0, 2, 4, whose metadata is 0, 20, 40.
     assert [sequence.get_meta(i) for i in range(len(sequence))] == [0, 20, 40]
     assert [sequence.get_meta(i) for i in range(len(sequence))] != [0, 10, 20]
 
@@ -305,7 +305,7 @@ class _Strict(_Frames):
 
 def test_a_window_already_held_asks_the_source_for_nothing():
     # The last window of a walk is entirely buffered, so the read that follows
-    # it has nothing to fetch -- and the source was still called, with an empty
+    # it has nothing to fetch, and the source was still called, with an empty
     # list. Harmless for a folder, and not something a source should have to
     # expect.
     source = _Strict(_frames(4))
@@ -319,7 +319,7 @@ def test_a_window_already_held_asks_the_source_for_nothing():
 
 def test_releasing_drops_the_buffered_window():
     # The window is whatever the last read needed, and nothing else lets go of
-    # it -- a driver holding every sequence of a dataset for the whole run holds
+    # it: a driver holding every sequence of a dataset for the whole run holds
     # one window per sequence with it, on the device, and again in each worker.
     source = _Frames(_frames(4))
     sequence = FilteredSequence(source, MedianKernel((0, 0, 1)))
@@ -382,14 +382,14 @@ def test_the_refusal_names_the_frame_by_the_source_s_own_metadata():
 
     filtered = FilteredSequence(_Frames(frames), IdentityKernel(), step=2)
 
-    # view 2 is source 4, whose metadata is 40 -- neither of the other numbers.
+    # view 2 is source 4, whose metadata is 40, neither of the other numbers.
     with pytest.raises(ValueError, match=r"non-finite value in 40"):
         filtered.get_item(2)
 
 
 def test_a_neighbour_is_refused_even_when_the_target_itself_is_clean():
     # A temporal kernel reads past its target, so a frame nobody asked for still
-    # reaches the arithmetic -- and one NaN there spreads across the output.
+    # reaches the arithmetic, and one NaN there spreads across the output.
     frames = _frames(5)
     frames[3] = np.nan
 
@@ -425,7 +425,7 @@ def test_a_value_only_a_wider_source_could_hold_is_refused():
 
 def test_the_buffer_does_not_view_the_source_s_own_storage():
     # `_Frames` hands back a slice of the array it keeps, as a memmap-backed
-    # source does -- and a float32 one needs no cast, so without the copy the
+    # source does, and a float32 one needs no cast, so without the copy the
     # buffer, the filter, and the caller all read the source's own memory.
     frames = _frames(4)
     sequence = FilteredSequence(_Frames(frames), MedianKernel((0, 0, 1)))

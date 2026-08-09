@@ -53,12 +53,14 @@ def _scan(
 ) -> None:
     source = SourceConfig(root=str(phase_tree))
     compute = ComputeConfig(device="cpu", workers=workers, show_progress=False)
+    policy = "overwrite" if overwrite else "error"
     config = TargetConfig(
         root=str(dest),
         subpath=subpath,
         save_frames=save_frames,
         save_ranges=save_ranges,
-        overwrite=overwrite,
+        if_frames_exist=policy,
+        if_ranges_exist=policy,
     )
 
     run_all(build_phase_stages(source, config, name=STAGE, output_root=dest), compute)
@@ -95,10 +97,11 @@ def _rewrite_unit(phase_tree: Path, name: str, unit: PhaseUnit) -> None:
 def test_sources_are_found_under_the_root(phase_tree):
     # The one that fails silently: a search that finds nothing leaves every other
     # check green, since there is then no sequence to get anything wrong with.
-    sources, found = search_sources(SourceConfig(root=str(phase_tree)))
+    sources, contents = search_sources(SourceConfig(root=str(phase_tree)))
 
     assert len(sources) == SEQUENCES
-    assert found == SEQUENCES
+    assert sorted(contents) == [f"TL_{index:02d}" for index in range(SEQUENCES)]
+    assert all(len(frames) == FRAMES for frames in contents.values())
 
 
 def test_a_root_holding_nothing_and_an_empty_selection_are_told_apart(
@@ -125,7 +128,7 @@ def test_a_sequence_missing_a_frame_is_refused_by_name(phase_tree, tmp_path):
     # The one that would be believed: discovery is a name pattern and a sort, so
     # a gap opens as an ordinary shorter sequence. The filter would then treat
     # the frames either side of it as neighbours, and the tree written back out
-    # is numbered from zero without a gap -- leaving the run reporting success
+    # is numbered from zero without a gap, leaving the run reporting success
     # over numbers that are wrong by the width of the gap. Refused for the whole
     # dataset rather than per item, and the name says which sequence to fix.
     (phase_tree / "TL_01" / PHASE_FLOAT_BIN / "00002_phase.bin").unlink()
@@ -143,7 +146,7 @@ def test_a_sequence_missing_a_frame_is_refused_by_name(phase_tree, tmp_path):
 def test_a_sequence_that_cannot_be_read_in_radians_is_named(phase_tree):
     # A header may say `UNKNOWN`, which `save_phase_bin` only warns about, and
     # setting the unit runs the conversion check again. One such acquisition
-    # took the whole run down saying only that it could not convert -- with 121
+    # took the whole run down saying only that it could not convert: with 121
     # sequences and no name, there was nothing to `exclude` on.
     with pytest.warns(UserWarning, match="unit=UNKNOWN"):
         _rewrite_unit(phase_tree, "TL_01", PhaseUnit.UNKNOWN)
@@ -157,17 +160,17 @@ def test_a_sequence_that_cannot_be_read_in_radians_is_named(phase_tree):
 
 def test_a_sequence_missing_a_frame_can_be_excluded_rather_than_fixed(phase_tree):
     # The check sits after the selection, so one bad acquisition does not put a
-    # whole dataset out of reach -- `exclude` is the way round it while the
+    # whole dataset out of reach, and `exclude` is the way round it while the
     # frames are recovered. Ahead of the selection it would close that off, and
     # every other test would stay green.
     (phase_tree / "TL_01" / PHASE_FLOAT_BIN / "00002_phase.bin").unlink()
 
-    sources, found = search_sources(
+    sources, contents = search_sources(
         SourceConfig(root=str(phase_tree), exclude=["TL_01"])
     )
 
     assert len(sources) == SEQUENCES - 1
-    assert found == SEQUENCES
+    assert len(contents) == SEQUENCES  # the excluded one is still in the dataset
 
 
 def test_a_narrowed_run_says_how_much_of_the_dataset_it_took(phase_tree, tmp_path):
@@ -186,7 +189,9 @@ def test_a_narrowed_run_says_how_much_of_the_dataset_it_took(phase_tree, tmp_pat
         "found": SEQUENCES,
         "selected": 1,
         "covered": 1,
+        "reused": 0,
         "skipped": [],
+        "unselected": ["TL_00", "TL_02"],
     }
 
 
@@ -244,7 +249,7 @@ def test_a_sequence_knows_what_it_is_called_in_its_dataset(phase_tree):
 
 def test_a_target_asking_for_nothing_is_refused(phase_tree, tmp_path):
     # Both branches off is a config that configures nothing, which is a mistake
-    # rather than a way to say "just read" -- that is `target_config=None`.
+    # rather than a way to say "just read": that is `target_config=None`.
     source = SourceConfig(root=str(phase_tree))
     target = TargetConfig(root=str(tmp_path), save_frames=False, save_ranges=False)
 
@@ -253,7 +258,7 @@ def test_a_target_asking_for_nothing_is_refused(phase_tree, tmp_path):
 
 
 def test_a_target_asking_for_nothing_is_refused_before_the_source_is_read(tmp_path):
-    # Reading the source costs a header per frame -- about 4.3s for 121x1200 --
+    # Reading the source costs a header per frame, about 4.3s for 121x1200,
     # and a sweep pays it per job, since it does not stop at the first refusal.
     # Nothing about this verdict needs the frames, so a root that cannot be read
     # at all still has to come back with the configuration's own complaint.
@@ -274,7 +279,7 @@ FILTERED = "Phase/Float/FilteredBin"
 def test_a_subpath_that_reaches_outside_a_sequence_is_refused(config, subpath):
     # The destination check compares the two subpaths as they stand, so a `..`
     # walks straight past it and `Path(root, name, subpath)` lands wherever it
-    # points -- back inside the source, on a run the check just cleared. Refused
+    # points: back inside the source, on a run the check just cleared. Refused
     # where a subpath is read instead, which covers whichever end named it.
     # `is_absolute()` is not the test: `/elsewhere` is False on Windows, where
     # it still resets the path to the drive root, and the anchor is what says so
@@ -352,8 +357,9 @@ def test_a_factory_offers_one_stage_per_sequence(phase_tree, tmp_path):
 
 
 def test_a_run_without_a_target_writes_nothing(phase_tree, tmp_path):
-    # `target_config=None` is how a run that only reads -- a cached source, or a
-    # timing pass -- says it wants no side branch. The root is still named, so
+    # `target_config=None` is how a run that only reads, such as one over a
+    # cached source or a timing pass, says it wants no side branch. The root
+    # is still named, so
     # what keeps it empty is the missing target rather than a missing place.
     dest = tmp_path / "out"
     source = SourceConfig(root=str(phase_tree))
@@ -403,7 +409,7 @@ def test_the_pool_writes_what_the_lone_path_does(phase_tree, tmp_path):
 
 def test_the_written_tree_mirrors_the_source(phase_tree, tmp_path):
     # A frame tree crosses to the workers as a recipe, so the folders have to
-    # land under its root -- with nothing coming back to say they did.
+    # land under its root, with nothing coming back to say they did.
     dest = tmp_path / "out"
 
     _scan(phase_tree, dest, 2)
@@ -415,7 +421,7 @@ def test_the_written_tree_mirrors_the_source(phase_tree, tmp_path):
 
 def test_the_written_frames_are_always_in_radians(phase_tree, tmp_path):
     # A metric reads optical path difference out of phase, so the cache a run
-    # leaves carries one unit -- and the header still holds `height_scale` for
+    # leaves carries one unit, and the header still holds `height_scale` for
     # whoever wants metres back.
     dest = tmp_path / "out"
 
@@ -427,7 +433,7 @@ def test_the_written_frames_are_always_in_radians(phase_tree, tmp_path):
 
 def test_a_source_in_metres_is_converted_rather_than_relabelled(phase_tree, tmp_path):
     # Every source the suite builds is already in radians, so the conversion
-    # `search_sources` asks for was a no-op everywhere -- the call could be
+    # `search_sources` asks for was a no-op everywhere, so the call could be
     # deleted and nothing would fail. A source in metres is what makes it do
     # something: `height_scale` is the height one radian stands for, in m per
     # rad, so the values come back divided by it rather than restamped.
@@ -455,8 +461,8 @@ def test_a_source_in_metres_is_converted_rather_than_relabelled(phase_tree, tmp_
 def test_the_job_names_the_stage_every_line_is_filed_under(
     phase_tree, tmp_path, caplog
 ):
-    # Nothing here is preprocessing by nature -- the same filtered-phase run is
-    # postprocessing behind a hologram reconstruction -- so the name is the job's
+    # Nothing here is preprocessing by nature, since the same filtered-phase run
+    # is postprocessing behind a hologram reconstruction, so the name is the job's
     # to give, and every line of the run has to follow it: the configuration, the
     # driver's own summary, the per-sequence block, and the side branches.
     stage = "reconstruct"
@@ -524,7 +530,7 @@ def test_a_sequence_holding_a_non_finite_frame_costs_only_that_sequence(
     assert name == "TL_01"
     assert "non-finite value in" in reason
 
-    # The other two are whole -- frames committed, ranges folded -- and the one
+    # The other two are whole, frames committed and ranges folded, and the one
     # that failed left no half-written folder behind.
     subpath = Path(PHASE_FLOAT_BIN).as_posix()
     assert sorted(_written(dest)) == [f"TL_{s:02d}/{subpath}" for s in (0, 2)]
@@ -540,7 +546,9 @@ def test_a_sequence_holding_a_non_finite_frame_costs_only_that_sequence(
         "found": 3,
         "selected": 3,
         "covered": 2,
+        "reused": 0,
         "skipped": ["TL_01"],
+        "unselected": [],
     }
 
 
@@ -584,7 +592,7 @@ class _Exploding:
 @pytest.mark.parametrize("branch", (_Branch(None), _Exploding()))
 def test_a_finished_sequence_lets_go_of_its_window(phase_tree, monkeypatch, branch):
     # The factory holds every sequence for the whole run, so a window kept past
-    # the item it belongs to is kept to the end -- once per sequence, on the
+    # the item it belongs to is kept to the end, once per sequence, on the
     # device, and again in each worker's own copy of them. A sequence that gave
     # up holds one too, so the release has to happen either way. Spied rather
     # than measured, since what the release costs is a device this test has no
@@ -641,6 +649,97 @@ def _factory(phase_tree, *branches):
     return PhaseStageFactory(sequences, *branches, name=STAGE)
 
 
+class _Unsourced:
+    """A branch holding outputs of sequences the source no longer has."""
+
+    def __init__(self, *names: str) -> None:
+        self._names = list(names)
+
+    def get_hook(self, source):
+        return None
+
+    def list_unsourced(self) -> list[str]:
+        return self._names
+
+
+class _Counting:
+    """A branch whose hook also says how much it has taken, as a writer might."""
+
+    class _Hook:
+        def __init__(self) -> None:
+            self.seen: list[int] = []
+
+        def __call__(self, step) -> None:
+            self.seen.append(step.index)
+
+        def __len__(self) -> int:
+            return len(self.seen)
+
+    def __init__(self) -> None:
+        self.hook = self._Hook()
+
+    def get_hook(self, source):
+        return self.hook
+
+
+def test_a_hook_that_is_empty_is_still_a_hook(phase_tree):
+    # `get_hook` returns `Hook | None`, so the filter has to ask for `None` and
+    # not for truth: a hook counting what it has taken is falsy before it takes
+    # anything, and one dropped here leaves the sequence reported as done with
+    # nothing written for it.
+    branch = _Counting()
+    stages = _factory(phase_tree, branch)
+
+    assert stages.run_stage(0, Device("cpu"))
+    assert branch.hook.seen == list(range(FRAMES))
+
+
+def test_a_run_says_which_outputs_have_no_sequence_behind_them(phase_tree, caplog):
+    # Said whatever the branch then does with them, and before the frames are
+    # spent: a dataset that shrank and a share that came up half read the same
+    # from here, and only whoever started the run can tell them apart.
+    stages = _factory(phase_tree, _Unsourced("plate/TL_09"), _Unsourced("plate/TL_09"))
+
+    with caplog.at_level(logging.INFO):
+        _run_nothing(stages)
+
+    said = [record.getMessage() for record in caplog.records]
+    assert "1 output(s) have no source: plate/TL_09" in said
+
+
+def test_a_run_says_it_removed_them_and_not_only_that_they_were_due(
+    phase_tree, tmp_path, caplog
+):
+    # The line before the run names them whatever the policy is, so on its own
+    # it leaves an operator reading names with no word that anything was acted
+    # on. Destructive, and until now only its failure was ever loud.
+    out = tmp_path / "out"
+    (out / "plate/TL_09" / PHASE_FLOAT_BIN).mkdir(parents=True)
+    _, contents = build_sequences(
+        SourceConfig(root=str(phase_tree)), parse_filter_config(None)
+    )
+    tree = FrameTree(out, PHASE_FLOAT_BIN, contents, if_sources_gone="delete")
+
+    with caplog.at_level(logging.INFO):
+        _run_nothing(_factory(phase_tree, tree))
+
+    said = [record.getMessage() for record in caplog.records]
+    assert "1 output(s) have no source: plate/TL_09" in said
+    assert "removed 1 folder with no source" in said
+    assert not (out / "plate").exists()
+
+
+def test_a_run_whose_outputs_all_have_sources_says_nothing_about_it(phase_tree, caplog):
+    # The line is for the surprising state, so a run with nothing odd about it
+    # must not carry one.
+    stages = _factory(phase_tree, _Unsourced())
+
+    with caplog.at_level(logging.INFO):
+        _run_nothing(stages)
+
+    assert not [line for line in caplog.messages if "no source" in line]
+
+
 def _run_nothing(stages) -> None:
     """Open the branches and close them, in a single statement."""
     with stages.running():
@@ -655,8 +754,9 @@ def _give_up(stages) -> None:
 
 
 def test_one_branch_that_cannot_commit_does_not_silence_the_others(phase_tree, caplog):
-    # The branches are siblings, the same as the hooks of one sequence a level
-    # down, and one `ExitStack` over them handed each whatever the last raised.
+    # The branches write separately, the same as the hooks of one sequence a
+    # level down, and one `ExitStack` over them handed each whatever the last
+    # raised.
     # What committed still says so: a branch that committed nothing reports
     # nothing anyway, so the line is only ever about work that landed.
     stages = _factory(phase_tree, _Unclosable(), _Branch("spoke"))
@@ -707,16 +807,26 @@ def test_a_branch_with_nothing_to_say_adds_no_line(phase_tree, caplog):
 # ------------------------------ the side branches ------------------------- #
 
 
-def _branches(tmp_path, *, sequence_names=("TL_00",), subpath=None, step=1, **target):
+def _branches(
+    tmp_path,
+    *,
+    sequence_names=("TL_00",),
+    selected=None,
+    subpath=None,
+    step=1,
+    **target,
+):
     source = SourceConfig(root="/dataset", subpath=subpath, frame_step=step)
     config = TargetConfig(root=str(tmp_path), **target)
+    contents = dict.fromkeys(sequence_names, ("00000_phase.bin",))
 
     return build_branches(
         source,
         config,
         parse_filter_config(None),
         tmp_path,
-        list(sequence_names),
+        contents,
+        selected,
     )
 
 
@@ -756,22 +866,35 @@ def test_an_unset_subpath_is_recorded_as_the_one_that_was_read(tmp_path):
 
 def test_the_selection_stays_out_of_the_settings(tmp_path):
     # `include` / `exclude` change which sequences a run covers, not what any
-    # sequence's numbers mean -- and `coverage` already reports that. Recording
+    # sequence's numbers mean, and `coverage` already reports that. Recording
     # them here would refuse reuse to a run that narrowed its selection.
     source = SourceConfig(root="/dataset", include=["TL_00"], exclude=["TL_09"])
     config = TargetConfig(root=str(tmp_path), save_ranges=True)
 
     (document,) = build_branches(
-        source, config, parse_filter_config(None), tmp_path, ["TL_00"]
+        source, config, parse_filter_config(None), tmp_path, {"TL_00": ()}
     )
 
     assert set(document.settings["source"]) == {"subpath", "frame_step"}
 
 
-def test_the_roster_reaches_the_document_that_reports_on_it(tmp_path):
+def test_the_contents_reaches_the_document_that_reports_on_it(tmp_path):
     (document,) = _branches(tmp_path, sequence_names=("TL_00", "TL_01", "TL_02"))
 
-    assert document.sequence_names == ("TL_00", "TL_01", "TL_02")
+    assert tuple(document.contents) == ("TL_00", "TL_01", "TL_02")
+    assert document.selected == ("TL_00", "TL_01", "TL_02")
+
+
+def test_a_narrowed_run_keeps_the_whole_dataset_in_its_contents(tmp_path):
+    # What the document counts against: a run given one of three still describes
+    # a dataset of three, and coverage measured against the selection alone
+    # would call one part of it complete.
+    (document,) = _branches(
+        tmp_path, sequence_names=("TL_00", "TL_01", "TL_02"), selected=["TL_01"]
+    )
+
+    assert tuple(document.contents) == ("TL_00", "TL_01", "TL_02")
+    assert document.selected == ("TL_01",)
 
 
 def test_branches_are_refused_before_any_of_them_is_built(tmp_path):
@@ -785,7 +908,7 @@ def _frame_tree(tmp_path, **target):
         TargetConfig(root=str(tmp_path), save_frames=True, save_ranges=False, **target),
         parse_filter_config(None),
         tmp_path,
-        ["TL_00"],
+        {"TL_00": ()},
     )
 
 
@@ -810,7 +933,7 @@ def test_the_settings_record_the_subpath_that_was_read(tmp_path):
     config = TargetConfig(root=str(tmp_path), subpath=FILTERED, save_ranges=True)
 
     (document,) = build_branches(
-        source, config, parse_filter_config(None), tmp_path, ["TL_00"]
+        source, config, parse_filter_config(None), tmp_path, {"TL_00": ()}
     )
 
     assert document.settings["source"]["subpath"] == PHASE_FLOAT_BIN
@@ -847,7 +970,7 @@ def _logged(caplog, source, target=None, kernel=None, output_root="/out"):
 
 def test_the_target_line_says_where_the_run_writes_not_what_placed_it(caplog):
     # `target.root` places the job's directory and nothing reads it to write
-    # with -- a sweep gives each job one of its own beneath it, so both jobs
+    # with: a sweep gives each job one of its own beneath it, so both jobs
     # logged the same `target:` while writing to `<root>/0` and `<root>/1`. The
     # line follows the branches, which is the path a reader goes looking in.
     logged = _logged(
@@ -863,7 +986,7 @@ def test_the_target_line_says_where_the_run_writes_not_what_placed_it(caplog):
 
 def test_each_block_is_tagged_by_what_it_configures(caplog):
     # A tag apiece rather than a verb, so a reader looking for one of the three
-    # finds it by name -- and the run's own lines below are never mistaken for
+    # finds it by name, and the run's own lines below are never mistaken for
     # configuration.
     logged = _logged(caplog, SourceConfig(root="/dataset"), TargetConfig(root="/out"))
     heads = [line for line in logged if not line.startswith("  ")]
@@ -925,7 +1048,7 @@ def test_a_short_selection_is_listed_one_to_a_line(caplog):
 def test_a_long_selection_points_at_the_config_instead(caplog):
     # Listing it would bury the lines around it, and the job's own `.hydra` holds
     # it exactly: `config.yaml` always, as part of the composed config, and
-    # `overrides.yaml` whenever the command line is what set it -- which is the
+    # `overrides.yaml` whenever the command line is what set it, which is the
     # usual way, since both selections default to null. The path stays relative
     # because the log file naming it already sits in that directory, which is
     # what keeps a sweep's jobs pointing at their own copies.
@@ -1031,7 +1154,7 @@ def test_the_written_frames_take_the_shape_the_source_was_read_in(caplog):
 
 def test_a_target_naming_a_subpath_says_that_one(caplog):
     # The two lines part company here, and the one about writing has to follow
-    # the target -- a reader checking where the output went reads this line.
+    # the target: a reader checking where the output went reads this line.
     logged = _logged(
         caplog,
         SourceConfig(root="/dataset"),
@@ -1042,18 +1165,36 @@ def test_a_target_naming_a_subpath_says_that_one(caplog):
     assert f"  writing the filtered frames to <sequence>/{FILTERED}" in logged
 
 
-def test_a_run_allowed_to_replace_says_so(caplog):
-    # Only the permissive state is said, refusing being the default. Worth
-    # revisiting when a third answer lands -- reuse whatever is still valid --
+@pytest.mark.parametrize(
+    ("policy", "said"),
+    (
+        ("overwrite", "  replacing the ranges already there"),
+        ("reuse", "  keeping the ranges already there that still describe this run"),
+    ),
+)
+def test_a_run_says_what_it_does_with_what_is_already_there(caplog, policy, said):
+    # Refusing is the default and says nothing; each of the other two is named,
     # since silence can separate two states but not three.
-    allowed = _logged(
-        caplog, SourceConfig(root="/d"), TargetConfig(root="/o", overwrite=True)
-    )
-    assert "  replacing what is already there" in allowed
+    target = TargetConfig(root="/o", if_ranges_exist=policy)
+
+    assert said in _logged(caplog, SourceConfig(root="/d"), target)
 
     caplog.clear()
     refused = _logged(caplog, SourceConfig(root="/d"), TargetConfig(root="/o"))
-    assert not [line for line in refused if "replace" in line]
+    assert not [line for line in refused if "already there" in line]
+
+
+def test_a_run_that_will_delete_says_so_before_it_reads_anything(caplog):
+    # The one setting whose default is the safe one and whose other value is
+    # not undoable, so it is named up front rather than only in what it removed.
+    target = TargetConfig(root="/o", if_sources_gone="delete")
+
+    said = "  dropping outputs whose sequence the source has lost"
+    assert said in _logged(caplog, SourceConfig(root="/d"), target)
+
+    caplog.clear()
+    kept = _logged(caplog, SourceConfig(root="/d"), TargetConfig(root="/o"))
+    assert not [line for line in kept if "dropping" in line]
 
 
 def test_a_run_without_a_target_says_nothing_about_writing(caplog):

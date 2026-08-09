@@ -26,8 +26,12 @@ if TYPE_CHECKING:
 
     from torch import Tensor
 
-KernelShape = Literal["ellipsoid", "cuboid"]
-KERNEL_SHAPES: Final[tuple[KernelShape, ...]] = get_args(KernelShape)
+type KernelShape = Literal["ellipsoid", "cuboid"]
+
+# Taken off the alias rather than written twice. `get_args` reads a
+# `TypeAliasType` as having no arguments of its own, so it is asked about the
+# `Literal` the alias stands for instead.
+KERNEL_SHAPES: Final[tuple[KernelShape, ...]] = get_args(KernelShape.__value__)
 
 # Where CUDA's `sort` and `topk` each leave a faster shared-memory path.
 _SHARED_TIERS: Final = (32, 128)
@@ -45,7 +49,7 @@ _MASK_BYTES: Final = 1
 
 
 def _prefers_topk(samples: int) -> bool:
-    """Whether `topk` beats a full `sort`, which it does across a tier boundary."""
+    """Test whether `topk` beats a full `sort`, which it does across a tier."""
 
     def tier(count: int) -> int:
         return sum(count > bound for bound in _SHARED_TIERS)
@@ -54,7 +58,7 @@ def _prefers_topk(samples: int) -> bool:
 
 
 def _band_bytes(samples: int, rows: int, width: int, itemsize: int) -> int:
-    """What one pass over `rows` rows holds at its peak.
+    """Measure what one pass over `rows` rows holds at its peak.
 
     The stack of neighbours is only part of it: ordering hands back the values
     again with an int64 index beside each, and the validity count reads a bool
@@ -67,7 +71,7 @@ def _band_bytes(samples: int, rows: int, width: int, itemsize: int) -> int:
 
 
 def _tile_rows(samples: int, width: int, itemsize: int) -> int:
-    """How many rows of the frame one pass may take, at least one.
+    """Choose how many rows of the frame one pass may take, at least one.
 
     One row is the floor: a neighbourhood wide enough to exceed the budget on
     its own has nothing left to divide, and the pass takes it anyway.
@@ -83,13 +87,16 @@ class MedianKernel(FilterKernel):
     That is why `torch.median`, which returns the lower, cannot serve here.
 
     Args:
-        radius: half-extent per axis; `0` disables that axis. Left required
-            because there is no safe default: `rz` counts frames but damage
-            tracks the time a window spans, so it has to follow the frame rate
-            rather than a constant. That is also why `(r_spatial, r_temporal)` is
-            usually the form to reach for over a bare `r`.
-        shape: `ellipsoid` weighs the axes against their radii together, taking
-            33 offsets at radius `(2, 2, 2)`; `cuboid` takes the whole box, 125.
+        radius: The half-extent per axis, where `0` disables that axis. Left
+            required because there is no safe default: `rz` counts frames but
+            damage tracks the time a window spans, so it has to follow the frame
+            rate rather than a constant. That is also why
+            `(r_spatial, r_temporal)` is usually the form to reach for over a
+            bare `r`.
+        shape: The neighbours to read inside that extent. `"ellipsoid"` weighs
+            the axes against their radii together, taking 33 offsets at radius
+            `(2, 2, 2)`; `"cuboid"` takes the whole box, 125. Defaults to
+            `"ellipsoid"`.
 
     Raises:
         ValueError: If any radius is negative, or `shape` is neither name.
@@ -135,8 +142,8 @@ class MedianKernel(FilterKernel):
         """Take the median over each pixel's in-range neighbours.
 
         Args:
-            window: `(T, H, W)` consecutive float32 frames.
-            target: index in `window` of the frame to filter.
+            window: The `(T, H, W)` consecutive float32 frames to read.
+            target: The index in `window` of the frame to filter.
 
         Returns:
             The `(H, W)` filtered frame, each pixel the median of however many
@@ -238,9 +245,10 @@ class MedianConfig(KernelConfig):
     """The settings of a `MedianKernel`, as one recordable value.
 
     Attributes:
-        kind: what a record says this filter was.
-        radius: half-extent per axis, in samples.
-        shape: which neighbours inside that extent are read.
+        kind: The name a record gives this filter.
+        radius: The half-extent per axis, in samples.
+        shape: The neighbours read inside that extent. Defaults to
+            `"ellipsoid"`.
     """
 
     kind: ClassVar[str] = "median"

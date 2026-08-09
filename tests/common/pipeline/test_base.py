@@ -359,11 +359,11 @@ class TestStageRun:
         assert second.events == ["open", "see0", "abort"]
 
     def test_one_hook_failing_to_close_does_not_abort_the_others(self) -> None:
-        # The two are siblings writing separate outputs -- a frame tree and the
-        # document that indexes it -- so a part file that cannot be written must
+        # The two write separate outputs, a frame tree and the document that
+        # indexes it, so a part file that cannot be written must
         # not tell the writer its 306 committed frames failed. Sharing one
         # `ExitStack` did exactly that: it hands each callback whatever the last
-        # one raised, which is right for nested `with` and wrong for siblings.
+        # one raised, which is right for nested `with` and wrong for these.
         first, second = _Managed(), _Managed("could not write the part file")
         stage = _Fixed("a").register_hooks(first, second)
 
@@ -397,10 +397,10 @@ class TestStageRun:
 
         assert first.events == ["open", "see0", "close"]
 
-    def test_a_sibling_that_cannot_commit_takes_back_what_did(self) -> None:
+    def test_a_branch_that_cannot_commit_takes_back_what_did(self) -> None:
         # Closing in turn is not one commit. The document's part is written
         # first and the frame tree fails a moment later, leaving a part on disk
-        # for a sequence with no frames -- which no number in the finished
+        # for a sequence with no frames, which no number in the finished
         # document would show, since a part is what counts as covered.
         reverting = _Reverting()
         stage = _Fixed("a").register_hooks(
@@ -414,13 +414,13 @@ class TestStageRun:
 
     def test_a_clean_close_takes_nothing_back(self) -> None:
         # The other half: reverting is for the failure, and a run where every
-        # sibling committed must keep what they wrote.
+        # branch committed must keep what they wrote.
         reverting = _Reverting()
         _Fixed("a").register_hooks(_Managed(), reverting).run()
 
         assert reverting.events == ["open", "see0", "close"]
 
-    def test_a_sibling_that_could_not_close_is_not_asked_to_revert(self) -> None:
+    def test_a_branch_that_could_not_close_is_not_asked_to_revert(self) -> None:
         # It never committed, so there is nothing of its own to take back, and
         # asking would run a rollback over a half-written output.
         first, second = _Reverting(), _Reverting("could not write the part file")
@@ -432,9 +432,28 @@ class TestStageRun:
         assert first.events == ["open", "see0", "close", "revert"]
         assert "revert" not in second.events
 
+    def test_a_revert_that_fails_does_not_swallow_the_closing_failure(self) -> None:
+        # The failure being answered is the one worth raising, and the branches
+        # after it still have outputs of their own to take back.
+        class _Stubborn(_Reverting):
+            def revert(self) -> None:
+                super().revert()
+                msg = "it will not come away"
+                raise OSError(msg)
+
+        first, stubborn = _Reverting(), _Stubborn()
+        stage = _Fixed("a").register_hooks(_Managed("the tree could not move"))
+        stage.register_hooks(stubborn, first)
+
+        with pytest.raises(OSError, match="the tree could not move"):
+            stage.run()
+
+        assert stubborn.events[-1] == "revert"
+        assert first.events[-1] == "revert"
+
     def test_a_walk_that_failed_still_reaches_a_hook_that_cannot_close(self) -> None:
         # The walk's own failure goes to every hook, including one whose close
-        # then fails -- and that failure is what rises, chained to the walk's.
+        # then fails, and that failure is what rises, chained to the walk's.
         def explode(step: Step[str, None]) -> None:
             msg = "the walk gave up"
             raise RuntimeError(msg)
@@ -463,7 +482,7 @@ class TestStageRun:
     def test_a_stage_is_walked_once(self) -> None:
         # Every index a hook has seen is remembered so it sees each exactly
         # once, which is also what a second walk runs into: it would open the
-        # hooks, fire none of them, and close them again -- and a writer closed
+        # hooks, fire none of them, and close them again, and a writer closed
         # over nothing gives up with "no frame was written".
         managed = _Managed()
         stage = _Fixed("a", "b").register_hooks(managed)

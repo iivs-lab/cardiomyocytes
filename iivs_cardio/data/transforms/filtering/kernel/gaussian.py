@@ -61,13 +61,14 @@ class GaussianKernel(FilterKernel):
     neighbourhood; the two are not interchangeable.
 
     Args:
-        sigma: standard deviation per axis, in samples; `0` disables that axis.
-            Written as `s`, `(s_spatial, s_temporal)`, or `(sx, sy, sz)`, like a
-            radius, and for the same reason the two-value form is usual, since
-            `sz` spans frames and tracks the frame rate.
-        truncate: how many standard deviations the window spans, so each radius
-            is `int(truncate * sigma + 0.5)`, which is `scipy.ndimage`'s rule and
-            name. It is distinct from the border policy, which is always to drop.
+        sigma: The standard deviation per axis, in samples, where `0` disables
+            that axis. Written as `s`, `(s_spatial, s_temporal)`, or
+            `(sx, sy, sz)`, like a radius, and for the same reason the two-value
+            form is usual, since `sz` spans frames and tracks the frame rate.
+        truncate: The number of standard deviations the window spans, so each
+            radius is `int(truncate * sigma + 0.5)`, which is
+            `scipy.ndimage`'s rule and name. It is distinct from the border
+            policy, which is always to drop. Defaults to 4.0.
 
     Raises:
         ValueError: If any sigma is negative, or `truncate` is not positive.
@@ -91,7 +92,7 @@ class GaussianKernel(FilterKernel):
         self._weights = tuple(self._build_weights(axis) for axis in range(3))
 
     def weights(self, axis: int, device: torch.device | None = None) -> Tensor:
-        """The `2r + 1` normalized weights along `axis` (`0`=x, `1`=y, `2`=z).
+        """Return the `2r + 1` normalized weights along `axis` (`0`=x, `1`=y, `2`=z).
 
         A disabled axis (`sigma` `0`) yields the single weight `[1.0]`, so it
         contributes a pass-through. Precomputed on the CPU and copied on each
@@ -102,7 +103,7 @@ class GaussianKernel(FilterKernel):
         return self._weights[axis].to(device, copy=True)
 
     def _build_weights(self, axis: int) -> Tensor:
-        """The normalized 1D Gaussian for `axis`, or `[1.0]` when it is disabled."""
+        """Build the normalized 1D Gaussian for `axis`, `[1.0]` when disabled."""
         radius = self.radius[axis]
         if radius == 0:
             return torch.ones(1)
@@ -118,8 +119,8 @@ class GaussianKernel(FilterKernel):
         """Take the Gaussian-weighted mean over each pixel's in-range neighbours.
 
         Args:
-            window: `(T, H, W)` consecutive float32 frames.
-            target: index in `window` of the frame to filter.
+            window: The `(T, H, W)` consecutive float32 frames to read.
+            target: The index in `window` of the frame to filter.
 
         Returns:
             The `(H, W)` filtered frame, each pixel divided by the weight that
@@ -163,9 +164,10 @@ class GaussianConfig(KernelConfig):
     """The settings of a `GaussianKernel`, as one recordable value.
 
     Attributes:
-        kind: what a record says this filter was.
-        sigma: standard deviation per axis, in samples.
-        truncate: how many standard deviations the window spans.
+        kind: The name a record gives this filter.
+        sigma: The standard deviation per axis, in samples.
+        truncate: The number of standard deviations the window spans. Defaults
+            to 4.0.
     """
 
     kind: ClassVar[str] = "gaussian"

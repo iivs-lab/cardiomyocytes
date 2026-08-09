@@ -44,7 +44,8 @@ def parse_filter_config(node: DictConfig | None) -> KernelConfig:
 
     config = instantiate(node, _target_whitelist_=_WHITELIST, _convert_="all")
     if not isinstance(config, KernelConfig):
-        msg = f"`filter` describes no kernel: give it a `_target_`, or select from `{_GROUP}`"
+        fix = f"give it a `_target_`, or select from `{_GROUP}`"
+        msg = f"`filter` describes no kernel: {fix}"
         raise TypeError(msg)
 
     return config

@@ -43,7 +43,7 @@ def test_a_node_that_names_no_kernel_points_at_the_group():
     # Reached by dropping `_target_`, or by adding a node by hand: `instantiate`
     # then hands back a plain mapping, and the failure surfaced later still, as
     # a missing attribute on a dict. The group rather than the kernel kinds,
-    # since a kind is not what anyone types -- `gaussian` has no option to pick
+    # since a kind is not what anyone types, and `gaussian` has no option to pick
     # at all, and the default `median_ellipsoid_2x2x2` is not a kind.
     with pytest.raises(TypeError, match=r"select from `filter`"):
         parse_filter_config(OmegaConf.create({"radius": [1, 1, 1]}))

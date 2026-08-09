@@ -57,7 +57,7 @@ def test_a_node_comes_back_as_the_schema_holding_plain_values():
     # The one place a composed node becomes a dataclass. What it hands back has
     # to be free of configuration containers, since the rest of the code passes
     # it to workers and writes it into records without knowing where it came
-    # from -- a `ListConfig` reaching either would be a different value there.
+    # from: a `ListConfig` reaching either would be a different value there.
     node = OmegaConf.create({"root": "/dataset", "workers": 3, "names": ["a", "b"]})
 
     settings = apply_schema(_Settings, node)
@@ -86,7 +86,7 @@ def test_a_field_the_node_leaves_out_keeps_its_default():
 
 
 def test_the_output_directory_is_the_one_hydra_made_for_this_job(job):
-    # Everything a run writes goes here, and `target.root` only places it -- so
+    # Everything a run writes goes here, and `target.root` only places it, so
     # this is the value the outputs actually follow.
     assert output_directory() == job.hydra.runtime.output_dir
 

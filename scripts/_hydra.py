@@ -29,7 +29,7 @@ def apply_schema[T](schema: type[T], node: DictConfig) -> T:
 
 
 def output_directory() -> str:
-    """Hydra's own directory for this job, which a run writes its outputs into.
+    """Return Hydra's own directory for this job, which a run writes into.
 
     `hydra.run.dir` for a single run, and `hydra.sweep.dir/<subdir>` for each job
     of a `--multirun`. A sweep runs every job in one process, so a script naming
@@ -40,7 +40,7 @@ def output_directory() -> str:
 
 
 def is_multirun() -> bool:
-    """Whether this job is one of a `--multirun` sweep rather than a lone run.
+    """Test whether this job is one of a `--multirun` sweep, not a lone run.
 
     What `output_directory` already accounts for, made answerable: a step that
     writes somewhere every job shares cannot be repeated per job, and has to

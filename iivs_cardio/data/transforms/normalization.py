@@ -10,13 +10,13 @@ from jaxtyping import Real, jaxtyped
 from kaparoo.utils.optional import unwrap_or_default
 from torch import Tensor
 
-NormalizationMode = Literal["perframe", "pairwise", "injected"]
-FrameType = Real[Tensor, "*dim H W"]
+type NormalizationMode = Literal["perframe", "pairwise", "injected"]
+type FrameType = Real[Tensor, "*dim H W"]
 
 # The source `(min, max)` a frame is scaled *from*: scalars when injected,
 # `(*dim, 1, 1)` tensors when measured, so either broadcasts over the frame. The
 # target range a frame is scaled *to* is always a plain `(float, float)`.
-_Range = tuple[Tensor | float, Tensor | float]
+type _Range = tuple[Tensor | float, Tensor | float]
 
 
 def _ranges(frames: Tensor) -> tuple[Tensor, Tensor]:
@@ -69,12 +69,14 @@ class FrameNormalizer:
       Sequence or dataset scope is the caller's choice; scaling is identical.
 
     Args:
-        mode: which range each frame is scaled from.
-        dtype: output dtype, or `None` to keep each input's own.
-        source_range: range to scale from, for `injected` mode; also the
-            baseline `reset` returns to.
-        target_range: the span the output covers, or `None` for the dtype's own,
-            which is `[0, 1]` for floats and the full `iinfo` span for integers.
+        mode: The range each frame is scaled from.
+        dtype: The output dtype. Defaults to `None`, which keeps each input's
+            own.
+        source_range: The range to scale from, for `injected` mode, and the
+            baseline `reset` returns to. Defaults to `None`.
+        target_range: The span the output covers. Defaults to `None`, which
+            takes the dtype's own: `[0, 1]` for floats and the full `iinfo`
+            span for integers.
 
     Raises:
         ValueError: If `source_range` is set on a mode that measures its own,
@@ -154,8 +156,8 @@ class FrameNormalizer:
         """Min-max scale both frames per the mode, onto the target range and dtype.
 
         Args:
-            frame1: `(*dim, H, W)` frame(s) of any real dtype.
-            frame2: `(*dim, H, W)` frame(s) sharing `frame1`'s leading dims.
+            frame1: The `(*dim, H, W)` frame(s) to scale, of any real dtype.
+            frame2: The `(*dim, H, W)` frame(s) sharing `frame1`'s leading dims.
 
         Returns:
             Both frames scaled, each keeping its shape and dtype rule. Values
@@ -179,7 +181,7 @@ class FrameNormalizer:
     def _resolve_source_ranges(
         self, frame1: Tensor, frame2: Tensor
     ) -> tuple[_Range, _Range]:
-        """The `(min, max)` each frame scales from, ready to broadcast.
+        """Return the `(min, max)` each frame scales from, ready to broadcast.
 
         An injected range comes back as the stored scalars; a measured one as
         `(*dim, 1, 1)` tensors, unsqueezed here so `_scale` need not know which.
@@ -206,7 +208,7 @@ class FrameNormalizer:
         return range1, range2
 
     def _resolve_target(self, dtype: torch.dtype) -> tuple[float, float]:
-        """The `(min, max)` an output of `dtype` scales to.
+        """Return the `(min, max)` an output of `dtype` scales to.
 
         `target_range` when set, else the dtype's own span. Re-validates the set
         range because a `dtype` of `None` leaves the output dtype unknown until a

@@ -37,8 +37,8 @@ class IdentityKernel(FilterKernel):
         """Return frame `target` of `window` unchanged.
 
         Args:
-            window: `(T, H, W)` consecutive float32 frames.
-            target: index in `window` of the frame to return.
+            window: The `(T, H, W)` consecutive float32 frames to read.
+            target: The index in `window` of the frame to return.
 
         Returns:
             That frame, copied out of `window` rather than viewed: no filtering
@@ -58,7 +58,7 @@ class IdentityConfig(KernelConfig):
     """The settings of an `IdentityKernel`, which has none of its own.
 
     Attributes:
-        kind: what a record says this filter was.
+        kind: The name a record gives this filter.
     """
 
     kind: ClassVar[str] = "identity"

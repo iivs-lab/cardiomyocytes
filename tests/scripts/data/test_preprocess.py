@@ -43,8 +43,8 @@ def test_every_schema_field_is_reachable_from_the_command_line(group, schema):
 def test_a_compute_group_reaches_every_field_and_shapes_workers_for_its_device(
     group, workers
 ):
-    # One knob whose shape follows the device -- a count on cpu, gpu ids on cuda
-    # -- so the group has to carry the shape `plan_devices` will accept.
+    # One knob whose shape follows the device, a count on cpu and gpu ids on
+    # cuda, so the group has to carry the shape `plan_devices` will accept.
     composed = _composed(f"compute={group}")["compute"]
 
     missing = {field.name for field in fields(ComputeConfig)} - set(composed)
@@ -65,8 +65,8 @@ def test_a_key_no_schema_declares_is_refused():
 def _job(output_dir: Path, *overrides: str) -> Iterator[DictConfig]:
     """Compose and install this job's hydra node, the way `hydra.main` does.
 
-    Composing does not fill `runtime.output_dir`, nor make the directory -- the
-    launcher does both, once it knows where the job goes -- so this does, and
+    Composing does not fill `runtime.output_dir`, nor make the directory. The
+    launcher does both, once it knows where the job goes, so this does, and
     the singleton is put back afterwards since a job left in it would answer for
     whatever ran next.
     """
@@ -92,7 +92,7 @@ def _job(output_dir: Path, *overrides: str) -> Iterator[DictConfig]:
 def test_a_job_writes_where_hydra_put_it_rather_than_where_target_names(
     phase_tree, tmp_path
 ):
-    # `main` was never run by the suite, only the config it composes -- and it is
+    # `main` was never run by the suite, only the config it composes, and it is
     # what wires the whole of stage (1) together: the three schemas, the sweep
     # guard, the log folder, and the run. Nothing reads `target.root` to write
     # with, so a job pointed elsewhere still lands in hydra's own directory.
@@ -109,7 +109,7 @@ def test_a_job_writes_where_hydra_put_it_rather_than_where_target_names(
 def test_a_sweep_is_refused_before_it_writes_the_one_tree(phase_tree, tmp_path):
     # Frames go to the job directory, and a sweep gives each job one of its own,
     # so every job would write a tree of its own and the last would be all that
-    # was left -- 1.45 TB apiece, in turn, for one of them.
+    # was left: 1.45 TB apiece, in turn, for one of them.
     with (
         _job(
             tmp_path,

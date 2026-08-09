@@ -7,20 +7,24 @@ from functools import cached_property
 from typing import TYPE_CHECKING, Final, Literal, get_args
 
 import torch
+from kaparoo.utils import unwrap_or_default
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-DeviceKind = Literal["cpu", "cuda"]
-
-DEVICE_KINDS: Final[frozenset[DeviceKind]] = frozenset(get_args(DeviceKind))
+type DeviceKind = Literal["cpu", "cuda"]
 
 # What a caller may write for a device; `Device` is the form it is stored as.
 type DeviceLike = str | torch.device | Device
 
+# Taken off the alias rather than written twice. `get_args` reads a
+# `TypeAliasType` as having no arguments of its own, so it is asked about the
+# `Literal` the alias stands for instead.
+DEVICE_KINDS: Final[frozenset[DeviceKind]] = frozenset(get_args(DeviceKind.__value__))
+
 
 def _cuda_count() -> int:
-    """How many CUDA devices the driver reports, 0 when there is no driver.
+    """Count the CUDA devices the driver reports, 0 when there is no driver.
 
     Deliberately not guarded by `torch.cuda.is_available()`, which initializes
     CUDA in whichever process asks: a pool started by forking after that gives
@@ -47,9 +51,9 @@ class Device:
     what a caller writes; the constructor is for a kind and index already known.
 
     Args:
-        kind: Which family of device.
-        index: Which CUDA device, defaulting to `0`. Ignored for `cpu`, which
-            takes no index.
+        kind: The family of device.
+        index: The CUDA device to name. Ignored for `cpu`, which takes no
+            index. Defaults to `None`, which comes to `0` on cuda.
 
     Raises:
         ValueError: If `kind` is not a known kind, or `index` is negative.
@@ -68,7 +72,7 @@ class Device:
             msg = f"negative device index {self.index}: expected 0 or more, or None"
             raise ValueError(msg)
 
-        index = None if self.kind == "cpu" else 0 if self.index is None else self.index
+        index = None if self.kind == "cpu" else unwrap_or_default(self.index, 0)
         if index != self.index:
             object.__setattr__(self, "index", index)  # frozen: normalize in place
 
@@ -89,8 +93,8 @@ class Device:
         since naming a set is planning work across it.
 
         Args:
-            spec: What to resolve, in any form a caller may write.
-            supported: The device kinds to accept.
+            spec: The device to resolve, in any form a caller may write.
+            supported: The device kinds to accept. Defaults to every kind.
 
         Returns:
             The normalized device, whose `kind` is in `supported`.
@@ -123,8 +127,8 @@ class Device:
         CPU. The driver is asked only when a CUDA device is actually named.
 
         Args:
-            specs: What to resolve, in the order the devices are wanted.
-            supported: The device kinds to accept.
+            specs: The devices to resolve, in the order they are wanted.
+            supported: The device kinds to accept. Defaults to every kind.
 
         Returns:
             The normalized devices, in the order given.

@@ -230,7 +230,7 @@ def test_the_ellipsoid_is_a_strict_subset_of_its_box_in_the_same_order():
 
 
 def test_a_zero_radius_disables_that_axis():
-    # Legacy could not express this -- it divides by each radius unguarded.
+    # Legacy could not express this: it divides by each radius unguarded.
     spatial = MedianKernel((1, 1, 0))
 
     assert {dz for _, _, dz in spatial.offsets} == {0}
@@ -255,7 +255,7 @@ def test_border_pixels_drop_offsets_and_average_the_middle_two():
     # A column of 1, 2, 10 with a vertical radius of 1. The middle pixel sees
     # all three -> 2. Each end loses one offset to the border, leaving an even
     # two to average: (1 + 2) / 2 and (2 + 10) / 2. `torch.median` would return
-    # the lower of each pair instead, giving [1, 2, 2] -- which is why it cannot
+    # the lower of each pair instead, giving [1, 2, 2], which is why it cannot
     # be used directly, and what this test exists to catch.
     window = torch.tensor([[[1.0], [2.0], [10.0]]])  # (T=1, H=3, W=1)
 
@@ -296,7 +296,7 @@ def test_cuda_returns_what_the_cpu_returns(radius, shape):
 
 def test_an_odd_count_returns_the_sample_itself_bit_for_bit():
     # An odd count averages each sample with itself, so this pins that the
-    # averaging is exact and not merely close -- `torch.equal`, not `allclose`,
+    # averaging is exact and not merely close: `torch.equal`, not `allclose`,
     # over values that have no exact halves.
     awkward = torch.rand(1, 64, 64, generator=torch.Generator().manual_seed(0))
 
@@ -305,7 +305,7 @@ def test_an_odd_count_returns_the_sample_itself_bit_for_bit():
 
     # Three per pixel, spanning eight orders of magnitude so a lost bit shows.
     # The centre row sees all three, and their median by value is the first
-    # row's `0.1` -- sorted they run 1e-8, 0.1, 12345.679.
+    # row's `0.1`, and sorted they run 1e-8, 0.1, 12345.679.
     column = torch.tensor([[[0.1], [12345.679], [1e-8]]])  # (T=1, H=3, W=1)
     filtered = MedianKernel((0, 1, 0)).apply(column, 0)
 
@@ -313,8 +313,9 @@ def test_an_odd_count_returns_the_sample_itself_bit_for_bit():
 
 
 def test_median_matches_a_brute_force_pass_over_explicit_neighbours():
-    # Everything at once -- offset selection, truncation at all six borders, and
-    # even-count averaging -- against a computation sharing no code with it.
+    # Everything at once, meaning offset selection, truncation at all six
+    # borders, and even-count averaging, against a computation sharing no code
+    # with it.
     frames = _frames(5)
     kernel = MedianKernel((2, 1, 1))
     window = torch.from_numpy(frames)
@@ -420,7 +421,7 @@ def test_a_neighbourhood_too_wide_to_band_says_so_once(caplog):
     ),
 )
 def test_a_neighbourhood_that_bands_says_nothing(caplog, radius, shape, width):
-    # One row a band is not itself the trouble -- it is one row that does not
+    # One row a band is not itself the trouble: it is one row that does not
     # fit that is, so the wide-but-affordable case has to stay quiet.
     kernel = MedianKernel(radius, shape=shape)
     frames = 2 * kernel.temporal_radius + 1
@@ -436,7 +437,7 @@ def test_a_neighbourhood_that_bands_says_nothing(caplog, radius, shape, width):
 
 def test_a_pixel_with_no_valid_neighbour_comes_back_as_nan():
     # Every sample NaN leaves zero valid ones, and the lower of the middle pair
-    # is `(valid - 1) // 2` -- which is -1 there. On the cpu that raises; on cuda
+    # is `(valid - 1) // 2`, which is -1 there. On the cpu that raises; on cuda
     # it is a device-side assert, and the context it kills is the worker's.
     kernel = MedianKernel((1, 1, 0))
     window = torch.full((1, 4, 5), float("nan"))

@@ -19,7 +19,7 @@ def _ramp(low: float, high: float, h: int = 8, w: int = 8) -> torch.Tensor:
 
 
 def test_perframe_scales_each_frame_by_its_own_range():
-    # Different spans, identical output -- which is exactly why the mode breaks
+    # Different spans, identical output, which is exactly why the mode breaks
     # brightness constancy between the two frames.
     out1, out2 = FrameNormalizer("perframe").apply(_ramp(0.0, 1.0), _ramp(100.0, 300.0))
     assert (out1.min().item(), out1.max().item()) == pytest.approx((0.0, 1.0))
@@ -28,7 +28,7 @@ def test_perframe_scales_each_frame_by_its_own_range():
 
 def test_pairwise_scales_both_frames_by_the_joint_range():
     # frame2 spans the pair, so it keeps the full range while frame1 occupies the
-    # lower half -- the pair stays comparable, unlike perframe.
+    # lower half: the pair stays comparable, unlike perframe.
     out1, out2 = FrameNormalizer("pairwise").apply(_ramp(0.0, 1.0), _ramp(0.0, 2.0))
     assert out2.max().item() == pytest.approx(1.0)
     assert out1.max().item() == pytest.approx(0.5)  # 1.0 of a [0, 2] range
@@ -178,7 +178,7 @@ def test_target_range_defaults_stay_dtype_derived():
 
 
 def test_target_range_can_reserve_headroom_in_an_integer_dtype():
-    # A sub-span of the dtype is legitimate -- 0..100 inside uint8, not 0..255.
+    # A sub-span of the dtype is legitimate: 0..100 inside uint8, not 0..255.
     out1, _ = FrameNormalizer(
         "perframe", dtype=torch.uint8, target_range=(0.0, 100.0)
     ).apply(_ramp(0.0, 1.0), _ramp(0.0, 1.0))

@@ -14,12 +14,13 @@ from mpire import WorkerPool
 from iivs_cardio.common.device import Device
 from scripts import _compute as compute
 from scripts._compute import (
+    _DEFAULT_WORKERS,
     ComputeConfig,
     IncompleteRunError,
-    SharedContext,
-    WorkerLogFolder,
     Outcome,
     RunRecord,
+    SharedContext,
+    WorkerLogFolder,
     _collect_outcomes,
     _init_worker,
     log_compute_config,
@@ -101,7 +102,7 @@ def test_a_clean_run_finishes_quietly(tmp_path, workers):
 @pytest.mark.parametrize("workers", (0, 2))
 def test_one_item_failing_does_not_take_the_rest_with_it(tmp_path, workers):
     # `mpire` re-raises a task's exception in the parent and tears the pool down,
-    # so a run that let one through would lose every item still to come -- hours
+    # so a run that let one through would lose every item still to come: hours
     # of finished sequences, at dataset scale.
     dest = tmp_path / "done"
 
@@ -113,8 +114,8 @@ def test_one_item_failing_does_not_take_the_rest_with_it(tmp_path, workers):
 
 @pytest.mark.parametrize("workers", (0, 2))
 def test_what_failed_stays_whole_rather_than_folded_into_the_message(tmp_path, workers):
-    # A caller acts on this -- a report saying it covers a subset, a retry -- and
-    # a dataset's worth of failures would not fit one line anyway.
+    # A caller acts on this, with a report saying it covers a subset or with a
+    # retry, and a dataset's worth of failures would not fit one line anyway.
     dest = tmp_path / "done"
 
     with pytest.raises(IncompleteRunError) as failure:
@@ -281,8 +282,8 @@ def test_a_starting_worker_takes_the_level_the_parent_was_at(tmp_path):
 
 
 def test_a_worker_with_nowhere_to_write_keeps_the_logging_it_started_with(tmp_path):
-    # A driver may run without a log folder -- a test, or a caller doing its own
-    # logging -- and a worker then has no file to open. It leaves the process's
+    # A driver may run without a log folder, such as a test or a caller doing its
+    # own logging, and a worker then has no file to open. It leaves the process's
     # logging alone rather than replacing it with nothing.
     context = SharedContext("run", _Stages(1, tmp_path), (Device("cpu"),), None)
     before = logging.getLogger().handlers[:]
@@ -359,7 +360,7 @@ def test_clearing_drops_what_an_earlier_job_left(tmp_path):
 def test_insights_nobody_will_collect_are_said_out_loud(
     tmp_path, caplog, workers, expected
 ):
-    # `mpire` gathers them, so a run with no pool gathers nothing -- and asking
+    # `mpire` gathers them, so a run with no pool gathers nothing, and asking
     # for a measurement that never arrives should not look like a quiet result.
     config = ComputeConfig(
         device="cpu", workers=workers, show_progress=False, measure_workers=True
@@ -385,7 +386,7 @@ def test_insights_nobody_will_collect_are_said_out_loud(
 def test_a_worker_file_is_padded_to_the_pool_it_belongs_to(tmp_path, workers, expected):
     # A fixed width misaligns the moment a pool outgrows it, and 64 cores is a
     # size this project has already run at. The width follows the highest id
-    # rather than the count, so ten workers -- ids 0 to 9 -- still take one.
+    # rather than the count, so ten workers, ids 0 to 9, still take one.
     assert WorkerLogFolder(tmp_path).path_for(0, workers).name == expected
 
 
@@ -463,7 +464,7 @@ def test_items_the_pool_took_down_with_it_are_not_counted_ready(
     # that never ran: a pool dying after two of four said "3 of 4 ready". The
     # difference between those two numbers is what a retry is built from.
     # Patched at the worker, since what tears down is the pool rather than an
-    # item -- an item that raises comes back as a failure and is counted.
+    # item: an item that raises comes back as a failure and is counted.
     outcomes = iter([Outcome(0, "boom"), Outcome(1, None, computed=True)])
 
     def vanish(worker_id, context, index):
@@ -489,7 +490,7 @@ def test_items_the_pool_took_down_with_it_are_not_counted_ready(
 def test_an_unset_worker_count_falls_back_to_the_machine(monkeypatch):
     # Comparing against `DEFAULT_WORKERS` could not fail, whatever that constant
     # came to mean. What the fallback owes is the machine's own answer, so the
-    # machine is what it is checked against -- and moving that answer has to
+    # machine is what it is checked against, and moving that answer has to
     # move the plan with it.
     monkeypatch.setattr(compute, "_DEFAULT_WORKERS", 3)
 
@@ -503,8 +504,8 @@ def test_the_default_worker_count_follows_this_process_s_own_affinity():
     # use, so a run under `taskset` or a scheduler's allocation would start a
     # worker per core of the host and have them contend over its own few.
     # The two agree on windows whatever the affinity mask, so only a linux run
-    # tells the constants apart -- which is where the pool is actually sized.
-    assert os.process_cpu_count() == compute._DEFAULT_WORKERS
+    # tells the constants apart, which is where the pool is actually sized.
+    assert os.process_cpu_count() == _DEFAULT_WORKERS
 
 
 # ------------------------------ the progress bar -------------------------- #
@@ -516,7 +517,7 @@ def _redirected(monkeypatch, *, tty: bool) -> None:
 
 def test_a_redirected_run_draws_no_progress_bar(tmp_path, monkeypatch, caplog):
     # `tqdm` renders with a carriage return, so a redirected pool writes one
-    # long line of fragments into the log it was pointed at -- at the timer's
+    # long line of fragments into the log it was pointed at, at the timer's
     # own rate, not the run's.
     _redirected(monkeypatch, tty=False)
     drawn = []
@@ -638,7 +639,7 @@ _INSIGHTS = {
 
 def test_the_shares_reported_account_for_the_whole(caplog):
     # `mpire` splits a worker's life five ways and the ratios are of their sum,
-    # so naming two of them leaves a reader asking where the rest went -- 98% of
+    # so naming two of them leaves a reader asking where the rest went: 98% of
     # it, on a run short enough for process start-up to dominate. The other three
     # are start-up, `worker_init` and `worker_exit`, which no single name covers.
     with caplog.at_level(logging.INFO):
@@ -676,7 +677,7 @@ def test_a_pool_that_collected_nothing_says_so_rather_than_raising(caplog):
 
 def test_the_report_is_filed_under_the_name_it_is_given(caplog):
     # No default: `run_all` always knows the stage's name, and a default would
-    # only ever apply where a caller forgot -- filing the run's lines elsewhere.
+    # only ever apply where a caller forgot, filing the run's lines elsewhere.
     with caplog.at_level(logging.INFO):
         log_insights(_INSIGHTS, "reconstruct")
 
