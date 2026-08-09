@@ -364,3 +364,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   500 sequences whose 300th was already written paid for 299 of them first.
   `FrameTree` takes `selected` for this, so a retry of one sequence is not
   refused by the ones that already succeeded.
+- `source.frame_start` and `source.frame_count` beside `frame_step`, with
+  `source.if_frames_short` (`take | error`) for a sequence that cannot supply
+  the count. `take` takes what there is and names the short sequences in the
+  log, since sequences differ in length and that is the dataset's ordinary
+  shape; `error` refuses for the whole run before a frame is read, the way a
+  missing frame already does, for the run whose premise is that every sequence
+  gives the same number. The name says the count and the flag says the policy,
+  so neither contradicts the other.
+- `frame_indices(total, start=, step=, limit=)` is the one place those three
+  become positions. A run reads its frames through `FilteredSequence` and names
+  them again when `search_sources` lists what the source holds, and the two
+  have to agree exactly: a document counts what it covers by matching one
+  against the other, so a difference between them would show as every output
+  being stale rather than as a wrong index. They were two independent
+  expressions of the same slice, which one more setting each would have made
+  three ways to disagree.

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 __all__ = (
     "EXISTING_OUTPUT_POLICIES",
+    "SHORT_INPUT_POLICIES",
     "STAGING",
     "UNSOURCED_OUTPUT_POLICIES",
     "ExistingOutputPolicy",
+    "ShortInputPolicy",
     "UnsourcedOutputPolicy",
     "as_written",
     "counted",
@@ -24,12 +26,16 @@ if TYPE_CHECKING:
 
 type ExistingOutputPolicy = Literal["error", "overwrite", "reuse"]
 type UnsourcedOutputPolicy = Literal["keep", "delete"]
+type ShortInputPolicy = Literal["take", "error"]
 
 EXISTING_OUTPUT_POLICIES: Final[tuple[ExistingOutputPolicy, ...]] = get_args(
     ExistingOutputPolicy.__value__
 )
 UNSOURCED_OUTPUT_POLICIES: Final[tuple[UnsourcedOutputPolicy, ...]] = get_args(
     UnsourcedOutputPolicy.__value__
+)
+SHORT_INPUT_POLICIES: Final[tuple[ShortInputPolicy, ...]] = get_args(
+    ShortInputPolicy.__value__
 )
 
 STAGING: Final = And((StartsWith("."), EndsWith(".tmp")))

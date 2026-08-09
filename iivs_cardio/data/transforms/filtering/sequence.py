@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("FilteredSequence",)
+__all__ = ("FilteredSequence", "frame_indices")
 
 from typing import TYPE_CHECKING, Any, cast, override
 
@@ -22,6 +22,51 @@ if TYPE_CHECKING:
 type NumPyRealDType = np.floating | np.integer
 
 
+def frame_indices(
+    total: int, *, start: int = 0, step: int = 1, limit: int | None = None
+) -> range:
+    """Return which of `total` source frames a run takes, in order.
+
+    The one place the three settings become positions. A run reads its frames
+    through a sequence and names them again when it lists what the source
+    holds, and the two have to agree exactly: a document counts what it covers
+    by matching one against the other, so a difference between them shows up as
+    every output being stale rather than as a wrong index.
+
+    A `start` past the end takes nothing, and a `limit` past what is left takes
+    what is left. Neither is refused here, since how short a sequence is
+    allowed to come is the caller's policy.
+
+    Args:
+        total: How many frames the source holds.
+        start: The first source frame to take. Defaults to 0.
+        step: The stride to take them at. Defaults to 1.
+        limit: How many to take once the stride has been applied. Defaults to
+            `None`, which takes them all.
+
+    Returns:
+        The source positions to read, ascending.
+
+    Raises:
+        ValueError: If `start` is negative, or `step` or `limit` is below one.
+    """
+    if start < 0:
+        msg = f"invalid frame start {start}: expected 0 or more"
+        raise ValueError(msg)
+
+    if step < 1:
+        msg = f"invalid frame step {step}: expected 1 or more"
+        raise ValueError(msg)
+
+    if limit is not None and limit < 1:
+        msg = f"invalid frame count {limit}: expected 1 or more, or None"
+        raise ValueError(msg)
+
+    stop = total if limit is None else min(total, start + limit * step)
+
+    return range(start, stop, step)
+
+
 class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.float32](
     DataSequence["Tensor", M]
 ):
@@ -36,7 +81,7 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
     in order cost one read of the source per frame. Reading out of order stays
     correct and only misses the buffer more often.
 
-    `step` is applied before filtering, not after: taking every Nth frame first
+    The frames are chosen before filtering, not after: taking every Nth first
     is what makes a strided read measure the frame rate it claims to. It also
     renumbers the view, so `len` and every index count kept frames, and item 1
     at `step=2` is the source's frame 2.
@@ -50,12 +95,14 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
     Args:
         source: The sequence to read frames from.
         kernel: The reduction to apply over each window.
-        step: The stride to read the source at, applied before filtering.
-            Defaults to 1.
+        start: The first source frame to take. Defaults to 0.
+        step: The stride to read the source at. Defaults to 1.
+        limit: How many frames to take once the stride has been applied.
+            Defaults to `None`, which takes them all.
         device: The device the frames are filtered on. Defaults to `"cpu"`.
 
     Raises:
-        ValueError: If `step` is less than one.
+        ValueError: If `start` is negative, or `step` or `limit` is below one.
     """
 
     def __init__(
@@ -63,18 +110,18 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
         source: S,
         kernel: FilterKernel,
         *,
+        start: int = 0,
         step: int = 1,
+        limit: int | None = None,
         device: DeviceLike = "cpu",
     ) -> None:
-        if step < 1:
-            msg = f"invalid frame step {step}: expected 1 or more"
-            raise ValueError(msg)
-
         self._origin = cast("DataSequence[NDArray[T], M]", source)
 
+        whole = len(self._origin)
+        indices = frame_indices(whole, start=start, step=step, limit=limit)
+
         self._source = self._origin
-        if step > 1:
-            indices = range(0, len(self._origin), step)
+        if indices != range(whole):
             self._source = SlicedSequence(self._origin, indices)
 
         self._buffer: dict[int, Tensor] = {}
@@ -114,7 +161,9 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
         source: S,
         config: KernelConfig,
         *,
+        start: int = 0,
         step: int = 1,
+        limit: int | None = None,
         device: DeviceLike = "cpu",
     ) -> FilteredSequence[S, M, T]:
         """Build a filtered view from a kernel's settings rather than a kernel.
@@ -122,7 +171,9 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
         Returns:
             The view, with a kernel built from `config`.
         """
-        return cls(source, config.build(), step=step, device=device)
+        return cls(
+            source, config.build(), start=start, step=step, limit=limit, device=device
+        )
 
     @property
     def origin(self) -> S:

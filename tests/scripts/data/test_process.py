@@ -176,6 +176,63 @@ def test_a_sequence_missing_a_frame_can_be_excluded_rather_than_fixed(phase_tree
     assert len(contents) == SEQUENCES  # the excluded one is still in the dataset
 
 
+def _short(phase_tree: Path, name: str, keep: int) -> None:
+    """Leave `name` holding `keep` frames, so a count can fall short of it."""
+    for frame in range(keep, FRAMES):
+        (phase_tree / name / PHASE_FLOAT_BIN / f"{frame:05d}_phase.bin").unlink()
+
+
+def test_a_count_takes_that_many_from_where_the_start_says(phase_tree):
+    # The three settings become positions in one place, and the contents is
+    # what a document counts itself against, so this is where they agree.
+    source = SourceConfig(
+        root=str(phase_tree), frame_start=1, frame_step=2, frame_count=2
+    )
+
+    sequences, contents = search_sources(source)
+
+    assert contents["TL_00"] == ("00001_phase.bin", "00003_phase.bin")
+    assert all(len(frames) == 2 for frames in contents.values())
+    assert len(sequences) == SEQUENCES
+
+
+def test_a_sequence_that_cannot_supply_the_count_is_taken_as_it_is(phase_tree, caplog):
+    # Sequences differ in length, so falling short is the dataset's ordinary
+    # shape rather than a fault. Named, since a reader comparing them has to
+    # know which ones are not on the same footing.
+    _short(phase_tree, "TL_01", FRAMES - 1)
+    source = SourceConfig(root=str(phase_tree), frame_count=FRAMES)
+
+    with caplog.at_level(logging.INFO):
+        stages = build_phase_stages(source, name=STAGE, output_root="/out")
+
+    assert len(stages) == SEQUENCES
+    said = " ".join(record.getMessage() for record in caplog.records)
+    assert f"1 sequence gave fewer than {FRAMES}: TL_01 ({FRAMES - 1})" in said
+
+
+def test_a_sequence_that_cannot_supply_the_count_can_be_refused_instead(phase_tree):
+    # `error` is for the run whose premise is that every sequence gives the
+    # same number, and it refuses for the dataset rather than per item: the
+    # premise is broken before a single frame has been read.
+    _short(phase_tree, "TL_01", 2)
+    source = SourceConfig(
+        root=str(phase_tree), frame_count=FRAMES, if_frames_short="error"
+    )
+
+    with pytest.raises(ValueError, match=r"TL_01: 2 frames after the stride"):
+        search_sources(source)
+
+
+def test_a_count_nobody_falls_short_of_says_nothing(phase_tree, caplog):
+    source = SourceConfig(root=str(phase_tree), frame_count=FRAMES)
+
+    with caplog.at_level(logging.INFO):
+        build_phase_stages(source, name=STAGE, output_root="/out")
+
+    assert not [line for line in caplog.messages if "gave fewer" in line]
+
+
 def test_a_narrowed_run_says_how_much_of_the_dataset_it_took(phase_tree, tmp_path):
     # The retry that produced a document reading as complete: `include` takes one
     # of three, and the file said "covered 1, skipped none" over a `source` that
@@ -454,7 +511,9 @@ def test_a_written_sequence_says_which_frames_it_was_made_from(phase_tree, tmp_p
     assert record["source"] == "TL_00"
     assert record["settings"]["source"] == {
         "subpath": PHASE_FLOAT_BIN,
+        "frame_start": 0,
         "frame_step": 2,
+        "frame_count": None,
     }
     kept = range(0, FRAMES, 2)
     assert record["frames"] == [f"{index:05d}_phase.bin" for index in kept]
@@ -975,7 +1034,9 @@ def test_the_settings_carry_what_would_change_the_numbers(tmp_path):
 
     assert document.settings["source"] == {
         "subpath": "Phase/Float/Other",
+        "frame_start": 0,
         "frame_step": 3,
+        "frame_count": None,
     }
     assert document.settings["filter"]["kind"] == "identity"
 
@@ -999,7 +1060,12 @@ def test_the_selection_stays_out_of_the_settings(tmp_path):
         source, config, parse_filter_config(None), tmp_path, {"TL_00": ()}
     )
 
-    assert set(document.settings["source"]) == {"subpath", "frame_step"}
+    assert set(document.settings["source"]) == {
+        "subpath",
+        "frame_start",
+        "frame_step",
+        "frame_count",
+    }
 
 
 def test_the_contents_reaches_the_document_that_reports_on_it(tmp_path):
@@ -1319,6 +1385,47 @@ def test_a_run_that_will_delete_says_so_before_it_reads_anything(caplog):
     caplog.clear()
     kept = _logged(caplog, SourceConfig(root="/d"), TargetConfig(root="/o"))
     assert not [line for line in kept if "dropping" in line]
+
+
+@pytest.mark.parametrize(
+    ("source", "said"),
+    (
+        (SourceConfig(root="/d"), None),
+        (SourceConfig(root="/d", frame_step=2), "  reading frames 0, 2, 4, ..."),
+        (SourceConfig(root="/d", frame_start=5), "  reading frames 5, 6, 7, ..."),
+        (
+            SourceConfig(root="/d", frame_start=1, frame_step=3, frame_count=2),
+            "  reading frames 1, 4 (at most 2 frames)",
+        ),
+        (
+            SourceConfig(root="/d", frame_step=2, frame_count=9),
+            "  reading frames 0, 2, 4, ... (at most 9 frames)",
+        ),
+    ),
+)
+def test_a_run_says_which_frames_it_takes_unless_it_takes_them_all(
+    caplog, source, said
+):
+    # Shown as positions rather than as the three settings: what a reader
+    # checks is whether these are the frames they meant.
+    logged = _logged(caplog, source)
+
+    if said is None:
+        assert not [line for line in logged if "reading frames" in line]
+    else:
+        assert said in logged
+
+
+def test_a_run_that_will_refuse_a_short_sequence_says_so_up_front(caplog):
+    # The one value of `if_frames_short` that can end the run, so it is named
+    # with the rest of what the run was told rather than only in the failure.
+    source = SourceConfig(root="/d", frame_count=9, if_frames_short="error")
+
+    assert "  refusing a sequence that cannot supply them" in _logged(caplog, source)
+
+    caplog.clear()
+    taking = SourceConfig(root="/d", frame_count=9)
+    assert not [line for line in _logged(caplog, taking) if "refusing" in line]
 
 
 def test_a_run_without_a_target_says_nothing_about_writing(caplog):

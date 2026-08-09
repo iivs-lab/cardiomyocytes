@@ -34,7 +34,9 @@ from omegaconf import MISSING
 from iivs_cardio.common.logging import log_indented
 from iivs_cardio.common.pipeline import (
     EXISTING_OUTPUT_POLICIES,
+    SHORT_INPUT_POLICIES,
     UNSOURCED_OUTPUT_POLICIES,
+    counted,
     read_policy,
 )
 from iivs_cardio.data.phase import PhaseFilteredSequence
@@ -45,6 +47,7 @@ from iivs_cardio.data.pipeline import (
     PhaseStageFactory,
     RangeDocument,
 )
+from iivs_cardio.data.transforms.filtering import frame_indices
 from scripts.data._filtering import describe_filter_kernel, parse_filter_config
 
 if TYPE_CHECKING:
@@ -122,15 +125,34 @@ class SourceConfig(TreeConfig):
         include: The sequences to take, as names or as a path to a file listing
             them. Defaults to `None`, which takes all of them.
         exclude: The same, for sequences to leave out. Defaults to `None`.
+        frame_start: The first source frame to take. Defaults to 0.
         frame_step: The stride to read each sequence at, so that every
-            `frame_step`th frame is taken. Defaults to 1.
+            `frame_step`th frame from `frame_start` is taken. Defaults to 1.
+        frame_count: How many frames to take once the stride has been applied.
+            Defaults to `None`, which takes them all.
+        if_frames_short: The policy for a sequence that cannot supply
+            `frame_count`, which says nothing when there is no count to fall
+            short of. `"take"` takes what there is and names the sequence in
+            the log. Defaults to `"take"`.
     """
 
     DEFAULT_SUBPATH: ClassVar[str] = PHASE_FLOAT_BIN
 
     include: list[str] | str | None = None
     exclude: list[str] | str | None = None
+    frame_start: int = 0
     frame_step: int = 1
+    frame_count: int | None = None
+    if_frames_short: str = "take"
+
+    def frame_indices(self, total: int) -> range:
+        """Return which of `total` source frames this run takes, in order."""
+        return frame_indices(
+            total,
+            start=self.frame_start,
+            step=self.frame_step,
+            limit=self.frame_count,
+        )
 
 
 @dataclass
@@ -256,15 +278,36 @@ def log_source_config(source_config: SourceConfig, logger: Logger) -> None:
 
     log_indented(logger, "reading <sequence>/%s", source_config.resolve_subpath())
 
-    if (step := source_config.frame_step) > 1:
-        kept = ", ".join(str(index * step) for index in range(3))
-        log_indented(logger, "reading frames %s, ...", kept)
+    _log_frames(source_config, logger)
 
     if source_config.include:
         _log_selection(logger, "including", source_config.include)
 
     if source_config.exclude:
         _log_selection(logger, "excluding", source_config.exclude)
+
+
+def _log_frames(source_config: SourceConfig, logger: Logger) -> None:
+    """Log which source frames a run takes, unless it takes every one.
+
+    Shown as the first few positions rather than as the three settings, since
+    what a reader checks is whether the frames are the ones they meant and the
+    settings are what they already wrote.
+    """
+    start = source_config.frame_start
+    step = source_config.frame_step
+    count = source_config.frame_count
+    if (start, step, count) == (0, 1, None):
+        return
+
+    shown = [start + index * step for index in range(3)][: count or 3]
+    listed = ", ".join(str(index) for index in shown)
+    tail = "" if count is not None and count <= len(shown) else ", ..."
+    held = "" if count is None else f" (at most {counted(count, 'frame')})"
+    log_indented(logger, "reading frames %s%s%s", listed, tail, held)
+
+    if count is not None and source_config.if_frames_short == "error":
+        log_indented(logger, "refusing a sequence that cannot supply them")
 
 
 def log_filter_config(kernel_config: KernelConfig, logger: Logger) -> None:
@@ -354,7 +397,8 @@ def log_configs(
         subpath = target_config.resolve_subpath(source_config.resolve_subpath())
         log_target_config(target_config, logger, output_root, subpath=subpath)
 
-        if target_config.save_frames and source_config.frame_step > 1:
+        renumbered = (source_config.frame_start, source_config.frame_step) != (0, 1)
+        if target_config.save_frames and renumbered:
             fix = "join the value ranges to it by position rather than by name"
             logger.warning("the cache renumbers the frames it keeps: %s", fix)
 
@@ -362,6 +406,38 @@ def log_configs(
 # ========================== #
 #          Building          #
 # ========================== #
+
+
+def _log_short(
+    source_config: SourceConfig,
+    sequences: Sequence[PhaseFilteredSequence],
+    contents: Mapping[str, Sequence[str]],
+    *,
+    name: str,
+) -> None:
+    """Name the sequences that could not supply the count that was asked for.
+
+    Said after the search rather than with the rest of the configuration,
+    since it is what the dataset turned out to hold and not what the run was
+    told to do. `"error"` never reaches here: the search refuses there.
+    """
+    count = source_config.frame_count
+    if count is None:
+        return
+
+    short = [
+        f"{sequence.name} ({len(contents[sequence.name])})"
+        for sequence in sequences
+        if len(contents[sequence.name]) < count
+    ]
+    if not short:
+        return
+
+    logger = logging.getLogger(name)
+    listed = ", ".join(short)
+    logger.warning(
+        "%s gave fewer than %d: %s", counted(len(short), "sequence"), count, listed
+    )
 
 
 def search_sources(
@@ -427,11 +503,28 @@ def search_sources(
             msg = f"{folder_subpath(source)}: {error}"
             raise ValueError(msg) from error
 
-    step = config.frame_step
     contents = {
-        folder_subpath(folder): tuple(file.name for file in folder.files[::step])
+        folder_subpath(folder): tuple(
+            folder.files[index].name
+            for index in config.frame_indices(len(folder.files))
+        )
         for folder in folders
     }
+
+    if config.frame_count is not None:
+        policy = read_policy(
+            config.if_frames_short, SHORT_INPUT_POLICIES, "if_frames_short"
+        )
+        short = {
+            name: len(contents[name])
+            for name in map(folder_subpath, sources)
+            if len(contents[name]) < config.frame_count
+        }
+        if short and policy == "error":
+            name, held = next(iter(short.items()))
+            asked = counted(config.frame_count, "frame")
+            msg = f"{name}: {held} frames after the stride, short of the {asked} asked for"
+            raise ValueError(msg)
 
     return taken, contents
 
@@ -459,7 +552,9 @@ def build_sequences(
             kernel,
             root=source_config.root,
             subpath=subpath,
+            start=source_config.frame_start,
             step=source_config.frame_step,
+            limit=source_config.frame_count,
         )
 
     return [build_sequence(source) for source in sources], contents
@@ -505,7 +600,12 @@ def build_branches(
     )
 
     settings = {
-        "source": {"subpath": subpath, "frame_step": source_config.frame_step},
+        "source": {
+            "subpath": subpath,
+            "frame_start": source_config.frame_start,
+            "frame_step": source_config.frame_step,
+            "frame_count": source_config.frame_count,
+        },
         "filter": describe_filter_kernel(kernel_config),
     }
 
@@ -588,6 +688,8 @@ def build_phase_stages(
         _validate_output(source_config, target_config, output_root)
 
     sequences, contents = build_sequences(source_config, kernel_config)
+    _log_short(source_config, sequences, contents, name=name)
+
     branches = []
 
     if target_config is not None:

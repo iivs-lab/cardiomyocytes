@@ -15,6 +15,7 @@ from iivs_cardio.data.transforms.filtering import (
     IdentityKernel,
     MedianConfig,
     MedianKernel,
+    frame_indices,
 )
 
 requires_cuda = pytest.mark.skipif(
@@ -446,3 +447,48 @@ def test_the_frame_handed_back_is_not_a_view_of_the_buffer():
     sequence[1].fill_(0.0)
 
     assert torch.equal(sequence[1], torch.from_numpy(frames[1]))
+
+
+# ----------------------------- which frames ------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "expected"),
+    (
+        ({}, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+        ({"step": 3}, [0, 3, 6, 9]),
+        ({"start": 4}, [4, 5, 6, 7, 8, 9]),
+        ({"limit": 3}, [0, 1, 2]),
+        ({"start": 1, "step": 3, "limit": 2}, [1, 4]),
+        ({"start": 1, "step": 3}, [1, 4, 7]),
+        ({"limit": 99}, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),  # clamped, not refused
+        ({"start": 8, "step": 4, "limit": 5}, [8]),  # clamped at the end
+        ({"start": 20}, []),  # past the end takes nothing
+    ),
+)
+def test_the_frames_a_run_takes_are_the_ones_the_three_settings_name(kwargs, expected):
+    assert list(frame_indices(10, **kwargs)) == expected
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "said"),
+    (
+        ({"start": -1}, "invalid frame start -1"),
+        ({"step": 0}, "invalid frame step 0"),
+        ({"limit": 0}, "invalid frame count 0"),
+    ),
+)
+def test_a_setting_that_names_no_frames_is_refused(kwargs, said):
+    with pytest.raises(ValueError, match=said):
+        frame_indices(10, **kwargs)
+
+
+def test_a_view_reads_the_source_frames_the_settings_name():
+    # The view renumbers, so its index 1 is the source's 4 here, and `get_meta`
+    # keeps naming the source frame, which is what a hook writes down.
+    source = _Frames(_frames(10))
+    view = FilteredSequence(source, IdentityKernel(), start=1, step=3, limit=2)
+
+    assert len(view) == 2
+    assert [view.get_meta(index) for index in range(len(view))] == [10, 40]
+    assert torch.equal(view[1], torch.from_numpy(source[4]))

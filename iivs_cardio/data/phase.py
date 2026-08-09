@@ -37,8 +37,11 @@ class PhaseFilteredSequence(FilteredSequence[PhaseFileFolder, "Path"]):
         root: The dataset root the name is measured from.
         subpath: The part of the folder's path that is the same for every
             sequence, and so is left out of the name.
+        start: The first source frame to take. Defaults to 0.
         step: Take every `step`th frame of the source, before filtering.
             Defaults to 1.
+        limit: How many frames to take once the stride has been applied.
+            Defaults to `None`, which takes them all.
     """
 
     def __init__(
@@ -48,9 +51,11 @@ class PhaseFilteredSequence(FilteredSequence[PhaseFileFolder, "Path"]):
         *,
         root: str,
         subpath: str,
+        start: int = 0,
         step: int = 1,
+        limit: int | None = None,
     ) -> None:
-        super().__init__(source, kernel, step=step)
+        super().__init__(source, kernel, start=start, step=step, limit=limit)
         self._name = stringify_path(source.root, after=root, before=subpath)
 
     @property

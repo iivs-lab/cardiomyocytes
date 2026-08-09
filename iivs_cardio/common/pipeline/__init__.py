@@ -1,5 +1,6 @@
 __all__ = (
     "EXISTING_OUTPUT_POLICIES",
+    "SHORT_INPUT_POLICIES",
     "STAGING",
     "UNSOURCED_OUTPUT_POLICIES",
     "ExistingOutputPolicy",
@@ -8,6 +9,7 @@ __all__ = (
     "Reporting",
     "Reverting",
     "SequenceStage",
+    "ShortInputPolicy",
     "SideBranch",
     "Stage",
     "StageFactory",
@@ -34,9 +36,11 @@ from iivs_cardio.common.pipeline.base import (
 )
 from iivs_cardio.common.pipeline.branch import (
     EXISTING_OUTPUT_POLICIES,
+    SHORT_INPUT_POLICIES,
     STAGING,
     UNSOURCED_OUTPUT_POLICIES,
     ExistingOutputPolicy,
+    ShortInputPolicy,
     UnsourcedOutputPolicy,
     counted,
     find_unsourced,

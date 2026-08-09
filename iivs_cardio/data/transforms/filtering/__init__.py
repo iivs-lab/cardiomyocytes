@@ -13,6 +13,7 @@ __all__ = (
     "RadiusType",
     "SigmaLike",
     "SigmaType",
+    "frame_indices",
 )
 
 from iivs_cardio.data.transforms.filtering.kernel import (
@@ -30,4 +31,7 @@ from iivs_cardio.data.transforms.filtering.kernel import (
     SigmaLike,
     SigmaType,
 )
-from iivs_cardio.data.transforms.filtering.sequence import FilteredSequence
+from iivs_cardio.data.transforms.filtering.sequence import (
+    FilteredSequence,
+    frame_indices,
+)
