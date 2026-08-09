@@ -957,6 +957,114 @@ return self._count_frames(folder) == len(frames)
 점수는 흐름을 계산한 그 uint8 프레임 위에서 매긴다. 그러면 `data_range`가 dtype에서 나오므로
 명시할 필요가 없다 — float 프레임에 대해 `_resolve_data_range`가 요구하는 그것이다.
 
+## 결정 — 실행이 세 모양이고, `flow.root`가 어느 것인지 정한다
+
+| | 읽는 것 | 쓰는 것 | 추정기 |
+| --- | --- | --- | --- |
+| **A** 계산하고 남긴다 | 위상 | 흐름 + 평가 | 씀 |
+| **B** 계산하되 안 남긴다 | 위상 | 평가만 | 씀 |
+| **C** 캐시를 평가한다 | 위상 **+ 흐름** | 평가만 | **안 씀** |
+
+A와 B는 `save_flows` 하나로 갈린다 — (1)의 `save_frames`/`save_ranges`와 같은 짝이다.
+**C가 새로운 모양이고, 소스가 둘이다.** 워프 일관성이 `frame1`·`frame2`·`flow` 셋을 요구하므로
+캐시를 읽어도 위상은 여전히 필요하다.
+
+C가 필요한 이유는 비용이다. 448,800 프레임에 흐름을 다시 계산하는 것보다 읽는 쪽이 훨씬 싸다.
+
+### config
+
+```yaml
+source:                    # 위상. 셋 다 필요하다 — 평가가 프레임을 본다
+  root: ???
+  subpath: null            # Phase/Float/Bin
+  include: null
+  exclude: null
+  frame_start: 0
+  frame_step: 1
+  frame_count: null
+  if_frames_short: take
+
+flow:                      # 흐름을 어디서 얻는가
+  root: null               # null 이면 estimator 로 계산한다
+  subpath: null            # Flow/Float/Npy, 읽을 때만
+
+normalize:
+  mode: injected           # pairwise | injected  (perframe 은 기각됨)
+  range_file: ???          # 측정 실행이 남긴 value_range.json
+  level: dataset           # dataset | sequence
+
+target:
+  root: ???
+  subpath: null            # Flow/Float/Npy
+  save_flows: false
+  save_evals: true
+  evals_file: flow_evaluation
+  if_flows_exist: error    # error | overwrite | reuse
+  if_evals_exist: error
+  if_sources_gone: keep
+```
+
+`evals_file`의 기본값은 (1)의 `range_file: value_range`와 같은 모양이다 — 짧은 필드명에 풀어
+쓴 파일명. `flow_` 접두어는 (3)이 자기 문서를 같은 루트에 쓸 때 값을 한다.
+
+`subpath` 기본값은 **`Flow/Float/Npy`**로 둔다. Koala 관례가 `<종류>/<정밀도>/<형식>`이고,
+파일 이름은 `OpticalFlowFolder.FILE_STEM`/`FILE_EXT`가 이미 `00000_flow.npy`로 정해두었다.
+
+### 소스 쪽은 새로 만들 것이 없다
+
+(2)의 위상 소스는 (1)의 것과 같은 모양이다. 원본을 읽든 (1)의 캐시를 읽든 설정으로 갈린다.
+
+```
+source.root=/sdd/.../Off-axis   filter=median_cuboid_3x3x3     원본에서 필터링하며
+source.root=$OUT/filtered       filter=identity                (1)이 남긴 캐시에서
+```
+
+`search_sources`·`build_sequences`도 그대로다. **여기서 §「`TreeConfig`를 (2)·(3)이 쓰게
+하려면」의 첫 항목이 닫힌다** — 두 번째 쌍이 생겼으니 `TreeConfig`·`SourceConfig`·
+`search_sources`·`build_sequences`를 `scripts.data` 위로 올린다. `TargetConfig`와
+`build_branches`만 단계별로 남는다.
+
+### 「캐시에서 읽기」는 estimator 값이 아니다
+
+(1)이 `filter=identity`로 「필터 없음」을 표현한 전례가 있으나 여기서는 안 된다.
+`identity`는 진짜 커널이라 `apply(window, target)`을 구현한다. **캐시 리더는
+`calc(prev, curr)`를 구현할 수 없다** — 두 프레임만으로는 어느 인덱스인지 모르고 답은 파일에
+있다. 추상이 늘어나지 않으므로 흐름의 출처는 estimator 그룹이 아니라 자기 자리를 갖는다.
+
+### C가 먼저 확인해야 하는 것
+
+**캐시된 흐름은 특정 필터와 특정 정규화를 거친 위상에서 나왔다.** 다른 설정으로 만든 프레임에
+그 흐름을 대고 점수를 매기면 의미 없는 수치가 조용히 나온다.
+
+검사할 재료는 이미 있다. 흐름 폴더의 `source.json`이 자기를 만든 `settings`를 든다.
+**`_still_describes`가 쓰는 그 비교를 재사용 판정이 아니라 전제 조건으로 쓰면 된다.** 어긋나면
+시퀀스 이름을 대고 거절한다. 새 기계가 필요 없다.
+
+그리고 **C에서 `save_flows`는 거절한다.** 읽으면서 쓰면 복사이고, `_validate_output`이 (1)에서
+「소스 위에 쓰는 것」을 거절한 자리와 같다.
+
+### `settings`가 담아야 하는 것 둘
+
+재사용 판정이 `settings`를 비교하므로, **출력을 바꾸는 값이 거기 없으면 조용히 섞인다.**
+
+- **주입된 범위.** `level: dataset`이면 값이 하나이므로 `settings`에 그대로 넣는다.
+  `level: sequence`면 시퀀스마다 다르므로 공유 `settings`가 아니라 **각 시퀀스의 record**에
+  들어간다 — `KoalaFrameWriter`의 `_record`가 `get_hook`에서 시퀀스별로 만들어지므로 자리는
+  있다. `range_file`의 **경로**만 넣는 것으로는 부족하다. 같은 경로의 문서가 다시 쓰였을 수
+  있고, 그것은 `R15`와 같은 함정이다.
+- **흐름이 계산된 것인지 읽힌 것인지.** 두 실행이 같은 이름의 평가 문서를 낸다.
+
+### `frame_count`는 소스 프레임 수다
+
+`source.frame_count=50`이면 위상 50장을 읽어 **흐름 49장**이 나온다. (1)과 일관되게 소스
+기준으로 센다. 출력 기준으로 세면 `frame_indices`가 두 단계에서 다른 뜻이 된다.
+
+### 열어둔 것 — `flow`를 (3)과 나눠 쓸 것인가
+
+**(3)도 흐름 폴더를 읽는다.** 그렇다면 `flow`는 (2)만의 항목이 아니라 (3)의 `source`다.
+`TreeConfig`를 상속한 `FlowSourceConfig`로 만들어 (2)에서는 선택적 두 번째 소스,
+(3)에서는 유일한 소스로 쓰는 편이 맞을 수 있다. **(3)의 입력을 정할 때 함께 정한다.**
+
 ## 열린 것
 
 - **캐시 폴더는 자기가 어디서부터 시작하는지 말하지 않는다.** `KoalaFrameWriter`는 도착한
