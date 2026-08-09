@@ -522,9 +522,7 @@ def test_a_redirected_run_draws_no_progress_bar(tmp_path, monkeypatch, caplog):
     # own rate, not the run's.
     _redirected(monkeypatch, tty=False)
     drawn = []
-    monkeypatch.setattr(
-        compute, "trange", lambda *a, **kw: drawn.append(kw) or range(*a)
-    )
+    monkeypatch.setattr(compute, "tqdm", lambda it, **kw: drawn.append(kw) or it)
 
     config = replace(_compute(0), show_progress=True)
     with caplog.at_level(logging.WARNING):
@@ -540,9 +538,7 @@ def test_a_watched_run_still_draws_one(tmp_path, monkeypatch, caplog):
     # what an assertion on the redirected case alone would let through.
     _redirected(monkeypatch, tty=True)
     drawn = []
-    monkeypatch.setattr(
-        compute, "trange", lambda *a, **kw: drawn.append(kw) or range(*a)
-    )
+    monkeypatch.setattr(compute, "tqdm", lambda it, **kw: drawn.append(kw) or it)
 
     config = replace(_compute(0), show_progress=True)
     with caplog.at_level(logging.WARNING):
@@ -564,6 +560,33 @@ def test_a_run_told_not_to_draw_says_nothing_about_the_terminal(
         run_all(_Stages(4, tmp_path / "done"), _compute(0))
 
     assert "stderr is not a terminal" not in caplog.text
+
+
+def test_the_pool_draws_no_bar_of_its_own(tmp_path, monkeypatch):
+    # Two bars would count two things. `mpire`'s counts what the workers report
+    # finishing; ours counts what the parent has collected, which is what the
+    # log lines are written from. Left to `mpire`, the bar reached the end and
+    # closed while four more results were still being logged beneath it.
+    _redirected(monkeypatch, tty=True)
+    drawn = []
+    monkeypatch.setattr(compute, "tqdm", lambda it, **kw: drawn.append(kw) or it)
+
+    asked = {}
+    imap = WorkerPool.imap
+
+    def spy(self, *args, **kwargs):
+        asked.update(kwargs)
+        return imap(self, *args, **kwargs)
+
+    monkeypatch.setattr(WorkerPool, "imap", spy)
+
+    config = replace(_compute(2), show_progress=True)
+    run_all(_Stages(4, tmp_path / "done"), config)
+
+    assert asked  # the pool was reached at all
+    assert "progress_bar" not in asked
+    assert len(drawn) == 1
+    assert drawn[0]["disable"] is False
 
 
 def test_a_drawn_bar_takes_console_logging_over(restored_root_logger):
@@ -600,9 +623,7 @@ def test_the_bar_and_the_console_agree_on_whether_one_is_drawn(
     # its console around a bar it never drew, or drawing one it then tears.
     _redirected(monkeypatch, tty=tty)
     drawn, routed = [], []
-    monkeypatch.setattr(
-        compute, "trange", lambda *a, **kw: drawn.append(kw) or range(*a)
-    )
+    monkeypatch.setattr(compute, "tqdm", lambda it, **kw: drawn.append(kw) or it)
     monkeypatch.setattr(
         compute,
         "_drawing",

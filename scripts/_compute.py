@@ -25,7 +25,7 @@ import torch
 from kaparoo.filesystem import ensure_dir_exists
 from kaparoo.utils import Timer, unwrap_or_default
 from mpire import WorkerPool
-from tqdm import trange
+from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 from iivs_cardio.common.device import Device
@@ -426,6 +426,26 @@ def _drawing(*, progress: bool) -> AbstractContextManager[None]:
     return logging_redirect_tqdm() if progress else nullcontext()
 
 
+def _tracked(
+    outcomes: Iterable[Outcome], context: SharedContext, *, unit: str, drawn: bool
+) -> Iterable[Outcome]:
+    """Return `outcomes`, advancing a bar as each one is taken.
+
+    Both run paths draw through here, so the bar counts one thing: the results
+    this process has in hand. Left to `mpire`, the pool's own bar counts what
+    the workers reported finishing, which is a different clock and reaches the
+    end while the parent is still draining the queue.
+
+    The bar therefore follows collection rather than computation, and `imap`
+    hands results back in order, so one slow item holds the bar behind workers
+    that have already moved on. It catches up by the end, which is where the
+    two clocks disagreed.
+    """
+    total = len(context.stages)
+
+    return tqdm(outcomes, total=total, desc=context.name, unit=unit, disable=not drawn)
+
+
 def _run_in_process(
     context: SharedContext, record: RunRecord, *, unit: str, show_progress: bool
 ) -> None:
@@ -442,10 +462,10 @@ def _run_in_process(
     stages = context.stages
     logger = logging.getLogger(context.name)
 
-    bar = trange(len(stages), desc=context.name, unit=unit, disable=not show_progress)
-    outcomes = (_run_on_worker(0, context, index) for index in bar)
+    outcomes = (_run_on_worker(0, context, index) for index in range(len(stages)))
+    tracked = _tracked(outcomes, context, unit=unit, drawn=show_progress)
 
-    _collect_outcomes(outcomes, stages, logger, record)
+    _collect_outcomes(tracked, stages, logger, record)
 
 
 def _run_in_pool(
@@ -482,10 +502,10 @@ def _run_in_pool(
             chunk_size=1,
             worker_init=_init_worker,
             worker_lifespan=config.tasks_per_worker,
-            progress_bar=show_progress,
-            progress_bar_options={"desc": context.name, "unit": unit},
         )
-        _collect_outcomes(outcomes, stages, logger, record)
+        tracked = _tracked(outcomes, context, unit=unit, drawn=show_progress)
+
+        _collect_outcomes(tracked, stages, logger, record)
 
         if config.measure_workers:
             log_insights(pool.get_insights(), context.name, unit=unit)
