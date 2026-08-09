@@ -112,6 +112,18 @@ class PhaseStageFactory:
         """
         log_indented(self._logger, message, *args, depth=int(nested))
 
+    def _nothing_to_do(self) -> str:
+        """Say why a sequence is being passed over, which is not always reuse.
+
+        A run given no target has no branch to ask, so nothing is held and
+        nothing was declined: there is simply nothing this run wants. Saying
+        the branches already hold it would name a cause that is not there.
+        """
+        if not self._branches:
+            return "nothing to do: this run writes nothing"
+
+        return "nothing to compute: every branch already holds this sequence"
+
     def run_stage(self, index: int, device: Device) -> bool:
         """Filter the sequence at `index` on `device`, and log what happened.
 
@@ -139,7 +151,7 @@ class PhaseStageFactory:
 
         stage = self.get_stage(index, device)
         if stage is None:
-            self._log("nothing to compute: every branch already holds this sequence")
+            self._log("%s", self._nothing_to_do())
             return False
 
         self._log("filtering %d frames on %s", len(sequence), device)

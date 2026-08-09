@@ -1432,3 +1432,20 @@ def test_a_run_without_a_target_says_nothing_about_writing(caplog):
     logged = _logged(caplog, SourceConfig(root="/dataset"))
 
     assert not any(line.startswith("target") for line in logged)
+
+
+def test_a_run_with_no_target_does_not_blame_a_branch_for_holding_anything(
+    phase_tree, caplog
+):
+    # No branch was asked and none declined: there is simply nothing this run
+    # wants. Naming reuse as the cause would send a reader looking for a cache.
+    stages = build_phase_stages(
+        SourceConfig(root=str(phase_tree)), name=STAGE, output_root="/out"
+    )
+
+    with caplog.at_level(logging.INFO):
+        assert not stages.run_stage(0, Device("cpu"))
+
+    said = " ".join(record.getMessage() for record in caplog.records)
+    assert "nothing to do: this run writes nothing" in said
+    assert "already holds" not in said
