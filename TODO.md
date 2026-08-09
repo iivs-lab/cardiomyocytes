@@ -286,17 +286,120 @@ force          4     3, 4, 5 → acceleration 4
   이르는 설정이 실제로 쓰이면 다시 볼 것.
 
 
+## 결정 — 설정은 셋으로 갈리고, 접두사는 타깃에만 붙는다
+
+**(4) 전처리 검증이 끝난 뒤에 옮긴다.** 이유는 맨 아래에.
+
+### 소스에서 선택을 뗀다
+
+지금 `SourceConfig`는 「트리가 어디 있는가」와 「무엇을 얼마나 읽는가」를 **합쳐** 든다.
+소스가 하나뿐인 (1)에서는 문제가 없었다.
+
+(2)·(3)은 위상과 흐름을 **둘 다** 읽을 수 있다. 합쳐 두면 `include`·`exclude`·`frame_start`·
+`frame_step`·`frame_count`·`if_frames_short`가 **두 벌**이 되고, 둘이 어긋나면 짝이 안 맞는
+프레임을 짝지어 놓고 조용히 계산한다. 같은 실행이 두 소스에서 서로 다른 시퀀스를 고를 이유는
+없으므로, **선택은 소스의 성질이 아니라 실행의 성질이다.**
+
+```yaml
+select:                  # 실행에 한 벌
+  include: null
+  exclude: null
+  frame_start: 0
+  frame_step: 1
+  frame_count: null
+  if_frames_short: take
+
+phase:                   # 소스마다 — 남는 것은 root + subpath 뿐이다
+  root: ???
+  subpath: null
+
+flow:
+  root: null
+  subpath: null
+```
+
+**소스에 남는 것이 `TreeConfig` 그 자체가 된다.** 「두 벌이 일치해야 한다」는 검사가 아예
+필요 없어지고, 표현할 수 없는 것이 된다. `_validate_output`이나 `FrameTree.__post_init__`이
+계속 해온 방향이다.
+
+### 모달리티는 클래스가 아니라 키가 말한다
+
+`SourceConfig`에서 위상에 묶인 것은 `DEFAULT_SUBPATH: ClassVar[str] = PHASE_FLOAT_BIN`
+한 줄뿐이다. 나머지 필드는 전부 모달리티와 무관하고 `TargetConfig`도 같다.
+
+그러니 `PhaseSourceConfig` 같은 이름은 두지 않는다. 클래스는 하나고 **`phase:`·`flow:`라는
+키**가 그것이 무엇인지 말한다. 기본 subpath는 그 키를 아는 곳, 즉 단계가 댄다.
+
+### 접두사는 타깃 셋에만
+
+타깃의 모양은 단계가 정한다 — `save_frames`/`save_ranges`와 `save_flows`/`save_evals`는 그
+단계가 무엇을 내는지 그 자체다. 소스와 `select`는 세 단계가 글자 하나 다르지 않으므로 접두사가
+붙을 자리가 없다.
+
+```
+TreeConfig                   root + subpath           소스는 전부 이것
+SelectConfig                 include/exclude/frame_*  실행에 하나
+PreprocessTargetConfig
+OpticalFlowTargetConfig
+BeatingProfileTargetConfig
+```
+
+`Preprocessing`이 아니라 **`Preprocess`**다. 저장소가 이미 그 철자를 쓴다 —
+`scripts/data/preprocess.py`, `STAGE: Final = "preprocess"`, `configs/data/preprocess/`.
+셋을 명사구로 맞추고 싶어지지만 애초에 같은 종류의 명사가 아니다(뒤 둘은 만들어내는 것의
+이름이고 (1)은 활동의 이름이다). 어느 쪽으로도 완전히 나란해지지 않으므로 코드에 있는 철자를
+따른다.
+
+`OutputConfig` 같은 중간 층은 두지 않는다. 두 타깃이 `if_sources_gone` 하나를 공유하는데,
+필드 하나로 층을 만들 값은 없다.
+
+### 어느 소스가 필요한지는 소비자가 선언한다
+
+(3)은 프로파일 종류에 따라 필요한 소스가 다르다.
+
+```
+opd variance · drymass                 {phase}
+displacement · speed · acceleration    {flow}
+force · kinetic energy                 {phase, flow}
+```
+
+프로파일 설정이 `READS: ClassVar[frozenset[Modality]]`를 들고, 실행은 **고른 것들의 합집합**을
+갖춰야 한다. 빠지면 누가 요구했는지 대고 거절한다 — `force needs a flow source: set
+flow.root`. 반대로 `flow.root`를 줬는데 아무도 흐름을 안 읽으면 읽지 않을 트리를 가리키는
+것이므로 로그로 말한다.
+
+`SUPPORTED_DEVICES`가 알고리즘에 붙고 `LEVELS`가 폴더에 붙는 것과 같은 자리다. **요구사항을
+산문이 아니라 데이터로 둔다.**
+
+(2)는 더 단순하다. `flow.root`가 계산을 **대체**하므로 합집합이 아니라 둘 중 하나이고,
+선언 없이 유무만으로 갈린다.
+
+### 왜 (4) 뒤인가
+
+`source.include` → `select.include`, `source.frame_count` → `select.frame_count`로 키가
+움직인다. **서버에서 도는 (4) 스윕이 그 이름을 쓰고 있다.**
+
+```bash
+source.root="$DATA" source.include="$chunk"
+```
+
+스윕이 끝나기 전에 옮기면 남은 청크가 죽는다. 끝난 뒤에 옮기고, 그때 `temp/`의 스크립트도
+같이 고친다.
+
 ## 열린 것 — `TreeConfig`를 (2)·(3)이 쓰게 하려면
 
-`SourceConfig`·`TargetConfig`가 `TreeConfig`(= `root` + `subpath` +
-`resolve_subpath`)를 공유한다. 단계별 기본값은 이미 서브클래스의 몫이다 —
-`DEFAULT_SUBPATH`가 `ClassVar[str]`로 베이스에 선언만 되어 있고 값은 각 서브클래스가 댄다.
-(2)의 flow 트리 레이아웃이 정해지면 그 클래스에 적으면 되고, **베이스는 손대지 않는다.**
-남은 것은 둘이다.
+**모양과 이름은 §「설정은 셋으로 갈리고, 접두사는 타깃에만 붙는다」에서 정했다.** 소스는
+`TreeConfig`(= `root` + `subpath`)로 남고, 선택은 `SelectConfig`로 떨어지고, 접두사는 타깃
+셋에만 붙는다. **(4) 전처리 검증이 끝난 뒤에 옮긴다.**
 
-- **베이스가 (1)의 모듈에 산다.** (2)가 `scripts.data`에서 import하는 것은 의존 방향이
-  거꾸로다. 두 번째 쌍이 생길 때 위로 올릴 것. 지금 공용 모듈을 미리 만들지 않는 이유는
-  소비자가 하나뿐이어서고, 옮기는 것은 기계적이다.
+여기 남는 것은 둘이다.
+
+- **어느 모듈로 올릴 것인가.** `TreeConfig`·`SelectConfig`·`search_sources`·
+  `build_sequences`·`LAST_SEARCH`가 함께 간다 — (2)가 위상을 읽는 방식이 (1)과 완전히 같기
+  때문이다. `scripts/_trees.py`를 후보로 둔다. 이름이 `search_sources`까지 담기엔 좁지만,
+  `TreeConfig`가 그 안의 다른 모든 것의 뿌리이고 **타깃도 그것을 상속하므로** 파일 이름이
+  「읽기」를 뜻하면 타깃이 거기서 import하는 것이 어색해진다. `_sources.py`·`_reading.py`도
+  후보다. 옮길 때 정한다.
 
 - **(3)의 target은 프레임 트리가 아닐 수 있다.** 출력이 `{지표: (인덱스, 프레임)}`과
   문서라, `save_frames`도 폴더 통째 교체도 (3)에는 없을 수 있다. 그래서 겹침 검사는
