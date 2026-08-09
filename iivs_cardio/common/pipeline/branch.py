@@ -8,7 +8,7 @@ __all__ = (
     "ExistingOutputPolicy",
     "ShortInputPolicy",
     "UnsourcedOutputPolicy",
-    "as_written",
+    "as_read_back",
     "counted",
     "find_unsourced",
     "prune_above",
@@ -41,13 +41,14 @@ SHORT_INPUT_POLICIES: Final[tuple[ShortInputPolicy, ...]] = get_args(
 STAGING: Final = And((StartsWith("."), EndsWith(".tmp")))
 
 
-def as_written(settings: Mapping[str, object] | None) -> object:
-    """Return `settings` as an output on disk will hold them.
+def as_read_back(settings: Mapping[str, object] | None) -> object:
+    """Return `settings` as they will read back out of an output on disk.
 
-    A recorded setting is compared against what an output carries, and what an
-    output carries has been through JSON: a tuple comes back a list, and the
-    two are not equal. Comparing the two directly finds every output stale,
-    this run's own included, and nothing is ever reused.
+    Writing changes nothing: `json.dumps` puts a tuple down as an array
+    faithfully. Reading is where the asymmetry appears, since that array comes
+    back a list, and a list is not equal to the tuple that went in. Comparing
+    what is held against what was written finds every output stale, this run's
+    own included, and nothing is ever reused.
 
     Shared because both branches record the same block and both compare it
     back, so a difference between the two ways of reading it would show up as

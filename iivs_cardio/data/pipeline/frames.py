@@ -14,7 +14,7 @@ from kaparoo.utils.optional import unwrap_or_default
 from iivs_cardio.common.pipeline.branch import (
     EXISTING_OUTPUT_POLICIES,
     STAGING,
-    as_written,
+    as_read_back,
     counted,
     find_unsourced,
     prune_above,
@@ -101,7 +101,7 @@ class FrameTree:
             raise ValueError(msg)
 
         object.__setattr__(self, "_taken", frozenset(names))
-        object.__setattr__(self, "_recorded", as_written(self.settings))
+        object.__setattr__(self, "_recorded", as_read_back(self.settings))
 
     @property
     def _replacing(self) -> bool:

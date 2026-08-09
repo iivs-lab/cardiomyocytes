@@ -32,7 +32,7 @@ from kaparoo.filters import And, EndsWith, StartsWith
 from kaparoo.utils.optional import unwrap_or_default
 
 from iivs_cardio.common.pipeline.branch import (
-    as_written,
+    as_read_back,
     counted,
     find_unsourced,
     prune_above,
@@ -654,7 +654,7 @@ class RangeDocument:
             msg = f"selected {unknown[0]!r}, which the source does not hold"
             raise ValueError(msg)
 
-        self._recorded = as_written(settings)
+        self._recorded = as_read_back(settings)
         self._entered = False
         self._reused: frozenset[str] = frozenset()
         self._saved: DatasetRange | None = None
