@@ -98,7 +98,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   narrow in turn -- found by the search, selected by `include` / `exclude`,
   covered by the parts that arrived -- which is what tells a document describing
   part of a dataset from one describing a smaller dataset. `skipped` is derived
-  from the roster against the parts on disk rather than passed in, since a
+  from the contents against the parts on disk rather than passed in, since a
   sequence is missing whether it raised, died with its worker, or never ran, and
   `Coverage` refuses a set of numbers no run could have had.
 - `mpire` and `tqdm` in the `scripts` group, and `compute.show_progress` /
@@ -115,6 +115,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `iivs-lib[torch]>=0.3.1` as a dependency, for phase sequence IO. The `torch`
   extra additionally enables `iivs.dhm.analysis.pytorch` and
   `iivs.common.data.pytorch`.
+- `all_finite` in `iivs_cardio/common/range.py`, beside `finite_range` and
+  reading a frame the same way: `aminmax` in one fused pass, where NaN reaches
+  both bounds and an infinity lands on the one it belongs to. `isfinite().all()`
+  answers the same question through a mask the size of the frame, which on the
+  path every source frame takes is an allocation worth not making (672 -> 247 us
+  per 900x900 float32 frame, against ~3000 us of filtering).
 
 ### Changed
 
@@ -174,7 +180,47 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is always valid, so the pipeline cannot reach it; the index is clamped anyway,
   since `apply` is a public function of its arguments and on CUDA that gather is
   a device-side assert that takes the worker's context with it.
-- Sibling branches that could not all commit take back what did. Closing them
+- A run reuses what an earlier one left. `target.overwrite` is gone into
+  `if_frames_exist` and `if_ranges_exist`, each `error | overwrite` and the
+  ranges also `reuse`, plus `if_sources_gone` (`keep | delete`) for an output
+  whose sequence the dataset no longer holds. The two axes are separate because
+  they answer different questions -- what to do with the output of a sequence
+  being written, and what to do with one nothing will be written for -- and
+  because only the second can destroy something the source can no longer
+  remake. A frame cache carries no record of how it was made, so `reuse` is not
+  offered for it until one does.
+- A range document counts against the whole dataset rather than against the run
+  that wrote it. `RangeDocument` takes a contents of every sequence the source
+  holds against the frames each would be measured over, and `selected` names
+  which of them this run was given; `Coverage` gains `reused` and `unselected`
+  beside `skipped`, and every sequence the source holds is in exactly one of
+  the three. Counting against the selection said `31 of 31` for a document
+  whose bounds came from 121 -- and folding parts an earlier run left is what
+  reuse does, so the two had to be told apart. The fold takes only parts the
+  contents names whose settings match this run, which is what lets one left by a
+  larger dataset or a different filter stay on disk without reaching the
+  document. Parts carry their own `settings` for that comparison, since a part
+  outliving its document is the case that needs it.
+- A run that gave up still writes its document. `RangeDocument.__exit__` used to
+  return without saving when the run raised, so a worker dying at sequence 90 of
+  121 left the healthy 90 on disk with nothing to read them by; the document now
+  says what it covers and names what it does not. A run that covered nothing
+  writes `coverage` with no `dataset` block, since a range over nothing has no
+  bounds to invent -- `to_range` returns `None` there rather than refusing.
+- `FrameTree` has a lifetime, not only writers. Closing it walks the output tree
+  for what a killed worker staged and the empty shells above it, which the
+  writer only collects while it is alive, and for folders whose sequence the
+  source has lost. Both were previously nobody's to collect.
+- A side branch may decline an item: `SideBranch.get_hook` returns `Hook | None`,
+  and a sequence every branch declines is not read at all. `StageFactory.
+  run_stage` says whether it read one, and the run's summary splits three ways
+  (`121 of 121 ready in 4.2s (90 reused, 31 computed)`) -- `done` counted only
+  what was computed, which read as a smaller run than it was.
+- Outputs with no sequence behind them are always named, whatever the policy
+  then does with them: a dataset that shrank and a share that came up half make
+  the same absence, and only whoever started the run can tell them apart.
+
+- Branches that could not all commit take back what did. Closing them
   in turn is not one commit, so the range document's part reached disk and the
   frame tree failed to move a moment later, leaving a part standing for a
   sequence with no frames -- and a part is what `coverage` counts as covered,
@@ -287,3 +333,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   direction needs no inverse and is exact; the previous one approximated the
   inverse with an error growing as `|flow| * |grad flow|`. Scores shift only in
   the 5th decimal at sub-pixel motion, and estimator rankings are unchanged.
+
+- `common/pipeline.py` is now the package `common/pipeline/`, holding `base.py`
+  (what the file was) and `branch.py` (moved out of `data/pipeline/`). Nothing
+  importing `iivs_cardio.common.pipeline` changes.
+  The branch helpers moved because the policies a side branch reads are the
+  pipeline's, not the phase data's: `_process.py` now takes
+  `EXISTING_OUTPUT_POLICIES` and `read_policy` from `common.pipeline` and only
+  `FrameTree` / `RangeDocument` from `data.pipeline`. `common/__init__` and
+  `common/pipeline/__init__` re-export every public name their submodules carry;
+  `data/pipeline/__init__` sheds the four policy names that left with the move.
+- Neither the source search nor `FrameTree.list_sequences` descends into a
+  time-lapse. Both looked for `Phase/Float/Bin` by walking to it, so every frame
+  folder was listed to check whether another time-lapse was nested inside one,
+  which cannot happen. `search_dirs` recognises a sequence by a single
+  `dir_exists` on the parent's listing instead, and `exclude` prunes what sits
+  under one: the walk of a 20-sequence x 2000-frame tree drops from 52 to 7 ms
+  at the source and 39 to 7 ms at the output. The source pays the listing once
+  more when `PhaseBinFolder` opens each folder for its frames, which is the one
+  that is needed.

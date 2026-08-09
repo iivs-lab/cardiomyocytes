@@ -251,21 +251,52 @@ force          4     3, 4, 5 → acceleration 4
   121 seq」와 「completed 3 seq」에도 쓰인다. 산문을 완전한 낱말로 하려면 막대의 단위와
   가르고(`unit` + `noun`) 복수형을 붙여야 한다.
 
-- **복수형 처리가 세 곳에 복제돼 있다.** `_compute.py`의 `f"{num_workers} worker{...}"`,
-  `common/writer.py`의 `f"wrote {count} frame{...}"`, `data/pipeline/ranges.py`의 `_counted`.
-  `_counted`가 이미 그 함수인데 `data/` 아래 private이라 나머지 둘이 못 쓴다. 순수 텍스트
-  헬퍼라 도메인 의존이 없으므로 `common/`으로 올리면 셋이 하나가 되고, 위의 `noun` 항목도
-  같이 싸진다.
+- **복수형 처리가 아직 세 곳에 복제돼 있다.** `_counted`는 `common/pipeline/branch.py`의
+  공개 `counted`가 되었고 `RangeDocument`·`FrameTree`가 공유한다. 남은 셋은
+  `data/writer.py`의 `f"wrote {count} frame{...}"`, `scripts/_compute.py`의
+  `f"{num_workers} worker{...}"`, `data/pipeline/stage.py`의 `"%d output(s)"`다.
 
-- **`SharedContext.log_level`의 전달 경로에 테스트가 없다.** spawn된 워커는 root가
-  `WARNING`에 핸들러 0개로 시작하므로(실측) 레벨을 실어 보내지 않으면 워커 파일에 INFO 줄이
-  하나도 남지 않는다. 그런데 테스트는 `configure_worker(0, 2, logging.INFO)`로 항상 레벨을
-  명시해 부르므로, `run_all` → `SharedContext` → `_init_worker` 경로는 한 번도 검증되지
-  않는다 — 필드를 지워도 전부 통과한다. 부모가 DEBUG일 때 워커 파일에 DEBUG 줄이 남는지로
-  고정할 것. 출처가 root가 아니라 스테이지 로거인 것도 같이 볼 것.
+  **자리가 아직 맞지 않는다.** `counted`는 순수 텍스트 헬퍼인데 `common/pipeline/branch.py`
+  아래에 있어서, 파이프라인과 무관한 `writer.py`·`_compute.py`가 곁가지 모듈을 import해야
+  한다. `common/logging.py`가 더 맞아 보인다 — `log_indented`와 같은 「실행이 쓰는 줄」
+  범주이고, 세 소비자 모두 로깅한다. 옮기면 셋이 하나가 되고 위의 `noun` 항목도 같이 싸진다.
 
-- **`completed = num_stages - len(failed)`가 모든 스테이지가 결과를 냈다고 가정한다.**
-  지금 `imap`에서는 참이고, §1순위의 세 번째 상태(재사용·미도달)가 들어오면 깨진다.
+  `_compute.py`의 것은 개수가 아니라 `in_process`로 복수형을 정하므로 그대로는 안 바뀐다.
+
+- **레벨의 출처가 root가 아니라 스테이지 로거다.** `run_all`이
+  `logging.getLogger(stages.name).getEffectiveLevel()`을 읽어 워커의 **root**에 건다. 보통은
+  스테이지 로거에 레벨이 없어 root까지 올라가므로 같은 값이지만, 어긋나면 양쪽으로 샌다 —
+  스테이지 로거만 DEBUG면 다른 라이브러리의 DEBUG까지 워커 파일에 들어오고, 스테이지 로거만
+  WARNING이면 워커 파일이 경고만 든 껍데기가 된다(실측: INFO면 4줄, WARNING이면 1줄).
+  특정 로거의 레벨을 전역 로거에 적용하는 것이 맞는지 정할 것.
+
+  **전달 경로 자체는 닫혔다.** `test_the_level_the_parent_runs_at_reaches_the_worker_files`가
+  `run_all` → `SharedContext` → 워커 → 파일 전체를 박고,
+  `test_a_starting_worker_takes_the_level_the_parent_was_at`가 도착 쪽을 따로 박는다. 둘 다
+  되돌리면 실패한다.
+
+
+## 열린 것 — 재사용 구현 뒤에 남긴 판단
+
+- **`RangeDocument`가 같은 파트를 두 번 읽는다.** `__enter__`의 판정(`_read_valid`)과
+  `__exit__`의 접기가 같은 파일을 각각 읽고 파싱한다. 실측 121 시퀀스 × 2000 프레임
+  (16.2 MB)에서 554 ms + 602 ms = **1.16 s**. 전부 재사용하는 실행에서는 그것이 실행 전체다.
+
+  **고치지 않기로 했다.** 파싱한 `SequenceRange`를 들고 있으면 되지만 `RangeDocument`는
+  워커로 pickle되므로 121 × 2000개 `FrameRange`가 워커마다 실려 간다. 막으려면
+  `__getstate__`가 필요하고, 그것은 「워커가 나중에 그 필드를 쓰게 되면 조용히 깨지는」
+  구조다. 지금 `_reused`는 이름 121개짜리 `frozenset`이라 pickle이 사실상 공짜다.
+  1.16 s와 맞바꿀 만한 거래가 아니다.
+
+- **`if_frames_exist="error"`가 시퀀스마다 뒤늦게 터진다.** 폴더 존재는 워커 안에서
+  `StagedDirectory(overwrite=False)`가 알린다. 500개 중 300번째에 폴더가 있으면 299개를
+  계산한 뒤 실패한다. 앞에서 막으려면 `FrameTree`가 `selected`를 알아야 하는데
+  (`RangeDocument`는 이미 받는다), 그것은 **1-b**가 어차피 필요로 하는 것이라 함께 한다.
+
+- **`_window`가 창마다 버퍼 dict를 통째로 다시 짓는다.** O(창 크기). 창 1 → 512에서
+  1.39 → 29.41 µs이고, 같은 프레임의 필터링이 ~3000 µs이므로 **0.05%**다. 창이 수백에
+  이르는 설정이 실제로 쓰이면 다시 볼 것.
+
 
 ## 열린 것 — `TreeConfig`를 (2)·(3)이 쓰게 하려면
 
@@ -328,6 +359,11 @@ force          4     3, 4, 5 → acceleration 4
 문서가 없거나 못 쓴 상태로 파트만 남으면 판정 근거가 사라지므로, 파트에 최소한을 심을지
 정해야 한다.
 
+> **구현됨.** 아래는 설계 논의의 기록이다. 실제 형태는 `RangeDocument`와 `FrameTree`, 그리고
+> `target.if_frames_exist` / `if_ranges_exist` / `if_sources_gone` 세 키에 있다. 확정된 것:
+> 명단은 **데이터셋 전체**이고 `selected`가 이번 실행이 받은 것, 접기는 명단과 `settings`로
+> 거르며, `reuse`는 **아무 파트도 지우지 않는다**. 프레임 캐시의 재사용만 E8을 기다린다.
+
 **곁가지 간 합의 — 이쪽이 더 크다.** 메인 스트림을 건너뛰려면 **모든 곁가지가 "이 시퀀스는
 필요 없다"고 동의**해야 한다. 프레임 캐시는 있는데 파트가 없으면 필터링을 건너뛸 수 없다 —
 범위를 잴 프레임이 손에 없다.
@@ -337,10 +373,10 @@ force          4     3, 4, 5 → acceleration 4
 필터링을 시작하기 **전에** 끝나야 한다 — `SideBranch`에 `needs(source) -> bool` 정도의
 능력이 붙는다. 이것이 플래그 하나로는 안 되는 이유다.
 
-**형제 사이의 계약은 이미 하나 생겼다.** `Reverting`(닫기에 실패한 형제가 있으면 깨끗이
-닫힌 형제가 자기 출력을 되돌린다)이 「곁가지들이 한 시퀀스에 대해 함께 성공하거나 함께
-실패한다」의 절반이다. `needs()`는 그 반대편 — 함께 **시작하지 않는다** — 이므로, 둘을 한
-프로토콜로 볼 수 있는지 설계할 때 확인할 것.
+**확인했고, 한 프로토콜이 아니다.** `Reverting`은 「실패했을 때 함께 물러난다」이고
+`get_hook -> Hook | None`은 「결정에 따라 애초에 참여하지 않는다」다. 실패와 결정은 다른 축이라
+섞으면 둘 다 흐려진다. `needs()`를 따로 두지 않고 `get_hook`의 반환에 접은 이유도 같다 —
+판정과 사용이 두 번 일어나면 어긋날 수 있다.
 
 ## 아끼는 것은 계산이 아니라 I/O다
 
@@ -455,8 +491,9 @@ total   = len(sequence_names)
 로그의 「N of M done (a failed, b reused)」와 **같은 어휘**를 쓰는 것이 요점이다. 두
 숫자가 서로 다른 질문에 답한다는 점도 그대로다 — `IncompleteRunError.failed`는
 「무엇이 끝까지 가지 못했나」, `Coverage.skipped`는 「무엇의 범위가 문서에 없나」이고,
-프레임 writer의 커밋 단계에서만 실패한 시퀀스는 미터가 먼저 닫히므로 **파트를 남긴 채
-실패**한다(`ExitStack`이 역순으로 닫는 결과이며, 실측으로 확인했다).
+프레임 writer의 커밋 단계에서만 실패한 시퀀스는 **파트를 남기지 않는다** — P2가 `Reverting`을
+붙여, 닫기에 실패한 형제가 있으면 깨끗이 닫힌 형제가 자기 출력을 되돌린다. (1차 기록은 미터가
+먼저 닫혀 파트가 남는다는 것이었고, 실측으로 확인했으나 지금은 거짓이다.)
 
 **선행 조건이 하나 있다.** 지금 `RangeDocument.__enter__`는 파트를 무조건 전부 지운다:
 
