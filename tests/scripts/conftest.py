@@ -8,6 +8,8 @@ import pytest
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import save_phase_bin
 
+from scripts.data._process import LAST_SEARCH
+
 # `preprocess` reads this at import, and normally takes it from `.env`. Setting it
 # here keeps the tests runnable in a clone that has not generated one yet.
 CONFIGS_ROOT = str(Path(__file__).resolve().parents[2] / "configs")
@@ -17,6 +19,12 @@ PIXEL_SIZE = 1.5e-7
 HEIGHT_SCALE = 2.0e-7
 SEQUENCES = 3
 FRAMES = 4
+
+
+@pytest.fixture(autouse=True)
+def _forget_the_last_search() -> None:
+    """Start every test with no search held, whatever the one before it left."""
+    LAST_SEARCH.clear()
 
 
 @pytest.fixture()

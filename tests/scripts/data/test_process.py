@@ -14,6 +14,7 @@ from iivs.dhm.data.phase import (
     PhaseUnit,
     read_phase_bin_header,
     save_phase_bin,
+    search_phase_bin_folders,
 )
 from omegaconf import OmegaConf
 
@@ -174,6 +175,62 @@ def test_a_sequence_missing_a_frame_can_be_excluded_rather_than_fixed(phase_tree
 
     assert len(sources) == SEQUENCES - 1
     assert len(contents) == SEQUENCES  # the excluded one is still in the dataset
+
+
+def test_the_root_is_walked_once_however_many_runs_ask(phase_tree, monkeypatch):
+    # A sweep runs every job in one process and only the filter differs between
+    # them, so the walk that opens every sequence would otherwise be paid once
+    # per filter. Counted with a spy rather than compared: a cache that never
+    # hit would hand back the same answer and pass on the result alone.
+    walks = []
+
+    def spy(*args, **kwargs):
+        walks.append(args)
+        return search_phase_bin_folders(*args, **kwargs)
+
+    monkeypatch.setattr("scripts.data._process.search_phase_bin_folders", spy)
+
+    first, first_contents = search_sources(SourceConfig(root=str(phase_tree)))
+    second, second_contents = search_sources(SourceConfig(root=str(phase_tree)))
+
+    assert len(walks) == 1
+    assert [source.root for source in second] == [source.root for source in first]
+    assert second_contents == first_contents
+
+
+def test_a_source_asking_for_something_else_is_walked_again(phase_tree, monkeypatch):
+    # `include` is part of what makes one search differ from another, and only
+    # the newest is held. Reusing across the change would hand a run the very
+    # sequences it asked to leave out.
+    walks = []
+
+    def spy(*args, **kwargs):
+        walks.append(args)
+        return search_phase_bin_folders(*args, **kwargs)
+
+    monkeypatch.setattr("scripts.data._process.search_phase_bin_folders", spy)
+
+    search_sources(SourceConfig(root=str(phase_tree)))
+    taken, contents = search_sources(
+        SourceConfig(root=str(phase_tree), include=["TL_00"])
+    )
+
+    assert len(walks) == 2
+    assert [source.root.parents[2].name for source in taken] == ["TL_00"]
+    assert len(contents) == SEQUENCES  # the ones left out are still the dataset
+
+
+def test_what_a_run_does_with_its_own_answer_stays_its_own(phase_tree):
+    # The held answer is handed out as a fresh list and dict, so a job that
+    # reorders or adds to what it was given cannot leave the next one short.
+    sources, contents = search_sources(SourceConfig(root=str(phase_tree)))
+    sources.clear()
+    contents.clear()
+
+    again, again_contents = search_sources(SourceConfig(root=str(phase_tree)))
+
+    assert len(again) == SEQUENCES
+    assert sorted(again_contents) == [f"TL_{index:02d}" for index in range(SEQUENCES)]
 
 
 def _short(phase_tree: Path, name: str, keep: int) -> None:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 __all__ = (
+    "LAST_SEARCH",
+    "SearchResult",
     "SourceConfig",
     "TargetConfig",
     "TreeConfig",
@@ -15,7 +17,7 @@ __all__ = (
 )
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, ClassVar, Final
 
@@ -440,34 +442,32 @@ def _log_short(
     )
 
 
-def search_sources(
-    config: SourceConfig,
-) -> tuple[list[PhaseFileFolder], dict[str, tuple[str, ...]]]:
-    """Find the sequences a run reads, narrowed by what it was told to take.
+# One folder per sequence taken, against the contents of the dataset they came from.
+type SearchResult = tuple[list[PhaseFileFolder], dict[str, tuple[str, ...]]]
 
-    Every sequence taken is checked for a missing frame before any of them is
-    run, since a gap is a fault in the dataset rather than in one item of work.
-    A gap otherwise opens as an ordinary shorter sequence, and what is written
-    back out is numbered without one, so nothing downstream can tell.
+# The newest search, held for the next job of a sweep to take.
+LAST_SEARCH: dict[tuple[object, ...], SearchResult] = {}
 
-    Nothing inside a time-lapse is descended into. Opening one lists its frames
-    already, and the walk has no reason to list them a second time looking for
-    a time-lapse that cannot be nested there.
 
-    Returns:
-        One folder per sequence taken, each set to give its frames in radians,
-        and a contents of every sequence the root holds against the frames the
-        run would measure it over. The contents covers what the selection left
-        out too, which is what lets a document say it describes part of a
-        dataset rather than the whole of a smaller one, and what an output with
-        no sequence behind it is measured against.
+def _source_key(config: SourceConfig) -> tuple[object, ...]:
+    """Return what makes two searches the same search.
 
-    Raises:
-        ValueError: If the root holds no sequence at all, if the selection
-            leaves none of the ones it holds, or if a sequence taken is missing
-            a frame. The first two are told apart, since they are fixed
-            differently.
+    Every field is read rather than a chosen few, so a setting added later
+    cannot quietly reuse an answer it would have changed. The working directory
+    joins them because a relative `root` or `include` names a different folder
+    once `hydra.job.chdir` has moved it.
     """
+
+    def frozen(value: object) -> object:
+        return tuple(value) if isinstance(value, list) else value
+
+    settings = (frozen(getattr(config, field.name)) for field in fields(config))
+
+    return (str(Path.cwd()), *settings)
+
+
+def _search_sources(config: SourceConfig) -> SearchResult:
+    """Walk the root, open every sequence it holds, and keep the ones taken."""
     subpath = config.resolve_subpath()
 
     folders = search_phase_bin_folders(
@@ -528,6 +528,51 @@ def search_sources(
             raise ValueError(msg)
 
     return taken, contents
+
+
+def search_sources(config: SourceConfig) -> SearchResult:
+    """Find the sequences a run reads, narrowed by what it was told to take.
+
+    Every sequence taken is checked for a missing frame before any of them is
+    run, since a gap is a fault in the dataset rather than in one item of work.
+    A gap otherwise opens as an ordinary shorter sequence, and what is written
+    back out is numbered without one, so nothing downstream can tell.
+
+    Nothing inside a time-lapse is descended into. Opening one lists its frames
+    already, and the walk has no reason to list them a second time looking for
+    a time-lapse that cannot be nested there.
+
+    The answer is held for the next call asking the same thing, since a sweep
+    runs every job in one process and only the filter differs between them.
+    Only the newest is held, so a call asking for something else pays what it
+    would have paid anyway. A sweep cannot write frames at all, which is what
+    leaves the answer standing for as long as one runs.
+
+    Returns:
+        One folder per sequence taken, each set to give its frames in radians,
+        and a contents of every sequence the root holds against the frames the
+        run would measure it over. The contents covers what the selection left
+        out too, which is what lets a document say it describes part of a
+        dataset rather than the whole of a smaller one, and what an output with
+        no sequence behind it is measured against. Both are the caller's own to
+        reorder or add to; the folders inside them are shared and read-only.
+
+    Raises:
+        ValueError: If the root holds no sequence at all, if the selection
+            leaves none of the ones it holds, or if a sequence taken is missing
+            a frame. The first two are told apart, since they are fixed
+            differently.
+    """
+    key = _source_key(config)
+
+    if (found := LAST_SEARCH.get(key)) is None:
+        found = _search_sources(config)
+        LAST_SEARCH.clear()
+        LAST_SEARCH[key] = found
+
+    sources, contents = found
+
+    return list(sources), dict(contents)
 
 
 def build_sequences(
