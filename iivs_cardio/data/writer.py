@@ -1,20 +1,25 @@
 from __future__ import annotations
 
-__all__ = ("KoalaFrameWriter",)
+__all__ = ("RECORD_FILE", "KoalaFrameWriter")
 
+import json
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Final, Self
 
 from iivs.dhm.data.koala import koala_frame_name
 from kaparoo.filesystem import StagedDirectory
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
     from types import TracebackType
 
     from kaparoo.filesystem.types import StrPath
 
     from iivs_cardio.common.pipeline import Step
+
+# What a written folder says about itself, filed inside it. The readers select
+# frames by extension, so a name of another kind sits there unnoticed.
+RECORD_FILE: Final = "source.json"
 
 
 class KoalaFrameWriter[T]:
@@ -33,6 +38,13 @@ class KoalaFrameWriter[T]:
     Nothing is moved into place until the writer closes cleanly. Closing after
     an error, or with no frame written at all, leaves the destination as it was.
 
+    Renumbering is what makes the folder readable again, and it is also what
+    loses the source. Given a `record`, the writer files what it was told plus
+    the source name of every frame it took, in the order it took them, so the
+    nth frame here can be traced back to the one it was made from. It goes
+    inside the folder, which is what makes it appear and disappear with the
+    frames rather than outliving them.
+
     Type Parameters:
         T: The type of one frame, as `save` expects it.
 
@@ -43,6 +55,9 @@ class KoalaFrameWriter[T]:
         ext: The extension a frame is written with.
         overwrite: Whether an existing folder may be replaced. Defaults to
             False.
+        record: What the folder should say about itself, beside the source
+            names the writer collects. Defaults to `None`, which files nothing
+            and asks nothing of the steps.
 
     Raises:
         FileExistsError: If the destination is there and `overwrite` is not set.
@@ -56,12 +71,15 @@ class KoalaFrameWriter[T]:
         stem: str,
         ext: str,
         overwrite: bool = False,
+        record: Mapping[str, object] | None = None,
     ) -> None:
         self._made = [path for path in Path(root).parents if not path.is_dir()]
         self._root = StagedDirectory(root, overwrite=overwrite, make_parents=True)
         self._save = save
         self._stem = stem
         self._ext = ext
+        self._record = record
+        self._taken: list[str] = []
         self._written = -1
         self._source = -1
         self._committed = False
@@ -74,7 +92,9 @@ class KoalaFrameWriter[T]:
 
         Raises:
             ValueError: If a frame does not follow the one before it at the
-                source, since the numbering here would close the gap.
+                source, since the numbering here would close the gap, or if a
+                `record` was asked for and the step says nothing about where
+                its frame came from.
         """
         if step.value is None:
             return
@@ -83,6 +103,9 @@ class KoalaFrameWriter[T]:
         if self._written >= 0 and step.index != last + 1:
             msg = f"frame {step.index} does not follow {last}: expected {last + 1}"
             raise ValueError(msg)
+
+        if self._record is not None:
+            self._taken.append(Path(str(step.require_extra())).name)
 
         name = koala_frame_name(self._written + 1, stem=self._stem, ext=self._ext)
         self._save(self._root.workdir / name, step.value)
@@ -114,6 +137,21 @@ class KoalaFrameWriter[T]:
         count = self._written + 1
 
         return f"wrote {count} frame{'s' if count != 1 else ''}"
+
+    def _file_record(self) -> None:
+        """Write what the folder says about itself, into the staged folder.
+
+        Into the staged folder rather than the committed one, so the move that
+        makes the frames visible makes this visible with them: a record written
+        afterwards could be missing from a folder that is otherwise finished,
+        and a reader has no way to tell that from one written without a record.
+        """
+        if self._record is None:
+            return
+
+        document = {**self._record, "frames": self._taken}
+        written = json.dumps(document, indent=2, allow_nan=False)
+        (self._root.workdir / RECORD_FILE).write_text(written, encoding="utf-8")
 
     def _abort(self) -> None:
         """Drop the staged folder, and the ones opening it brought into being.
@@ -171,6 +209,7 @@ class KoalaFrameWriter[T]:
             raise ValueError(msg)
 
         try:
+            self._file_record()
             self._root.commit()
         except BaseException:
             self._abort()

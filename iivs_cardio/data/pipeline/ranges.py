@@ -634,7 +634,7 @@ class RangeDocument:
 
     def __init__(
         self,
-        path: Path,
+        path: StrPath,
         source: str,
         contents: Mapping[str, Sequence[str]],
         settings: Mapping[str, object] | None = None,

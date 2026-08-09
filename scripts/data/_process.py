@@ -503,6 +503,11 @@ def build_branches(
         target_config.if_sources_gone, UNSOURCED_OUTPUT_POLICIES, "if_sources_gone"
     )
 
+    settings = {
+        "source": {"subpath": subpath, "frame_step": source_config.frame_step},
+        "filter": describe_filter_kernel(kernel_config),
+    }
+
     if target_config.save_frames:
         target_subpath = target_config.resolve_subpath(subpath)
         frame_policy = read_policy(
@@ -513,6 +518,7 @@ def build_branches(
                 output_root,
                 target_subpath,
                 contents,
+                settings,
                 if_frames_exist=frame_policy,
                 if_sources_gone=source_policy,
             )
@@ -521,10 +527,6 @@ def build_branches(
     if target_config.save_ranges:
         path = Path(output_root, target_config.range_file)
         source = source_config.root
-        settings = {
-            "source": {"subpath": subpath, "frame_step": source_config.frame_step},
-            "filter": describe_filter_kernel(kernel_config),
-        }
         range_policy = read_policy(
             target_config.if_ranges_exist, EXISTING_OUTPUT_POLICIES, "if_ranges_exist"
         )

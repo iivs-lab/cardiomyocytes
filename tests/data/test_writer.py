@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -7,12 +9,11 @@ import pytest
 from kaparoo.filesystem import StagedDirectory
 
 from iivs_cardio.common.pipeline import Step
-from iivs_cardio.data.writer import KoalaFrameWriter
+from iivs_cardio.data.writer import RECORD_FILE, KoalaFrameWriter
 from iivs_cardio.optical_flow.data.folder import OpticalFlowFolder, save_flow_npy
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
-    from pathlib import Path
 
     from numpy.typing import NDArray
 
@@ -308,3 +309,75 @@ def test_a_writer_counts_what_it_wrote_not_what_it_was_offered(tmp_path):
 
     assert writer.report() == "wrote 1 frame"
     assert _names(tmp_path / "out") == ["00000_frame.txt"]
+
+
+# ------------------------------ the record -------------------------------- #
+
+
+def _sourced(*names: str) -> list[Step[str, Path]]:
+    """Steps carrying where each frame came from, as a real stage does."""
+    return [Step(i, name, Path("a/b") / name) for i, name in enumerate(names)]
+
+
+def test_a_record_says_which_source_frame_each_written_one_came_from(tmp_path):
+    # Renumbering is what makes the folder readable again and what loses the
+    # source: at a stride, written frame 1 is the source's frame 2, and a phase
+    # header carries neither a time nor a name to recover that from.
+    dest = tmp_path / "cache"
+    writer = KoalaFrameWriter(
+        dest,
+        _save_text,
+        stem="frame",
+        ext="txt",
+        record={"settings": {"filter": {"kind": "identity"}}, "source": "plate/TL_00"},
+    )
+
+    _drive(writer, _sourced("00000_phase.bin", "00002_phase.bin", "00004_phase.bin"))
+
+    written = json.loads((dest / RECORD_FILE).read_text(encoding="utf-8"))
+    assert written == {
+        "settings": {"filter": {"kind": "identity"}},
+        "source": "plate/TL_00",
+        "frames": ["00000_phase.bin", "00002_phase.bin", "00004_phase.bin"],
+    }
+    assert RECORD_FILE in _names(dest)
+
+
+def test_a_writer_told_nothing_files_nothing_and_asks_nothing_of_a_step(tmp_path):
+    # Flow and metric writers have no record to file yet, and their steps may
+    # carry nothing about a source, so the collecting must not happen at all.
+    dest = tmp_path / "cache"
+
+    _write_all(dest, [Step(0, "a"), Step(1, "b")])
+
+    assert _names(dest) == ["00000_frame.txt", "00001_frame.txt"]
+
+
+def test_a_record_asked_for_over_steps_that_name_no_source_is_refused(tmp_path):
+    # Better here than a record whose `frames` is short by however many steps
+    # said nothing, which reads as a shorter acquisition.
+    dest = tmp_path / "cache"
+    writer = KoalaFrameWriter(
+        dest, _save_text, stem="frame", ext="txt", record={"source": "plate/TL_00"}
+    )
+
+    with pytest.raises(ValueError, match="holds nothing beside its value"), writer:
+        writer.write(Step(0, "a"))
+
+
+def test_the_record_lands_with_the_frames_or_not_at_all(tmp_path):
+    # Written into the staged folder, so the move that makes the frames visible
+    # makes it visible with them. A run that gave up leaves neither.
+    dest = tmp_path / "cache"
+    writer = KoalaFrameWriter(
+        dest,
+        _refuse_the_third,
+        stem="frame",
+        ext="txt",
+        record={"source": "plate/TL_00"},
+    )
+
+    with pytest.raises(RuntimeError, match="the disk gave up"):
+        _drive(writer, _sourced("a.bin", "b.bin", "c.bin"))
+
+    assert not dest.exists()

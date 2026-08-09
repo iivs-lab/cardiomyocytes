@@ -18,6 +18,7 @@ from iivs.dhm.data.phase import (
 
 from iivs_cardio.common.device import Device
 from iivs_cardio.data.pipeline import FrameTree, PhaseStageFactory, RangeDocument
+from iivs_cardio.data.writer import RECORD_FILE
 from scripts._compute import ComputeConfig, IncompleteRunError, run_all
 from scripts.data._filtering import parse_filter_config
 from scripts.data._process import (
@@ -429,6 +430,49 @@ def test_the_written_frames_are_always_in_radians(phase_tree, tmp_path):
 
     header = read_phase_bin_header(dest / "TL_00" / PHASE_FLOAT_BIN / "00000_phase.bin")
     assert header.unit is PhaseUnit.RADIANS
+
+
+def test_a_written_sequence_says_which_frames_it_was_made_from(phase_tree, tmp_path):
+    # A phase header holds no time and no source name, and the folder is
+    # renumbered from zero, so at a stride the cache's frame 1 is the source's
+    # frame 2 and nothing in the frames says so. (2) derives its time radius
+    # from the beat period, which it reads out of the source's `timestamps.txt`.
+    dest = tmp_path / "out"
+    source = SourceConfig(root=str(phase_tree), frame_step=2)
+    target = TargetConfig(
+        root=str(dest), subpath=FILTERED, save_frames=True, save_ranges=False
+    )
+    compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
+
+    run_all(build_phase_stages(source, target, name=STAGE, output_root=dest), compute)
+
+    folder = dest / "TL_00" / FILTERED
+    record = json.loads((folder / RECORD_FILE).read_text(encoding="utf-8"))
+
+    assert record["source"] == "TL_00"
+    assert record["settings"]["source"] == {
+        "subpath": PHASE_FLOAT_BIN,
+        "frame_step": 2,
+    }
+    kept = range(0, FRAMES, 2)
+    assert record["frames"] == [f"{index:05d}_phase.bin" for index in kept]
+    assert len(PhaseBinFolder(folder)) == len(record["frames"])
+
+
+def test_a_tree_told_no_settings_leaves_the_folder_saying_nothing(phase_tree, tmp_path):
+    # The record is what a caller asks for, so a tree built without one writes
+    # frames and no more. Flow and metric caches start here.
+    dest = tmp_path / "out"
+    _, contents = build_sequences(
+        SourceConfig(root=str(phase_tree)), parse_filter_config(None)
+    )
+    stages = _factory(phase_tree, FrameTree(dest, PHASE_FLOAT_BIN, contents))
+
+    with contextlib.suppress(Exception):
+        stages.run_stage(0, Device("cpu"))
+
+    assert not (dest / "TL_00" / PHASE_FLOAT_BIN / RECORD_FILE).exists()
+    assert (dest / "TL_00" / PHASE_FLOAT_BIN / "00000_phase.bin").exists()
 
 
 def test_a_source_in_metres_is_converted_rather_than_relabelled(phase_tree, tmp_path):

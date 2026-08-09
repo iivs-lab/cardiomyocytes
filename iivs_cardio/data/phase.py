@@ -16,6 +16,7 @@ from iivs_cardio.data.transforms.filtering import FilteredSequence
 from iivs_cardio.data.writer import KoalaFrameWriter
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
     from kaparoo.filesystem.types import StrPath
@@ -65,6 +66,7 @@ def phase_frame_writer(
     height_scale: float,
     unit: PhaseUnit = PhaseUnit.RADIANS,
     overwrite: bool = False,
+    record: Mapping[str, object] | None = None,
 ) -> KoalaFrameWriter[Tensor]:
     """Build a writer that saves frames as a phase folder under `dest`.
 
@@ -73,6 +75,10 @@ def phase_frame_writer(
     beside them. A non finite value is refused rather than written, since
     what is written here is what a later run will take as its source.
 
+    A phase header carries no time and no source name, and the folder is
+    renumbered from zero, so nothing in the frames themselves says which
+    acquisition they came from. That is what `record` is for.
+
     Args:
         dest: The folder the finished frames go to.
         pixel_size: The size one pixel covers, stamped into each frame.
@@ -80,6 +86,8 @@ def phase_frame_writer(
         unit: The meaning the values carry. Defaults to `PhaseUnit.RADIANS`.
         overwrite: Whether an existing folder may be replaced. Defaults to
             `False`.
+        record: What the folder should say about itself. Defaults to `None`,
+            which files nothing.
 
     Returns:
         A writer ready to be registered as a hook.
@@ -101,4 +109,5 @@ def phase_frame_writer(
         stem=PhaseBinFolder.FILE_STEM,
         ext=PhaseBinFolder.FILE_EXT,
         overwrite=overwrite,
+        record=record,
     )

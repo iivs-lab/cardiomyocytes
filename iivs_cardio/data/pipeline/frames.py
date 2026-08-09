@@ -60,6 +60,11 @@ class FrameTree:
             with no sequence behind it from one this run simply did not take.
             Given rather than defaulted, since an empty one leaves every folder
             here unsourced and `if_sources_gone` would then take the whole tree.
+        settings: The settings that shaped the frames, filed inside each
+            sequence's folder beside the source names its writer collected. A
+            phase header carries no time and no source name, so without this a
+            written sequence cannot be traced back to the acquisition it came
+            from. Defaults to `None`, which files nothing.
         if_frames_exist: The policy for a sequence that already has a folder
             here. `"reuse"` is refused until a tree can be added to. Defaults
             to `"error"`.
@@ -73,6 +78,7 @@ class FrameTree:
     root: StrPath
     subpath: str
     contents: Mapping[str, Sequence[str]]
+    settings: Mapping[str, object] | None = None
     if_frames_exist: ExistingOutputPolicy = field(default="error", kw_only=True)
     if_sources_gone: UnsourcedOutputPolicy = field(default="keep", kw_only=True)
     _dropped: list[str] = field(default_factory=list, init=False, repr=False)
@@ -81,9 +87,19 @@ class FrameTree:
         read_policy(self.if_frames_exist, FRAME_POLICIES, "if_frames_exist")
 
     def get_hook(self, source: PhaseFilteredSequence) -> KoalaFrameWriter[Tensor]:
-        """Return the writer for `source`, placed where the source sits."""
+        """Return the writer for `source`, placed where the source sits.
+
+        The record the writer files names the sequence as the dataset does, so
+        a folder read on its own says which acquisition it came from. The root
+        it sat under is left out: an absolute path does not survive the move
+        from this machine to the server, and a wrong one is worse than none.
+        """
         origin = source.origin
         header = origin.header
+
+        record = None
+        if self.settings is not None:
+            record = {"settings": dict(self.settings), "source": source.name}
 
         return phase_frame_writer(
             Path(self.root, source.name, self.subpath),
@@ -91,6 +107,7 @@ class FrameTree:
             height_scale=header.height_scale,
             unit=unwrap_or_default(origin.target_unit, header.unit),
             overwrite=self.if_frames_exist == "overwrite",
+            record=record,
         )
 
     def list_sequences(self) -> list[str]:
