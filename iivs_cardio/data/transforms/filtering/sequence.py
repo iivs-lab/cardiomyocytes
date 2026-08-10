@@ -23,7 +23,7 @@ type NumPyRealDType = np.floating | np.integer
 
 
 def frame_indices(
-    total: int, *, start: int = 0, step: int = 1, limit: int | None = None
+    total: int, *, start: int = 0, step: int = 1, count: int | None = None
 ) -> range:
     """Return which of `total` source frames a run takes, in order.
 
@@ -33,7 +33,7 @@ def frame_indices(
     by matching one against the other, so a difference between them shows up as
     every output being stale rather than as a wrong index.
 
-    A `start` past the end takes nothing, and a `limit` past what is left takes
+    A `start` past the end takes nothing, and a `count` past what is left takes
     what is left. Neither is refused here, since how short a sequence is
     allowed to come is the caller's policy.
 
@@ -41,14 +41,14 @@ def frame_indices(
         total: How many frames the source holds.
         start: The first source frame to take. Defaults to 0.
         step: The stride to take them at. Defaults to 1.
-        limit: How many to take once the stride has been applied. Defaults to
+        count: How many to take once the stride has been applied. Defaults to
             `None`, which takes them all.
 
     Returns:
         The source positions to read, ascending.
 
     Raises:
-        ValueError: If `start` is negative, or `step` or `limit` is below one.
+        ValueError: If `start` is negative, or `step` or `count` is below one.
     """
     if start < 0:
         msg = f"invalid frame start {start}: expected 0 or more"
@@ -58,11 +58,11 @@ def frame_indices(
         msg = f"invalid frame step {step}: expected 1 or more"
         raise ValueError(msg)
 
-    if limit is not None and limit < 1:
-        msg = f"invalid frame count {limit}: expected 1 or more, or None"
+    if count is not None and count < 1:
+        msg = f"invalid frame count {count}: expected 1 or more, or None"
         raise ValueError(msg)
 
-    stop = total if limit is None else min(total, start + limit * step)
+    stop = total if count is None else min(total, start + count * step)
 
     return range(start, stop, step)
 
@@ -97,12 +97,12 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
         kernel: The reduction to apply over each window.
         start: The first source frame to take. Defaults to 0.
         step: The stride to read the source at. Defaults to 1.
-        limit: How many frames to take once the stride has been applied.
+        count: How many frames to take once the stride has been applied.
             Defaults to `None`, which takes them all.
         device: The device the frames are filtered on. Defaults to `"cpu"`.
 
     Raises:
-        ValueError: If `start` is negative, or `step` or `limit` is below one.
+        ValueError: If `start` is negative, or `step` or `count` is below one.
     """
 
     def __init__(
@@ -112,13 +112,13 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
         *,
         start: int = 0,
         step: int = 1,
-        limit: int | None = None,
+        count: int | None = None,
         device: DeviceLike = "cpu",
     ) -> None:
         self._origin = cast("DataSequence[NDArray[T], M]", source)
 
         whole = len(self._origin)
-        indices = frame_indices(whole, start=start, step=step, limit=limit)
+        indices = frame_indices(whole, start=start, step=step, count=count)
 
         self._source = self._origin
         if indices != range(whole):
@@ -163,7 +163,7 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
         *,
         start: int = 0,
         step: int = 1,
-        limit: int | None = None,
+        count: int | None = None,
         device: DeviceLike = "cpu",
     ) -> FilteredSequence[S, M, T]:
         """Build a filtered view from a kernel's settings rather than a kernel.
@@ -172,7 +172,7 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
             The view, with a kernel built from `config`.
         """
         return cls(
-            source, config.build(), start=start, step=step, limit=limit, device=device
+            source, config.build(), start=start, step=step, count=count, device=device
         )
 
     @property

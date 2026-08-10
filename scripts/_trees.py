@@ -2,7 +2,7 @@ from __future__ import annotations
 
 __all__ = (
     "SELECTION_LIMIT",
-    "SourceConfig",
+    "SelectConfig",
     "TreeConfig",
     "log_source_config",
 )
@@ -33,9 +33,14 @@ class TreeConfig:
     """A tree of sequences, and where inside one of them the frames sit.
 
     What a run reads and what it writes are the same shape, so the pair of
-    settings that says where a tree is lives here once. A subclass sets
+    settings that says where a tree is lives here once. A subclass may set
     `DEFAULT_SUBPATH` to the layout its own end of a stage uses, which is what
     an unset `subpath` comes to when the caller offers nothing to follow.
+
+    `DEFAULT_SUBPATH` is the one thing here that assumes a modality. It sits on
+    the base while phase is the only one read, and moves to whatever names the
+    reader when a second arrives: a hologram search takes no `subpath` at all,
+    so the layout is the reader's to know rather than the tree's.
 
     Attributes:
         root: The folder the sequences sit under.
@@ -44,7 +49,7 @@ class TreeConfig:
             this end's own layout when it offers nothing.
     """
 
-    DEFAULT_SUBPATH: ClassVar[str]
+    DEFAULT_SUBPATH: ClassVar[str] = PHASE_FLOAT_BIN
 
     root: str = MISSING
     subpath: str | None = None
@@ -76,13 +81,15 @@ class TreeConfig:
 
 
 @dataclass
-class SourceConfig(TreeConfig):
-    """Which sequences a run reads, and how much of each.
+class SelectConfig:
+    """Which sequences a run takes, and how much of each.
+
+    Held apart from the tree they are taken from, since a run reading two trees
+    takes the same sequences and the same frames from both. Two copies of this
+    could disagree, and a run that paired frames which do not correspond would
+    compute on them quietly.
 
     Attributes:
-        root: The dataset folder to search for sequences.
-        subpath: The path to a sequence's frames inside its time lapse. Defaults
-            to `None`, which takes the usual one.
         include: The sequences to take, as names or as a path to a file listing
             them. Defaults to `None`, which takes all of them.
         exclude: The same, for sequences to leave out. Defaults to `None`.
@@ -97,8 +104,6 @@ class SourceConfig(TreeConfig):
             the log. Defaults to `"take"`.
     """
 
-    DEFAULT_SUBPATH: ClassVar[str] = PHASE_FLOAT_BIN
-
     include: list[str] | str | None = None
     exclude: list[str] | str | None = None
     frame_start: int = 0
@@ -112,7 +117,7 @@ class SourceConfig(TreeConfig):
             total,
             start=self.frame_start,
             step=self.frame_step,
-            limit=self.frame_count,
+            count=self.frame_count,
         )
 
 
@@ -143,31 +148,33 @@ def _log_selection(logger: Logger, verb: str, value: list[str] | str) -> None:
         log_indented(logger, "%s", item, depth=2)
 
 
-def log_source_config(source_config: SourceConfig, logger: Logger) -> None:
+def log_source_config(
+    source_config: TreeConfig, select_config: SelectConfig, logger: Logger
+) -> None:
     """Log what a run reads, naming only the settings that were moved."""
     log_indented(logger, "source: %s", source_config.root, depth=0)
 
     log_indented(logger, "reading <sequence>/%s", source_config.resolve_subpath())
 
-    _log_frames(source_config, logger)
+    _log_frames(select_config, logger)
 
-    if source_config.include:
-        _log_selection(logger, "including", source_config.include)
+    if select_config.include:
+        _log_selection(logger, "including", select_config.include)
 
-    if source_config.exclude:
-        _log_selection(logger, "excluding", source_config.exclude)
+    if select_config.exclude:
+        _log_selection(logger, "excluding", select_config.exclude)
 
 
-def _log_frames(source_config: SourceConfig, logger: Logger) -> None:
+def _log_frames(select_config: SelectConfig, logger: Logger) -> None:
     """Log which source frames a run takes, unless it takes every one.
 
     Shown as the first few positions rather than as the three settings, since
     what a reader checks is whether the frames are the ones they meant and the
     settings are what they already wrote.
     """
-    start = source_config.frame_start
-    step = source_config.frame_step
-    count = source_config.frame_count
+    start = select_config.frame_start
+    step = select_config.frame_step
+    count = select_config.frame_count
     if (start, step, count) == (0, 1, None):
         return
 
@@ -177,5 +184,5 @@ def _log_frames(source_config: SourceConfig, logger: Logger) -> None:
     held = "" if count is None else f" (at most {quantify(count, 'frame')})"
     log_indented(logger, "reading frames %s%s%s", listed, tail, held)
 
-    if count is not None and source_config.if_frames_short == "error":
+    if count is not None and select_config.if_frames_short == "error":
         log_indented(logger, "refusing a sequence that cannot supply them")

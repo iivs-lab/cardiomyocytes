@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pytest
@@ -9,6 +10,10 @@ from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import save_phase_bin
 
 from scripts._phase import LAST_SEARCH
+from scripts._trees import SelectConfig, TreeConfig
+
+if TYPE_CHECKING:
+    from kaparoo.filesystem.types import StrPath
 
 # `preprocess` reads this at import, and normally takes it from `.env`. Setting it
 # here keeps the tests runnable in a clone that has not generated one yet.
@@ -19,6 +24,18 @@ PIXEL_SIZE = 1.5e-7
 HEIGHT_SCALE = 2.0e-7
 SEQUENCES = 3
 FRAMES = 4
+
+
+def source_configs(
+    root: StrPath, subpath: str | None = None, **select: Any
+) -> tuple[TreeConfig, SelectConfig]:
+    """Return the two configs a run reads a tree by, as one call.
+
+    Every reader takes both, so the pair travels together in a test the way it
+    does in a config file. Star it into the call, as the readers take them as
+    two arguments: `search_sources(*source_configs(root))`.
+    """
+    return TreeConfig(root=str(root), subpath=subpath), SelectConfig(**select)
 
 
 @pytest.fixture(autouse=True)

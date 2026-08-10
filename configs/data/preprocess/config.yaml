@@ -8,6 +8,8 @@ defaults:
 source:
   root: ??? # the folder to search for phase .bin sequences
   subpath: null # a sequence's path in its time-lapse; null takes Koala's Phase/Float/Bin
+
+select:
   include: null # a file of subpaths, or the subpaths as a list; null takes all
   exclude: null # same, for sequences to skip
   frame_start: 0 # the first source frame to take

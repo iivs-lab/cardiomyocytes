@@ -405,6 +405,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that computed nothing the pool's bar reached the end and closed while four
   more results were still being logged beneath it. The bar now trails a slow
   item, since `imap` returns in order, and catches up by the end.
+- `SourceConfig` is `TreeConfig` (`root` + `subpath`) and `SelectConfig`
+  (`include` / `exclude` / `frame_*` / `if_frames_short`), and the preprocess
+  config carries both as `source:` and `select:`. A stage reading two trees
+  takes the same sequences and the same frames from each, so a per-tree copy of
+  the selection could disagree and pair frames that do not correspond. Every
+  reader takes the two as separate arguments. `TargetConfig` still inherits
+  `TreeConfig`, and `DEFAULT_SUBPATH` moved to that base: it is the one setting
+  there that assumes a modality, and it moves to whatever names the reader once
+  a second one is read.
+- `frame_indices` takes `count` rather than `limit`, matching the
+  `select.frame_count` key that feeds it and the refusal it already wrote
+  (`invalid frame count`). `FilteredSequence` and `PhaseFilteredSequence` follow.
 - The range document, its parts, and a written folder's record are all written
   without `indent=2`. The whitespace was a large share of a file that carries an
   entry per frame, and nothing reads these by eye.

@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 from scripts._compute import ComputeConfig, WorkerLogFolder, run_all
 from scripts._hydra import apply_schema, is_multirun, output_directory
-from scripts._trees import SourceConfig
+from scripts._trees import SelectConfig, TreeConfig
 from scripts.data._process import TargetConfig, build_phase_stages
 
 if TYPE_CHECKING:
@@ -36,7 +36,8 @@ def main(cfg: DictConfig) -> None:
         IncompleteRunError: If any sequence failed.
     """
     compute_config = apply_schema(ComputeConfig, cfg.compute)
-    source_config = apply_schema(SourceConfig, cfg.source)
+    source_config = apply_schema(TreeConfig, cfg.source)
+    select_config = apply_schema(SelectConfig, cfg.select)
     target_config = apply_schema(TargetConfig, cfg.target)
     filter_config: DictConfig | None = cfg.get("filter")
 
@@ -48,6 +49,7 @@ def main(cfg: DictConfig) -> None:
 
     stages = build_phase_stages(
         source_config,
+        select_config,
         target_config,
         filter_config,
         output_root=log_folder.root,

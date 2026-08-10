@@ -20,7 +20,7 @@ from iivs_cardio.data.phase import PhaseFilteredSequence
 
 if TYPE_CHECKING:
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
-    from scripts._trees import SourceConfig
+    from scripts._trees import SelectConfig, TreeConfig
 
 
 # One folder per sequence taken, against the contents of the dataset they came from.
@@ -30,7 +30,9 @@ type SearchResult = tuple[list[PhaseFileFolder], dict[str, tuple[str, ...]]]
 LAST_SEARCH: dict[tuple[object, ...], SearchResult] = {}
 
 
-def _source_key(config: SourceConfig) -> tuple[object, ...]:
+def _source_key(
+    source_config: TreeConfig, select_config: SelectConfig
+) -> tuple[object, ...]:
     """Return what makes two searches the same search.
 
     Every field is read rather than a chosen few, so a setting added later
@@ -42,37 +44,44 @@ def _source_key(config: SourceConfig) -> tuple[object, ...]:
     def frozen(value: object) -> object:
         return tuple(value) if isinstance(value, list) else value
 
-    settings = (frozen(getattr(config, field.name)) for field in fields(config))
+    settings = (
+        frozen(getattr(config, field.name))
+        for config in (source_config, select_config)
+        for field in fields(config)
+    )
 
     return (str(Path.cwd()), *settings)
 
 
-def _search_sources(config: SourceConfig) -> SearchResult:
+def _search_sources(
+    source_config: TreeConfig, select_config: SelectConfig
+) -> SearchResult:
     """Walk the root, open every sequence it holds, and keep the ones taken."""
-    subpath = config.resolve_subpath()
+    root = source_config.root
+    subpath = source_config.resolve_subpath()
     holds_frames = contains(subpath, kind="dir")
 
     def descend(folder: Path) -> bool:
         return not holds_frames(folder)
 
-    folders = search_phase_bin_folders(config.root, subpath=subpath, descend=descend)
+    folders = search_phase_bin_folders(root, subpath=subpath, descend=descend)
 
     if (num_folders := len(folders)) == 0:
-        msg = f"no time-lapse holds a {subpath!r} folder: {config.root}"
+        msg = f"no time-lapse holds a {subpath!r} folder: {root}"
         raise ValueError(msg)
 
     def folder_subpath(folder: PhaseFileFolder) -> str:
-        return stringify_path(folder.root, after=config.root, before=subpath)
+        return stringify_path(folder.root, after=root, before=subpath)
 
     sources: list[PhaseFileFolder] = select(
         folders,
         key=folder_subpath,
-        include=config.include,
-        exclude=config.exclude,
+        include=select_config.include,
+        exclude=select_config.exclude,
     )
 
     if not sources:
-        msg = f"include/exclude left none of the {num_folders} sequences: {config.root}"
+        msg = f"include/exclude left none of the {num_folders} sequences: {root}"
         raise ValueError(msg)
 
     taken = []
@@ -87,23 +96,23 @@ def _search_sources(config: SourceConfig) -> SearchResult:
     contents = {
         folder_subpath(folder): tuple(
             folder.files[index].name
-            for index in config.frame_indices(len(folder.files))
+            for index in select_config.frame_indices(len(folder.files))
         )
         for folder in folders
     }
 
-    if config.frame_count is not None:
+    if select_config.frame_count is not None:
         policy = ensure_policy(
-            config.if_frames_short, SHORT_INPUT_POLICIES, "if_frames_short"
+            select_config.if_frames_short, SHORT_INPUT_POLICIES, "if_frames_short"
         )
         short = {
             name: len(contents[name])
             for name in map(folder_subpath, sources)
-            if len(contents[name]) < config.frame_count
+            if len(contents[name]) < select_config.frame_count
         }
         if short and policy == "error":
             name, held = next(iter(short.items()))
-            asked = quantify(config.frame_count, "frame")
+            asked = quantify(select_config.frame_count, "frame")
             short_of = f"short of the {asked} asked for"
             msg = f"{name}: {held} frames after the stride, {short_of}"
             raise ValueError(msg)
@@ -111,7 +120,9 @@ def _search_sources(config: SourceConfig) -> SearchResult:
     return taken, contents
 
 
-def search_sources(config: SourceConfig) -> SearchResult:
+def search_sources(
+    source_config: TreeConfig, select_config: SelectConfig
+) -> SearchResult:
     """Find the sequences a run reads, narrowed by what it was told to take.
 
     Every sequence taken is checked for a missing frame before any of them is
@@ -144,10 +155,10 @@ def search_sources(config: SourceConfig) -> SearchResult:
             a frame. The first two are told apart, since they are fixed
             differently.
     """
-    key = _source_key(config)
+    key = _source_key(source_config, select_config)
 
     if (found := LAST_SEARCH.get(key)) is None:
-        found = _search_sources(config)
+        found = _search_sources(source_config, select_config)
         LAST_SEARCH.clear()
         LAST_SEARCH[key] = found
 
@@ -157,7 +168,7 @@ def search_sources(config: SourceConfig) -> SearchResult:
 
 
 def build_sequences(
-    source_config: SourceConfig, kernel_config: KernelConfig
+    source_config: TreeConfig, select_config: SelectConfig, kernel_config: KernelConfig
 ) -> tuple[list[PhaseFilteredSequence], dict[str, tuple[str, ...]]]:
     """Build one filtered view per sequence, all sharing a single kernel.
 
@@ -168,7 +179,7 @@ def build_sequences(
         The sequences, in the order the search found them, and the contents of
         the whole dataset they were selected from.
     """
-    sources, contents = search_sources(source_config)
+    sources, contents = search_sources(source_config, select_config)
     subpath = source_config.resolve_subpath()
 
     kernel = kernel_config.build()
@@ -179,9 +190,9 @@ def build_sequences(
             kernel,
             root=source_config.root,
             subpath=subpath,
-            start=source_config.frame_start,
-            step=source_config.frame_step,
-            limit=source_config.frame_count,
+            start=select_config.frame_start,
+            step=select_config.frame_step,
+            count=select_config.frame_count,
         )
 
     return [build_sequence(source) for source in sources], contents

@@ -11,7 +11,7 @@ from hydra.core.singleton import Singleton
 from omegaconf import OmegaConf
 
 from scripts._compute import ComputeConfig
-from scripts._trees import SourceConfig
+from scripts._trees import SelectConfig, TreeConfig
 from scripts.data._process import TargetConfig
 from scripts.data.preprocess import CONFIG_NAME, CONFIG_PATH, main
 
@@ -28,7 +28,8 @@ def _composed(*overrides: str):
 
 
 @pytest.mark.parametrize(
-    ("group", "schema"), (("source", SourceConfig), ("target", TargetConfig))
+    ("group", "schema"),
+    (("source", TreeConfig), ("select", SelectConfig), ("target", TargetConfig)),
 )
 def test_every_schema_field_is_reachable_from_the_command_line(group, schema):
     # hydra only lets an override touch a key the composed config already holds, so

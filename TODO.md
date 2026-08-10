@@ -288,7 +288,9 @@ force          4     3, 4, 5 → acceleration 4
 
 ## 결정 — 설정은 셋으로 갈리고, 접두사는 타깃에만 붙는다
 
-**(4) 전처리 검증이 끝난 뒤에 옮긴다.** 이유는 맨 아래에.
+> **소스와 선택을 가르는 데까지 반영됐다.** `TreeConfig` + `SelectConfig`가
+> `scripts/_trees.py`에 있고 (1)의 YAML은 `source:` + `select:`다. 남은 것은 타깃 셋의
+> 접두사(`PreprocessTargetConfig` 등)로, (2)의 타깃이 생길 때 같이 붙인다.
 
 ### 소스에서 선택을 뗀다
 
@@ -309,11 +311,10 @@ select:                  # 실행에 한 벌
   frame_count: null
   if_frames_short: take
 
-phase:                   # 소스마다 — 남는 것은 root + subpath 뿐이다
+source:                  # 소스마다 — 남는 것은 root + subpath 뿐이다
   root: ???
-  subpath: null
 
-flow:
+flow:                    # (2)가 더하는 두 번째 소스
   root: null
   subpath: null
 ```
@@ -327,8 +328,14 @@ flow:
 `SourceConfig`에서 위상에 묶인 것은 `DEFAULT_SUBPATH: ClassVar[str] = PHASE_FLOAT_BIN`
 한 줄뿐이다. 나머지 필드는 전부 모달리티와 무관하고 `TargetConfig`도 같다.
 
-그러니 `PhaseSourceConfig` 같은 이름은 두지 않는다. 클래스는 하나고 **`phase:`·`flow:`라는
-키**가 그것이 무엇인지 말한다. 기본 subpath는 그 키를 아는 곳, 즉 단계가 댄다.
+그러니 `PhaseSourceConfig` 같은 이름은 두지 않는다. **키도 마찬가지다** — `phase:`로 바꾸면
+스키마 대신 config 파일에 모달리티를 박는 것이라 같은 실수를 자리만 옮겨 되풀이한다. 주 소스는
+`source:`로 남고, (2)가 더하는 두 번째 소스만 그것이 무엇인지 말하는 이름(`flow:`)을 갖는다.
+
+`DEFAULT_SUBPATH`는 당분간 `TreeConfig`에 둔다. 위상만 읽는 동안은 「기본 레이아웃」이 곧
+Koala의 것이고, 두 번째 모달리티가 오면 그것을 아는 쪽 — 리더 — 으로 내려간다. 홀로그램 탐색은
+`subpath`를 아예 받지 않으므로, 레이아웃은 트리가 아니라 리더가 알 일이다. 그때 모달리티는
+`reader:` 같은 config 그룹이 고르고, `TreeConfig`는 `root` + `subpath`만 남는다.
 
 ### 접두사는 타깃 셋에만
 
@@ -374,32 +381,32 @@ flow.root`. 반대로 `flow.root`를 줬는데 아무도 흐름을 안 읽으면
 (2)는 더 단순하다. `flow.root`가 계산을 **대체**하므로 합집합이 아니라 둘 중 하나이고,
 선언 없이 유무만으로 갈린다.
 
-### 왜 (4) 뒤인가
+### 왜 (4) 뒤였는가
 
 `source.include` → `select.include`, `source.frame_count` → `select.frame_count`로 키가
-움직인다. **서버에서 도는 (4) 스윕이 그 이름을 쓰고 있다.**
+움직였다. **서버에서 돌던 (4) 스윕이 그 이름을 쓰고 있었다.**
 
 ```bash
 source.root="$DATA" source.include="$chunk"
 ```
 
-스윕이 끝나기 전에 옮기면 남은 청크가 죽는다. 끝난 뒤에 옮기고, 그때 `temp/`의 스크립트도
-같이 고친다.
+스윕이 끝나기 전에 옮기면 남은 청크가 죽는다. 스윕이 끝났으므로 옮겼고, `temp/`의
+`sweep.zsh`·`ranges.py`도 `source.include` → `select.include` 한 줄만 고치면 된다
+(`source.root`는 그대로다).
 
 ## 열린 것 — `TreeConfig`를 (2)·(3)이 쓰게 하려면
 
-**모양과 이름은 §「설정은 셋으로 갈리고, 접두사는 타깃에만 붙는다」에서 정했다.** 소스는
-`TreeConfig`(= `root` + `subpath`)로 남고, 선택은 `SelectConfig`로 떨어지고, 접두사는 타깃
-셋에만 붙는다. **(4) 전처리 검증이 끝난 뒤에 옮긴다.**
+**모양과 이름은 §「설정은 셋으로 갈리고, 접두사는 타깃에만 붙는다」에서 정했고, 소스와 선택을
+가르는 데까지 반영됐다.** `TreeConfig`·`SelectConfig`·`search_sources`·`build_sequences`·
+`LAST_SEARCH`가 `scripts/_trees.py`와 `scripts/_phase.py`에 나뉘어 있다 — 모달리티에
+의존하지 않는 것이 앞, 위상 탐색이 뒤다. (2)가 위상을 읽는 방식이 (1)과 완전히 같으므로 그대로
+쓴다.
 
 여기 남는 것은 둘이다.
 
-- **어느 모듈로 올릴 것인가.** `TreeConfig`·`SelectConfig`·`search_sources`·
-  `build_sequences`·`LAST_SEARCH`가 함께 간다 — (2)가 위상을 읽는 방식이 (1)과 완전히 같기
-  때문이다. `scripts/_trees.py`를 후보로 둔다. 이름이 `search_sources`까지 담기엔 좁지만,
-  `TreeConfig`가 그 안의 다른 모든 것의 뿌리이고 **타깃도 그것을 상속하므로** 파일 이름이
-  「읽기」를 뜻하면 타깃이 거기서 import하는 것이 어색해진다. `_sources.py`·`_reading.py`도
-  후보다. 옮길 때 정한다.
+- **타깃 셋의 접두사를 언제 붙일 것인가.** `TargetConfig` → `PreprocessTargetConfig`는
+  YAML 키를 건드리지 않는 순수 개명이라 언제든 되지만, 혼자 하면 접두사가 구분하는 대상이
+  아직 하나뿐이다. (2)의 `OpticalFlowTargetConfig`가 생길 때 같이 붙인다.
 
 - **(3)의 target은 프레임 트리가 아닐 수 있다.** 출력이 `{지표: (인덱스, 프레임)}`과
   문서라, `save_frames`도 폴더 통째 교체도 (3)에는 없을 수 있다. 그래서 겹침 검사는

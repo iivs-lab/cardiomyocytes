@@ -13,9 +13,8 @@ __all__ = (
 import logging
 from dataclasses import dataclass
 from pathlib import Path, PurePath
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
-from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from kaparoo.filesystem import (
     UnsupportedExtensionError,
     ensure_file_extension,
@@ -36,7 +35,7 @@ from iivs_cardio.data.pipeline import (
     RangeDocument,
 )
 from scripts._phase import build_sequences, search_sources
-from scripts._trees import SourceConfig, TreeConfig, log_source_config
+from scripts._trees import TreeConfig, log_source_config
 from scripts.data._filtering import describe_filter_kernel, parse_filter_config
 
 if TYPE_CHECKING:
@@ -50,6 +49,7 @@ if TYPE_CHECKING:
     from iivs_cardio.common.pipeline import SideBranch
     from iivs_cardio.data.phase import PhaseFilteredSequence
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
+    from scripts._trees import SelectConfig
 
 
 # ========================== #
@@ -90,8 +90,6 @@ class TargetConfig(TreeConfig):
             mounted share looks like, and what is kept is always said out loud.
     """
 
-    DEFAULT_SUBPATH: ClassVar[str] = PHASE_FLOAT_BIN
-
     save_frames: bool = False
     save_ranges: bool = True
     range_file: str = "value_range"
@@ -101,7 +99,7 @@ class TargetConfig(TreeConfig):
 
 
 def _validate_output(
-    source_config: SourceConfig, target_config: TargetConfig, output_root: StrPath
+    source_config: TreeConfig, target_config: TargetConfig, output_root: StrPath
 ) -> None:
     """Raise unless the target names an output this run can safely write.
 
@@ -217,7 +215,8 @@ def _log_policy(logger: Logger, what: str, policy: str) -> None:
 
 
 def log_configs(
-    source_config: SourceConfig,
+    source_config: TreeConfig,
+    select_config: SelectConfig,
     target_config: TargetConfig | None,
     kernel_config: KernelConfig,
     output_root: StrPath,
@@ -236,14 +235,14 @@ def log_configs(
     """
     logger = logging.getLogger(name)
 
-    log_source_config(source_config, logger)
+    log_source_config(source_config, select_config, logger)
     log_filter_config(kernel_config, logger)
 
     if target_config is not None:
         subpath = target_config.resolve_subpath(source_config.resolve_subpath())
         log_target_config(target_config, logger, output_root, subpath=subpath)
 
-        renumbered = (source_config.frame_start, source_config.frame_step) != (0, 1)
+        renumbered = (select_config.frame_start, select_config.frame_step) != (0, 1)
         if target_config.save_frames and renumbered:
             fix = "join the value ranges to it by position rather than by name"
             logger.warning("the cache renumbers the frames it keeps: %s", fix)
@@ -255,7 +254,7 @@ def log_configs(
 
 
 def _log_short(
-    source_config: SourceConfig,
+    select_config: SelectConfig,
     sequences: Sequence[PhaseFilteredSequence],
     contents: Mapping[str, Sequence[str]],
     *,
@@ -267,7 +266,7 @@ def _log_short(
     since it is what the dataset turned out to hold and not what the run was
     told to do. `"error"` never reaches here: the search refuses there.
     """
-    count = source_config.frame_count
+    count = select_config.frame_count
     if count is None:
         return
 
@@ -288,7 +287,8 @@ def _log_short(
 
 
 def build_branches(
-    source_config: SourceConfig,
+    source_config: TreeConfig,
+    select_config: SelectConfig,
     target_config: TargetConfig,
     kernel_config: KernelConfig,
     output_root: StrPath,
@@ -298,8 +298,10 @@ def build_branches(
     """Build the branches a target describes, in the order they will watch.
 
     Args:
-        source_config: The settings the run reads by, recorded in what the
-            branches write.
+        source_config: The tree the run reads, recorded in what the branches
+            write.
+        select_config: The sequences and frames it takes from that tree,
+            recorded alongside it.
         target_config: The settings saying what the run writes.
         kernel_config: The filter, recorded for a later run to compare against.
         output_root: The folder the branches write under.
@@ -329,9 +331,9 @@ def build_branches(
     settings = {
         "source": {
             "subpath": subpath,
-            "frame_start": source_config.frame_start,
-            "frame_step": source_config.frame_step,
-            "frame_count": source_config.frame_count,
+            "frame_start": select_config.frame_start,
+            "frame_step": select_config.frame_step,
+            "frame_count": select_config.frame_count,
         },
         "filter": describe_filter_kernel(kernel_config),
     }
@@ -376,7 +378,8 @@ def build_branches(
 
 
 def build_phase_stages(
-    source_config: SourceConfig,
+    source_config: TreeConfig,
+    select_config: SelectConfig,
     target_config: TargetConfig | None = None,
     filter_config: DictConfig | None = None,
     *,
@@ -391,8 +394,8 @@ def build_phase_stages(
     before the search costs anything.
 
     Args:
-        source_config: The settings saying which sequences to read, and how
-            much of each.
+        source_config: The tree the sequences are read from.
+        select_config: Which of them to read, and how much of each.
         target_config: The settings saying what to write. Defaults to `None`,
             for a run that only reads.
         filter_config: The filter to apply. Defaults to `None`, which leaves the
@@ -409,19 +412,27 @@ def build_phase_stages(
     """
     kernel_config = parse_filter_config(filter_config)
 
-    log_configs(source_config, target_config, kernel_config, output_root, name=name)
+    log_configs(
+        source_config,
+        select_config,
+        target_config,
+        kernel_config,
+        output_root,
+        name=name,
+    )
 
     if target_config is not None:
         _validate_output(source_config, target_config, output_root)
 
-    sequences, contents = build_sequences(source_config, kernel_config)
-    _log_short(source_config, sequences, contents, name=name)
+    sequences, contents = build_sequences(source_config, select_config, kernel_config)
+    _log_short(select_config, sequences, contents, name=name)
 
     branches = []
 
     if target_config is not None:
         branches = build_branches(
             source_config,
+            select_config,
             target_config,
             kernel_config,
             output_root,

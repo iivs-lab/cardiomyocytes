@@ -24,7 +24,7 @@ from iivs_cardio.data.transforms.filtering.kernel import MedianConfig
 from iivs_cardio.data.writer import RECORD_FILE
 from scripts._compute import ComputeConfig, IncompleteRunError, run_all
 from scripts._phase import build_sequences, search_sources
-from scripts._trees import SELECTION_LIMIT, SourceConfig
+from scripts._trees import SELECTION_LIMIT, TreeConfig
 from scripts.data._filtering import parse_filter_config
 from scripts.data._process import (
     TargetConfig,
@@ -38,6 +38,7 @@ from tests.scripts.conftest import (
     HEIGHT_SCALE,
     PIXEL_SIZE,
     SEQUENCES,
+    source_configs,
 )
 
 STAGE = "preprocess"
@@ -53,7 +54,7 @@ def _scan(
     subpath: str | None = None,
     overwrite: bool = False,
 ) -> None:
-    source = SourceConfig(root=str(phase_tree))
+    source = source_configs(root=str(phase_tree))
     compute = ComputeConfig(device="cpu", workers=workers, show_progress=False)
     policy = "overwrite" if overwrite else "error"
     config = TargetConfig(
@@ -65,7 +66,7 @@ def _scan(
         if_ranges_exist=policy,
     )
 
-    run_all(build_phase_stages(source, config, name=STAGE, output_root=dest), compute)
+    run_all(build_phase_stages(*source, config, name=STAGE, output_root=dest), compute)
 
 
 def _document(dest: Path) -> dict:
@@ -99,7 +100,7 @@ def _rewrite_unit(phase_tree: Path, name: str, unit: PhaseUnit) -> None:
 def test_sources_are_found_under_the_root(phase_tree):
     # The one that fails silently: a search that finds nothing leaves every other
     # check green, since there is then no sequence to get anything wrong with.
-    sources, contents = search_sources(SourceConfig(root=str(phase_tree)))
+    sources, contents = search_sources(*source_configs(root=str(phase_tree)))
 
     assert len(sources) == SEQUENCES
     assert sorted(contents) == [f"TL_{index:02d}" for index in range(SEQUENCES)]
@@ -115,11 +116,11 @@ def test_a_root_holding_nothing_and_an_empty_selection_are_told_apart(
     empty.mkdir()
 
     with pytest.raises(ValueError, match=r"no time-lapse holds"):
-        search_sources(SourceConfig(root=str(empty)))
+        search_sources(*source_configs(root=str(empty)))
 
     with pytest.raises(ValueError, match=r"include/exclude left none"):
         search_sources(
-            SourceConfig(
+            *source_configs(
                 root=str(phase_tree),
                 exclude=[f"TL_{s:02d}" for s in range(SEQUENCES)],
             )
@@ -137,7 +138,7 @@ def test_a_sequence_missing_a_frame_is_refused_by_name(phase_tree, tmp_path):
     dest = tmp_path / "out"
 
     with pytest.raises(ValueError, match=r"TL_01: non-contiguous"):
-        search_sources(SourceConfig(root=str(phase_tree)))
+        search_sources(*source_configs(root=str(phase_tree)))
 
     with pytest.raises(ValueError, match=r"TL_01: non-contiguous"):
         _scan(phase_tree, dest, 0)
@@ -154,9 +155,11 @@ def test_a_sequence_that_cannot_be_read_in_radians_is_named(phase_tree):
         _rewrite_unit(phase_tree, "TL_01", PhaseUnit.UNKNOWN)
 
     with pytest.raises(ValueError, match=r"TL_01: cannot convert phase"):
-        search_sources(SourceConfig(root=str(phase_tree)))
+        search_sources(*source_configs(root=str(phase_tree)))
 
-    sources, _ = search_sources(SourceConfig(root=str(phase_tree), exclude=["TL_01"]))
+    sources, _ = search_sources(
+        *source_configs(root=str(phase_tree), exclude=["TL_01"])
+    )
     assert len(sources) == SEQUENCES - 1
 
 
@@ -168,7 +171,7 @@ def test_a_sequence_missing_a_frame_can_be_excluded_rather_than_fixed(phase_tree
     (phase_tree / "TL_01" / PHASE_FLOAT_BIN / "00002_phase.bin").unlink()
 
     sources, contents = search_sources(
-        SourceConfig(root=str(phase_tree), exclude=["TL_01"])
+        *source_configs(root=str(phase_tree), exclude=["TL_01"])
     )
 
     assert len(sources) == SEQUENCES - 1
@@ -188,8 +191,8 @@ def test_the_root_is_walked_once_however_many_runs_ask(phase_tree, monkeypatch):
 
     monkeypatch.setattr("scripts._phase.search_phase_bin_folders", spy)
 
-    first, first_contents = search_sources(SourceConfig(root=str(phase_tree)))
-    second, second_contents = search_sources(SourceConfig(root=str(phase_tree)))
+    first, first_contents = search_sources(*source_configs(root=str(phase_tree)))
+    second, second_contents = search_sources(*source_configs(root=str(phase_tree)))
 
     assert len(walks) == 1
     assert [source.root for source in second] == [source.root for source in first]
@@ -208,9 +211,9 @@ def test_a_source_asking_for_something_else_is_walked_again(phase_tree, monkeypa
 
     monkeypatch.setattr("scripts._phase.search_phase_bin_folders", spy)
 
-    search_sources(SourceConfig(root=str(phase_tree)))
+    search_sources(*source_configs(root=str(phase_tree)))
     taken, contents = search_sources(
-        SourceConfig(root=str(phase_tree), include=["TL_00"])
+        *source_configs(root=str(phase_tree), include=["TL_00"])
     )
 
     assert len(walks) == 2
@@ -221,11 +224,11 @@ def test_a_source_asking_for_something_else_is_walked_again(phase_tree, monkeypa
 def test_what_a_run_does_with_its_own_answer_stays_its_own(phase_tree):
     # The held answer is handed out as a fresh list and dict, so a job that
     # reorders or adds to what it was given cannot leave the next one short.
-    sources, contents = search_sources(SourceConfig(root=str(phase_tree)))
+    sources, contents = search_sources(*source_configs(root=str(phase_tree)))
     sources.clear()
     contents.clear()
 
-    again, again_contents = search_sources(SourceConfig(root=str(phase_tree)))
+    again, again_contents = search_sources(*source_configs(root=str(phase_tree)))
 
     assert len(again) == SEQUENCES
     assert sorted(again_contents) == [f"TL_{index:02d}" for index in range(SEQUENCES)]
@@ -240,11 +243,11 @@ def _short(phase_tree: Path, name: str, keep: int) -> None:
 def test_a_count_takes_that_many_from_where_the_start_says(phase_tree):
     # The three settings become positions in one place, and the contents is
     # what a document counts itself against, so this is where they agree.
-    source = SourceConfig(
+    source = source_configs(
         root=str(phase_tree), frame_start=1, frame_step=2, frame_count=2
     )
 
-    sequences, contents = search_sources(source)
+    sequences, contents = search_sources(*source)
 
     assert contents["TL_00"] == ("00001_phase.bin", "00003_phase.bin")
     assert all(len(frames) == 2 for frames in contents.values())
@@ -256,10 +259,10 @@ def test_a_sequence_that_cannot_supply_the_count_is_taken_as_it_is(phase_tree, c
     # shape rather than a fault. Named, since a reader comparing them has to
     # know which ones are not on the same footing.
     _short(phase_tree, "TL_01", FRAMES - 1)
-    source = SourceConfig(root=str(phase_tree), frame_count=FRAMES)
+    source = source_configs(root=str(phase_tree), frame_count=FRAMES)
 
     with caplog.at_level(logging.INFO):
-        stages = build_phase_stages(source, name=STAGE, output_root="/out")
+        stages = build_phase_stages(*source, name=STAGE, output_root="/out")
 
     assert len(stages) == SEQUENCES
     said = " ".join(record.getMessage() for record in caplog.records)
@@ -271,19 +274,19 @@ def test_a_sequence_that_cannot_supply_the_count_can_be_refused_instead(phase_tr
     # same number, and it refuses for the dataset rather than per item: the
     # premise is broken before a single frame has been read.
     _short(phase_tree, "TL_01", 2)
-    source = SourceConfig(
+    source = source_configs(
         root=str(phase_tree), frame_count=FRAMES, if_frames_short="error"
     )
 
     with pytest.raises(ValueError, match=r"TL_01: 2 frames after the stride"):
-        search_sources(source)
+        search_sources(*source)
 
 
 def test_a_count_nobody_falls_short_of_says_nothing(phase_tree, caplog):
-    source = SourceConfig(root=str(phase_tree), frame_count=FRAMES)
+    source = source_configs(root=str(phase_tree), frame_count=FRAMES)
 
     with caplog.at_level(logging.INFO):
-        build_phase_stages(source, name=STAGE, output_root="/out")
+        build_phase_stages(*source, name=STAGE, output_root="/out")
 
     assert not [line for line in caplog.messages if "gave fewer" in line]
 
@@ -294,11 +297,11 @@ def test_a_narrowed_run_says_how_much_of_the_dataset_it_took(phase_tree, tmp_pat
     # names the whole root. The search already counts what the root held, and
     # that count is what the document was missing.
     dest = tmp_path / "out"
-    source = SourceConfig(root=str(phase_tree), include=["TL_01"])
+    source = source_configs(root=str(phase_tree), include=["TL_01"])
     target = TargetConfig(root=str(dest), save_frames=False, save_ranges=True)
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
-    run_all(build_phase_stages(source, target, name=STAGE, output_root=dest), compute)
+    run_all(build_phase_stages(*source, target, name=STAGE, output_root=dest), compute)
 
     assert _document(dest)["coverage"] == {
         "found": SEQUENCES,
@@ -319,12 +322,12 @@ def test_a_stride_leaves_the_two_outputs_naming_frames_differently(
     # entry holding another frame's bounds. Position is the key, and the run
     # says so out loud rather than leaving it to whoever reads the pair.
     dest = tmp_path / "out"
-    source = SourceConfig(root=str(phase_tree), frame_step=2)
+    source = source_configs(root=str(phase_tree), frame_step=2)
     target = TargetConfig(root=str(dest), save_frames=True, save_ranges=True)
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
     with caplog.at_level(logging.INFO):
-        stages = build_phase_stages(source, target, name=STAGE, output_root=dest)
+        stages = build_phase_stages(*source, target, name=STAGE, output_root=dest)
         run_all(stages, compute)
 
     (sequence,) = [
@@ -354,7 +357,7 @@ def test_a_sequence_knows_what_it_is_called_in_its_dataset(phase_tree):
     # Derived from the folder it was opened over, so a side branch reading the
     # name cannot land somewhere the frames did not come from.
     sequences, _ = build_sequences(
-        SourceConfig(root=str(phase_tree)), parse_filter_config(None)
+        *source_configs(root=str(phase_tree)), parse_filter_config(None)
     )
 
     assert [sequence.name for sequence in sequences] == [
@@ -365,11 +368,11 @@ def test_a_sequence_knows_what_it_is_called_in_its_dataset(phase_tree):
 def test_a_target_asking_for_nothing_is_refused(phase_tree, tmp_path):
     # Both branches off is a config that configures nothing, which is a mistake
     # rather than a way to say "just read": that is `target_config=None`.
-    source = SourceConfig(root=str(phase_tree))
+    source = source_configs(root=str(phase_tree))
     target = TargetConfig(root=str(tmp_path), save_frames=False, save_ranges=False)
 
     with pytest.raises(ValueError, match=r"nothing to do"):
-        build_phase_stages(source, target, name=STAGE, output_root=tmp_path)
+        build_phase_stages(*source, target, name=STAGE, output_root=tmp_path)
 
 
 def test_a_target_asking_for_nothing_is_refused_before_the_source_is_read(tmp_path):
@@ -377,11 +380,11 @@ def test_a_target_asking_for_nothing_is_refused_before_the_source_is_read(tmp_pa
     # and a sweep pays it per job, since it does not stop at the first refusal.
     # Nothing about this verdict needs the frames, so a root that cannot be read
     # at all still has to come back with the configuration's own complaint.
-    source = SourceConfig(root=str(tmp_path / "not-here"))
+    source = source_configs(root=str(tmp_path / "not-here"))
     target = TargetConfig(root=str(tmp_path), save_frames=False, save_ranges=False)
 
     with pytest.raises(ValueError, match=r"nothing to do"):
-        build_phase_stages(source, target, name=STAGE, output_root=tmp_path)
+        build_phase_stages(*source, target, name=STAGE, output_root=tmp_path)
 
 
 # ------------------------------ the destination --------------------------- #
@@ -389,7 +392,7 @@ def test_a_target_asking_for_nothing_is_refused_before_the_source_is_read(tmp_pa
 FILTERED = "Phase/Float/FilteredBin"
 
 
-@pytest.mark.parametrize("config", (SourceConfig, TargetConfig))
+@pytest.mark.parametrize("config", (TreeConfig, TargetConfig))
 @pytest.mark.parametrize("subpath", ("/elsewhere", "../raw", "Phase/../../raw"))
 def test_a_subpath_that_reaches_outside_a_sequence_is_refused(config, subpath):
     # The destination check compares the two subpaths as they stand, so a `..`
@@ -452,7 +455,7 @@ def test_frames_may_be_written_beside_the_ones_they_were_read_from(phase_tree):
     _scan(phase_tree, phase_tree, 0, subpath=FILTERED)
 
     assert _written(phase_tree) == before
-    assert len(search_sources(SourceConfig(root=str(phase_tree)))[0]) == SEQUENCES
+    assert len(search_sources(*source_configs(root=str(phase_tree)))[0]) == SEQUENCES
     assert len(PhaseBinFolder(phase_tree / "TL_00" / FILTERED)) == FRAMES
 
 
@@ -465,8 +468,8 @@ def test_a_run_writing_no_frames_may_share_the_source_root(phase_tree):
 
 
 def test_a_factory_offers_one_stage_per_sequence(phase_tree, tmp_path):
-    source = SourceConfig(root=str(phase_tree))
-    stages = build_phase_stages(source, name=STAGE, output_root=tmp_path)
+    source = source_configs(root=str(phase_tree))
+    stages = build_phase_stages(*source, name=STAGE, output_root=tmp_path)
 
     assert len(stages) == SEQUENCES
 
@@ -477,10 +480,10 @@ def test_a_run_without_a_target_writes_nothing(phase_tree, tmp_path):
     # is still named, so
     # what keeps it empty is the missing target rather than a missing place.
     dest = tmp_path / "out"
-    source = SourceConfig(root=str(phase_tree))
+    source = source_configs(root=str(phase_tree))
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
-    run_all(build_phase_stages(source, name=STAGE, output_root=dest), compute)
+    run_all(build_phase_stages(*source, name=STAGE, output_root=dest), compute)
 
     assert not dest.exists()
 
@@ -552,13 +555,13 @@ def test_a_written_sequence_says_which_frames_it_was_made_from(phase_tree, tmp_p
     # frame 2 and nothing in the frames says so. (2) derives its time radius
     # from the beat period, which it reads out of the source's `timestamps.txt`.
     dest = tmp_path / "out"
-    source = SourceConfig(root=str(phase_tree), frame_step=2)
+    source = source_configs(root=str(phase_tree), frame_step=2)
     target = TargetConfig(
         root=str(dest), subpath=FILTERED, save_frames=True, save_ranges=False
     )
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
-    run_all(build_phase_stages(source, target, name=STAGE, output_root=dest), compute)
+    run_all(build_phase_stages(*source, target, name=STAGE, output_root=dest), compute)
 
     folder = dest / "TL_00" / FILTERED
     record = json.loads((folder / RECORD_FILE).read_text(encoding="utf-8"))
@@ -577,13 +580,13 @@ def test_a_written_sequence_says_which_frames_it_was_made_from(phase_tree, tmp_p
 
 def _cache(phase_tree: Path, dest: Path, **target: object) -> None:
     """Run a frames-only pass, so a second one has something to reuse."""
-    source = SourceConfig(root=str(phase_tree))
+    source = source_configs(root=str(phase_tree))
     config = TargetConfig(
         root=str(dest), subpath=FILTERED, save_frames=True, save_ranges=False, **target
     )
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
-    run_all(build_phase_stages(source, config, name=STAGE, output_root=dest), compute)
+    run_all(build_phase_stages(*source, config, name=STAGE, output_root=dest), compute)
 
 
 def _mtimes(dest: Path) -> dict[str, float]:
@@ -619,7 +622,7 @@ def test_a_sequence_whose_filter_changed_is_written_again(phase_tree, tmp_path):
     _cache(phase_tree, dest)
     before = _mtimes(dest)
 
-    source = SourceConfig(root=str(phase_tree))
+    source = source_configs(root=str(phase_tree))
     config = TargetConfig(
         root=str(dest),
         subpath=FILTERED,
@@ -633,7 +636,7 @@ def test_a_sequence_whose_filter_changed_is_written_again(phase_tree, tmp_path):
     }
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
     stages = build_phase_stages(
-        source, config, OmegaConf.create(filtered), name=STAGE, output_root=dest
+        *source, config, OmegaConf.create(filtered), name=STAGE, output_root=dest
     )
 
     run_all(stages, compute)
@@ -658,7 +661,7 @@ def test_a_tree_told_no_settings_leaves_the_folder_saying_nothing(phase_tree, tm
     # frames and no more. Flow and metric caches start here.
     dest = tmp_path / "out"
     _, contents = build_sequences(
-        SourceConfig(root=str(phase_tree)), parse_filter_config(None)
+        *source_configs(root=str(phase_tree)), parse_filter_config(None)
     )
     stages = _factory(phase_tree, FrameTree(dest, PHASE_FLOAT_BIN, contents))
 
@@ -704,12 +707,12 @@ def test_the_job_names_the_stage_every_line_is_filed_under(
     # to give, and every line of the run has to follow it: the configuration, the
     # driver's own summary, the per-sequence block, and the side branches.
     stage = "reconstruct"
-    source = SourceConfig(root=str(phase_tree))
+    source = source_configs(root=str(phase_tree))
     target = TargetConfig(root=str(tmp_path), save_frames=True, save_ranges=True)
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
     with caplog.at_level(logging.INFO):
-        stages = build_phase_stages(source, target, name=stage, output_root=tmp_path)
+        stages = build_phase_stages(*source, target, name=stage, output_root=tmp_path)
         run_all(stages, compute)
 
     assert stages.name == stage
@@ -729,12 +732,12 @@ def test_a_sequence_leads_its_own_block(phase_tree, tmp_path, caplog):
     # The name is the head and its lines hang under it, so a reader skimming the
     # left margin sees one entry per sequence rather than one flat list. Pinned
     # because the nesting is a default a call site can lose without failing.
-    source = SourceConfig(root=str(phase_tree))
+    source = source_configs(root=str(phase_tree))
     target = TargetConfig(root=str(tmp_path), save_frames=False, save_ranges=True)
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
     with caplog.at_level(logging.INFO):
-        stages = build_phase_stages(source, target, name=STAGE, output_root=tmp_path)
+        stages = build_phase_stages(*source, target, name=STAGE, output_root=tmp_path)
         run_all(stages, compute)
 
     logged = [record.getMessage() for record in caplog.records]
@@ -836,7 +839,7 @@ def test_a_finished_sequence_lets_go_of_its_window(phase_tree, monkeypatch, bran
     # than measured, since what the release costs is a device this test has no
     # reason to need.
     sequences, _ = build_sequences(
-        SourceConfig(root=str(phase_tree)), parse_filter_config(None)
+        *source_configs(root=str(phase_tree)), parse_filter_config(None)
     )
     stages = PhaseStageFactory(sequences, branch, name=STAGE)
     released: list[str] = []
@@ -881,7 +884,7 @@ class _Watching:
 
 def _factory(phase_tree, *branches):
     sequences, _ = build_sequences(
-        SourceConfig(root=str(phase_tree)), parse_filter_config(None)
+        *source_configs(root=str(phase_tree)), parse_filter_config(None)
     )
 
     return PhaseStageFactory(sequences, *branches, name=STAGE)
@@ -954,7 +957,7 @@ def test_a_run_says_it_removed_them_and_not_only_that_they_were_due(
     out = tmp_path / "out"
     (out / "plate/TL_09" / PHASE_FLOAT_BIN).mkdir(parents=True)
     _, contents = build_sequences(
-        SourceConfig(root=str(phase_tree)), parse_filter_config(None)
+        *source_configs(root=str(phase_tree)), parse_filter_config(None)
     )
     tree = FrameTree(out, PHASE_FLOAT_BIN, contents, if_sources_gone="delete")
 
@@ -1023,7 +1026,7 @@ def test_a_branch_with_nothing_to_say_adds_no_line(phase_tree, caplog):
     def lines(said: str | None) -> list[str]:
         stages = PhaseStageFactory(
             build_sequences(
-                SourceConfig(root=str(phase_tree)), parse_filter_config(None)
+                *source_configs(root=str(phase_tree)), parse_filter_config(None)
             )[0],
             _Branch(said),
             name=STAGE,
@@ -1054,12 +1057,12 @@ def _branches(
     step=1,
     **target,
 ):
-    source = SourceConfig(root="/dataset", subpath=subpath, frame_step=step)
+    source = source_configs(root="/dataset", subpath=subpath, frame_step=step)
     config = TargetConfig(root=str(tmp_path), **target)
     contents = dict.fromkeys(sequence_names, ("00000_phase.bin",))
 
     return build_branches(
-        source,
+        *source,
         config,
         parse_filter_config(None),
         tmp_path,
@@ -1108,11 +1111,11 @@ def test_the_selection_stays_out_of_the_settings(tmp_path):
     # `include` / `exclude` change which sequences a run covers, not what any
     # sequence's numbers mean, and `coverage` already reports that. Recording
     # them here would refuse reuse to a run that narrowed its selection.
-    source = SourceConfig(root="/dataset", include=["TL_00"], exclude=["TL_09"])
+    source = source_configs(root="/dataset", include=["TL_00"], exclude=["TL_09"])
     config = TargetConfig(root=str(tmp_path), save_ranges=True)
 
     (document,) = build_branches(
-        source, config, parse_filter_config(None), tmp_path, {"TL_00": ()}
+        *source, config, parse_filter_config(None), tmp_path, {"TL_00": ()}
     )
 
     assert set(document.settings["source"]) == {
@@ -1149,7 +1152,7 @@ def test_branches_are_refused_before_any_of_them_is_built(tmp_path):
 
 def _frame_tree(tmp_path, **target):
     return build_branches(
-        SourceConfig(root="/dataset"),
+        *source_configs(root="/dataset"),
         TargetConfig(root=str(tmp_path), save_frames=True, save_ranges=False, **target),
         parse_filter_config(None),
         tmp_path,
@@ -1174,11 +1177,11 @@ def test_an_unset_target_subpath_follows_the_source(tmp_path):
 def test_the_settings_record_the_subpath_that_was_read(tmp_path):
     # A later run compares against where the frames came from, so writing them
     # somewhere else must not change what the document says it describes.
-    source = SourceConfig(root="/dataset")
+    source = source_configs(root="/dataset")
     config = TargetConfig(root=str(tmp_path), subpath=FILTERED, save_ranges=True)
 
     (document,) = build_branches(
-        source, config, parse_filter_config(None), tmp_path, {"TL_00": ()}
+        *source, config, parse_filter_config(None), tmp_path, {"TL_00": ()}
     )
 
     assert document.settings["source"]["subpath"] == PHASE_FLOAT_BIN
@@ -1189,7 +1192,7 @@ def test_branches_are_refused_where_the_frames_would_land_on_the_source(tmp_path
     # too, since a caller may assemble the branches without going through it.
     with pytest.raises(ValueError, match=r"frames would land on the source"):
         build_branches(
-            SourceConfig(root=str(tmp_path)),
+            *source_configs(root=str(tmp_path)),
             TargetConfig(root=str(tmp_path), save_frames=True),
             parse_filter_config(None),
             tmp_path,
@@ -1203,7 +1206,7 @@ def test_branches_are_refused_where_the_frames_would_land_on_the_source(tmp_path
 def _logged(caplog, source, target=None, kernel=None, output_root="/out"):
     with caplog.at_level(logging.INFO):
         log_configs(
-            source,
+            *source,
             target,
             kernel or parse_filter_config(None),
             output_root,
@@ -1220,7 +1223,7 @@ def test_the_target_line_says_where_the_run_writes_not_what_placed_it(caplog):
     # line follows the branches, which is the path a reader goes looking in.
     logged = _logged(
         caplog,
-        SourceConfig(root="/dataset"),
+        source_configs(root="/dataset"),
         TargetConfig(root="/out"),
         output_root="/out/0",
     )
@@ -1233,7 +1236,7 @@ def test_each_block_is_tagged_by_what_it_configures(caplog):
     # A tag apiece rather than a verb, so a reader looking for one of the three
     # finds it by name, and the run's own lines below are never mistaken for
     # configuration.
-    logged = _logged(caplog, SourceConfig(root="/dataset"), TargetConfig(root="/out"))
+    logged = _logged(caplog, source_configs(root="/dataset"), TargetConfig(root="/out"))
     heads = [line for line in logged if not line.startswith("  ")]
 
     assert heads == [
@@ -1246,7 +1249,7 @@ def test_each_block_is_tagged_by_what_it_configures(caplog):
 def test_the_subpath_is_shown_as_the_shape_it_is(caplog):
     # Shown rather than described: prose about which of the two nests inside the
     # other kept being read backwards, where the path template cannot be.
-    logged = _logged(caplog, SourceConfig(root="/dataset", subpath="Phase/Other"))
+    logged = _logged(caplog, source_configs(root="/dataset", subpath="Phase/Other"))
 
     assert "  reading <sequence>/Phase/Other" in logged
 
@@ -1263,7 +1266,7 @@ def test_the_subpath_is_shown_as_the_shape_it_is(caplog):
 def test_the_stride_is_said_only_when_it_drops_frames(caplog, step, said):
     # The indices carry the stride and settle where the count starts, which the
     # stride on its own leaves open.
-    logged = _logged(caplog, SourceConfig(root="/dataset", frame_step=step))
+    logged = _logged(caplog, source_configs(root="/dataset", frame_step=step))
     stride = [line for line in logged if line.startswith("  reading frames")]
 
     assert stride == ([] if said is None else [said])
@@ -1272,19 +1275,19 @@ def test_the_stride_is_said_only_when_it_drops_frames(caplog, step, said):
 def test_a_selection_naming_a_file_points_at_the_file(caplog):
     # A path is a promise about a file, where a name is the answer itself, so
     # the two cannot read the same.
-    logged = _logged(caplog, SourceConfig(root="/d", include="/cfg/keep.json"))
+    logged = _logged(caplog, source_configs(root="/d", include="/cfg/keep.json"))
 
     assert "  including as listed in /cfg/keep.json" in logged
 
 
 def test_a_selection_naming_one_thing_says_it_outright(caplog):
-    logged = _logged(caplog, SourceConfig(root="/d", exclude="TL_09"))
+    logged = _logged(caplog, source_configs(root="/d", exclude="TL_09"))
 
     assert "  excluding TL_09" in logged
 
 
 def test_a_short_selection_is_listed_one_to_a_line(caplog):
-    logged = _logged(caplog, SourceConfig(root="/d", exclude=["TL_07", "TL_09"]))
+    logged = _logged(caplog, source_configs(root="/d", exclude=["TL_07", "TL_09"]))
     head = logged.index("  excluding:")
 
     assert logged[head + 1 : head + 3] == ["    TL_07", "    TL_09"]
@@ -1299,7 +1302,7 @@ def test_a_long_selection_points_at_the_config_instead(caplog):
     # what keeps a sweep's jobs pointing at their own copies.
     names = [f"TL_{index:02d}" for index in range(SELECTION_LIMIT + 1)]
 
-    logged = _logged(caplog, SourceConfig(root="/d", exclude=names))
+    logged = _logged(caplog, source_configs(root="/d", exclude=names))
 
     assert f"  excluding {len(names)}, listed in .hydra/{{config,overrides}}.yaml" in (
         logged
@@ -1310,7 +1313,7 @@ def test_a_long_selection_points_at_the_config_instead(caplog):
 @pytest.mark.parametrize("selection", (None, []))
 def test_a_selection_that_narrows_nothing_is_left_out(caplog, selection):
     # An absent line reads as "all of it", which is what an unset selection is.
-    logged = _logged(caplog, SourceConfig(root="/dataset", include=selection))
+    logged = _logged(caplog, source_configs(root="/dataset", include=selection))
 
     assert not [line for line in logged if "including" in line]
 
@@ -1325,7 +1328,7 @@ def test_the_filter_fits_on_one_line(caplog):
 
     logged = _logged(
         caplog,
-        SourceConfig(root="/dataset"),
+        source_configs(root="/dataset"),
         kernel=parse_filter_config(composed.filter),
     )
 
@@ -1334,7 +1337,7 @@ def test_the_filter_fits_on_one_line(caplog):
 
 
 def test_a_kernel_with_nothing_to_set_says_only_what_it_is(caplog):
-    logged = _logged(caplog, SourceConfig(root="/dataset"))
+    logged = _logged(caplog, source_configs(root="/dataset"))
 
     assert "filter: identity kernel" in logged
 
@@ -1366,7 +1369,7 @@ def test_a_target_says_what_it_writes_and_where(caplog, target, written):
     # into the document too. The extension belongs to the document, so the log
     # names the file that will be there rather than the stem a run configured.
     logged = _logged(
-        caplog, SourceConfig(root="/d"), TargetConfig(root="/out", **target)
+        caplog, source_configs(root="/d"), TargetConfig(root="/out", **target)
     )
 
     assert [line for line in logged if line.startswith("  writing")] == written
@@ -1379,7 +1382,7 @@ def test_a_range_file_carrying_another_extension_names_the_setting(caplog, name)
     # so the reader was left with an extension and no key to go and change.
     with pytest.raises(ValueError, match=r"invalid `target.range_file`"):
         _logged(
-            caplog, SourceConfig(root="/d"), TargetConfig(root="/o", range_file=name)
+            caplog, source_configs(root="/d"), TargetConfig(root="/o", range_file=name)
         )
 
 
@@ -1389,7 +1392,7 @@ def test_the_written_frames_take_the_shape_the_source_was_read_in(caplog):
     # no subpath of its own and stopped following the source would not match.
     logged = _logged(
         caplog,
-        SourceConfig(root="/dataset", subpath="Phase/Other"),
+        source_configs(root="/dataset", subpath="Phase/Other"),
         TargetConfig(root="/out", save_frames=True),
     )
 
@@ -1402,7 +1405,7 @@ def test_a_target_naming_a_subpath_says_that_one(caplog):
     # the target: a reader checking where the output went reads this line.
     logged = _logged(
         caplog,
-        SourceConfig(root="/dataset"),
+        source_configs(root="/dataset"),
         TargetConfig(root="/out", subpath=FILTERED, save_frames=True),
     )
 
@@ -1422,10 +1425,10 @@ def test_a_run_says_what_it_does_with_what_is_already_there(caplog, policy, said
     # since silence can separate two states but not three.
     target = TargetConfig(root="/o", if_ranges_exist=policy)
 
-    assert said in _logged(caplog, SourceConfig(root="/d"), target)
+    assert said in _logged(caplog, source_configs(root="/d"), target)
 
     caplog.clear()
-    refused = _logged(caplog, SourceConfig(root="/d"), TargetConfig(root="/o"))
+    refused = _logged(caplog, source_configs(root="/d"), TargetConfig(root="/o"))
     assert not [line for line in refused if "already there" in line]
 
 
@@ -1435,25 +1438,25 @@ def test_a_run_that_will_delete_says_so_before_it_reads_anything(caplog):
     target = TargetConfig(root="/o", if_sources_gone="delete")
 
     said = "  dropping outputs whose sequence the source has lost"
-    assert said in _logged(caplog, SourceConfig(root="/d"), target)
+    assert said in _logged(caplog, source_configs(root="/d"), target)
 
     caplog.clear()
-    kept = _logged(caplog, SourceConfig(root="/d"), TargetConfig(root="/o"))
+    kept = _logged(caplog, source_configs(root="/d"), TargetConfig(root="/o"))
     assert not [line for line in kept if "dropping" in line]
 
 
 @pytest.mark.parametrize(
     ("source", "said"),
     (
-        (SourceConfig(root="/d"), None),
-        (SourceConfig(root="/d", frame_step=2), "  reading frames 0, 2, 4, ..."),
-        (SourceConfig(root="/d", frame_start=5), "  reading frames 5, 6, 7, ..."),
+        (source_configs(root="/d"), None),
+        (source_configs(root="/d", frame_step=2), "  reading frames 0, 2, 4, ..."),
+        (source_configs(root="/d", frame_start=5), "  reading frames 5, 6, 7, ..."),
         (
-            SourceConfig(root="/d", frame_start=1, frame_step=3, frame_count=2),
+            source_configs(root="/d", frame_start=1, frame_step=3, frame_count=2),
             "  reading frames 1, 4 (at most 2 frames)",
         ),
         (
-            SourceConfig(root="/d", frame_step=2, frame_count=9),
+            source_configs(root="/d", frame_step=2, frame_count=9),
             "  reading frames 0, 2, 4, ... (at most 9 frames)",
         ),
     ),
@@ -1474,17 +1477,17 @@ def test_a_run_says_which_frames_it_takes_unless_it_takes_them_all(
 def test_a_run_that_will_refuse_a_short_sequence_says_so_up_front(caplog):
     # The one value of `if_frames_short` that can end the run, so it is named
     # with the rest of what the run was told rather than only in the failure.
-    source = SourceConfig(root="/d", frame_count=9, if_frames_short="error")
+    source = source_configs(root="/d", frame_count=9, if_frames_short="error")
 
     assert "  refusing a sequence that cannot supply them" in _logged(caplog, source)
 
     caplog.clear()
-    taking = SourceConfig(root="/d", frame_count=9)
+    taking = source_configs(root="/d", frame_count=9)
     assert not [line for line in _logged(caplog, taking) if "refusing" in line]
 
 
 def test_a_run_without_a_target_says_nothing_about_writing(caplog):
-    logged = _logged(caplog, SourceConfig(root="/dataset"))
+    logged = _logged(caplog, source_configs(root="/dataset"))
 
     assert not any(line.startswith("target") for line in logged)
 
@@ -1495,7 +1498,7 @@ def test_a_run_with_no_target_does_not_blame_a_branch_for_holding_anything(
     # No branch was asked and none declined: there is simply nothing this run
     # wants. Naming reuse as the cause would send a reader looking for a cache.
     stages = build_phase_stages(
-        SourceConfig(root=str(phase_tree)), name=STAGE, output_root="/out"
+        *source_configs(root=str(phase_tree)), name=STAGE, output_root="/out"
     )
 
     with caplog.at_level(logging.INFO):
