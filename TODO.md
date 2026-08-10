@@ -240,7 +240,7 @@ force          4     3, 4, 5 → acceleration 4
   `running()`을 중첩해서 부르면 `seen`이 갈려 `RangeDocument`가 두 번 저장한다. 지금은
   소스가 없어 평평한 루프다.
 
-## 열린 것 — `scripts/_compute.py`
+## 열린 것 — `scripts/_common/compute.py`
 
 - **로그 안에 시간 형식이 둘 섞인다.** `log_insights`는 `mpire`가 준 `0:00:03.318`을 그대로
   쓰고, `run_all`과 `stage.py`는 `%.1f` + `s`로 `3.6s`를 쓴다. `insights`에는 포맷된 문자열만
@@ -253,7 +253,7 @@ force          4     3, 4, 5 → acceleration 4
 
 - **복수형 처리가 한 곳 남았다.** `counted`는 `kaparoo.utils.quantify`가 되어 사라졌고,
   `RangeDocument`·`FrameTree`·`writer.py`·`stage.py`가 모두 그것을 쓴다. 남은 하나는
-  `scripts/_compute.py`의 `f"{num_workers} worker{...}"`인데, 개수가 아니라 `in_process`로
+  `scripts/_common/compute.py`의 `f"{num_workers} worker{...}"`인데, 개수가 아니라 `in_process`로
   복수형을 정하므로 `quantify`로는 그대로 바뀌지 않는다.
 
 - **레벨의 출처가 root가 아니라 스테이지 로거다.** `run_all`이
@@ -289,7 +289,7 @@ force          4     3, 4, 5 → acceleration 4
 ## 결정 — 설정은 셋으로 갈리고, 접두사는 타깃에만 붙는다
 
 > **소스와 선택을 가르는 데까지 반영됐다.** `TreeConfig` + `SelectConfig`가
-> `scripts/_trees.py`에 있고 (1)의 YAML은 `source:` + `select:`다. 남은 것은 타깃 셋의
+> `scripts/_common/dataset.py`에 있고 (1)의 YAML은 `source:` + `select:`다. 남은 것은 타깃 셋의
 > 접두사(`PreprocessTargetConfig` 등)로, (2)의 타깃이 생길 때 같이 붙인다.
 
 ### 소스에서 선택을 뗀다
@@ -398,7 +398,7 @@ source.root="$DATA" source.include="$chunk"
 
 **모양과 이름은 §「설정은 셋으로 갈리고, 접두사는 타깃에만 붙는다」에서 정했고, 소스와 선택을
 가르는 데까지 반영됐다.** `TreeConfig`·`SelectConfig`·`search_sources`·`build_sequences`·
-`LAST_SEARCH`가 `scripts/_trees.py`와 `scripts/_phase.py`에 나뉘어 있다 — 모달리티에
+`LAST_SEARCH`가 `scripts/_common/dataset.py`와 `scripts/_common/phase.py`에 나뉘어 있다 — 모달리티에
 의존하지 않는 것이 앞, 위상 탐색이 뒤다. (2)가 위상을 읽는 방식이 (1)과 완전히 같으므로 그대로
 쓴다.
 
@@ -695,7 +695,7 @@ for stale in self.list_parts():
   오버라이드는 위상 전용이고, `open_folder`가 실패한 폴더 이름을 대게 되면 `target_unit`에
   흡수된다(§HANDOFF의 후속 요청).
 
-  **`scripts/_phase.py`가 그 대기 자리다.** 위상에 묶인 두 줄(탐색 함수와 `with_unit`)과
+  **`scripts/_common/phase.py`가 그 대기 자리다.** 위상에 묶인 두 줄(탐색 함수와 `with_unit`)과
   일반적인 나머지를 한 덩어리로 모아두면, 올릴 때 잘라내기가 기계적이 된다.
 
 - **필터 캐시를 둘지는 조건부다.** CUDA에서 1000프레임당 ~3초로 재생성되므로, GPU가 귀하거나

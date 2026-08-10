@@ -8,7 +8,7 @@ from hydra.core.hydra_config import HydraConfig
 from hydra.core.singleton import Singleton
 from omegaconf import DictConfig, OmegaConf, ValidationError
 
-from scripts._hydra import apply_schema, is_multirun, output_directory
+from scripts._common.hydra import apply_schema, is_multirun, output_directory
 from scripts.data.preprocess import CONFIG_NAME, CONFIG_PATH
 
 

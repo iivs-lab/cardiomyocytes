@@ -9,8 +9,8 @@ import pytest
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import save_phase_bin
 
-from scripts._phase import LAST_SEARCH
-from scripts._trees import SelectConfig, TreeConfig
+from scripts._common.dataset import SelectConfig, TreeConfig
+from scripts._common.phase import LAST_SEARCH
 
 if TYPE_CHECKING:
     from kaparoo.filesystem.types import StrPath

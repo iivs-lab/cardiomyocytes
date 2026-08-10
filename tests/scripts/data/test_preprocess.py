@@ -10,8 +10,8 @@ from hydra.core.hydra_config import HydraConfig
 from hydra.core.singleton import Singleton
 from omegaconf import OmegaConf
 
-from scripts._compute import ComputeConfig
-from scripts._trees import SelectConfig, TreeConfig
+from scripts._common.compute import ComputeConfig
+from scripts._common.dataset import SelectConfig, TreeConfig
 from scripts.data._process import TargetConfig
 from scripts.data.preprocess import CONFIG_NAME, CONFIG_PATH, main
 

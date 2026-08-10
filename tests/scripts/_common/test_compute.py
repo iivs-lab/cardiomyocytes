@@ -12,8 +12,8 @@ import torch
 from mpire import WorkerPool
 
 from iivs_cardio.common.device import Device
-from scripts import _compute as compute
-from scripts._compute import (
+from scripts._common import compute
+from scripts._common.compute import (
     _DEFAULT_WORKERS,
     ComputeConfig,
     IncompleteRunError,
@@ -188,7 +188,7 @@ def test_a_run_with_no_items_starts_no_pool(tmp_path, monkeypatch, workers):
     def refuse(*args, **kwargs):
         pytest.fail("an empty run reached the pool")
 
-    monkeypatch.setattr("scripts._compute.WorkerPool", refuse)
+    monkeypatch.setattr("scripts._common.compute.WorkerPool", refuse)
 
     run_all(_Stages(0, tmp_path / "done"), _compute(workers))
 
@@ -204,7 +204,7 @@ def test_the_pool_starts_its_workers_fresh_rather_than_forked(tmp_path, monkeypa
         started.update(kwargs)
         return WorkerPool(*args, **kwargs)
 
-    monkeypatch.setattr("scripts._compute.WorkerPool", spy)
+    monkeypatch.setattr("scripts._common.compute.WorkerPool", spy)
     run_all(_Stages(2, tmp_path / "done"), _compute(2))
 
     assert started["start_method"] == "spawn"

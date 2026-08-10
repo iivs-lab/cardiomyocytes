@@ -6,9 +6,9 @@ from typing import TYPE_CHECKING, Final
 import hydra
 from dotenv import load_dotenv
 
-from scripts._compute import ComputeConfig, WorkerLogFolder, run_all
-from scripts._hydra import apply_schema, is_multirun, output_directory
-from scripts._trees import SelectConfig, TreeConfig
+from scripts._common.compute import ComputeConfig, WorkerLogFolder, run_all
+from scripts._common.dataset import SelectConfig, TreeConfig
+from scripts._common.hydra import apply_schema, is_multirun, output_directory
 from scripts.data._process import TargetConfig, build_phase_stages
 
 if TYPE_CHECKING:

@@ -20,7 +20,7 @@ from iivs_cardio.data.phase import PhaseFilteredSequence
 
 if TYPE_CHECKING:
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
-    from scripts._trees import SelectConfig, TreeConfig
+    from scripts._common.dataset import SelectConfig, TreeConfig
 
 
 # One folder per sequence taken, against the contents of the dataset they came from.

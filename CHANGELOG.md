@@ -300,11 +300,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the filter joined the frames either side of the gap as neighbours, and the
   tree written back out was numbered densely, which took the gap out of the
   data entirely and left the run reporting success over numbers that were wrong.
-- The script helpers split by what they know: `scripts/_hydra.py` holds the
-  hydra boundary (`apply_schema`, `output_directory`, `is_multirun`),
-  `scripts/_compute.py` the machine's division (`ComputeConfig`, `plan_devices`,
-  `pin_threads`, `log_insights`). `scripts/_config.py` is gone into the
-  first.
+- What more than one stage shares sits in `scripts/_common/`, mirroring
+  `iivs_cardio/common/`: `hydra.py` holds the hydra boundary (`apply_schema`,
+  `output_directory`, `is_multirun`), `compute.py` the machine's division
+  (`ComputeConfig`, `plan_devices`, `pin_threads`, `log_insights`),
+  `dataset.py` where the data is and which of it a run takes (`TreeConfig`,
+  `SelectConfig`), and `phase.py` how a phase tree is searched. Elsewhere in
+  `scripts/` a leading underscore marks a module that is not an entry point;
+  the folder carries it once here, since nothing inside is one. A second
+  modality would join as `hologram.py` beside the first. `scripts/_config.py`
+  is gone into `hydra.py`.
 - The pipeline pieces sit under `iivs_cardio/data/pipeline/`, leaving
   `scripts/data/` with the two hydra bridges (`_filtering.py` for the kernel,
   `_process.py` for the stages) and one entry point. The range types moved with
