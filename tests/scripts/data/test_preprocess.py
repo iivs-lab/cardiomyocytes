@@ -11,7 +11,8 @@ from hydra.core.singleton import Singleton
 from omegaconf import OmegaConf
 
 from scripts._compute import ComputeConfig
-from scripts.data._process import SourceConfig, TargetConfig
+from scripts._trees import SourceConfig
+from scripts.data._process import TargetConfig
 from scripts.data.preprocess import CONFIG_NAME, CONFIG_PATH, main
 
 if TYPE_CHECKING:

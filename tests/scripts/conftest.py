@@ -8,7 +8,7 @@ import pytest
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import save_phase_bin
 
-from scripts.data._process import LAST_SEARCH
+from scripts._phase import LAST_SEARCH
 
 # `preprocess` reads this at import, and normally takes it from `.env`. Setting it
 # here keeps the tests runnable in a clone that has not generated one yet.

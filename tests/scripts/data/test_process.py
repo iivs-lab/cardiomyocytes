@@ -23,16 +23,14 @@ from iivs_cardio.data.pipeline import FrameTree, PhaseStageFactory, RangeDocumen
 from iivs_cardio.data.transforms.filtering.kernel import MedianConfig
 from iivs_cardio.data.writer import RECORD_FILE
 from scripts._compute import ComputeConfig, IncompleteRunError, run_all
+from scripts._phase import build_sequences, search_sources
+from scripts._trees import SELECTION_LIMIT, SourceConfig
 from scripts.data._filtering import parse_filter_config
 from scripts.data._process import (
-    SELECTION_LIMIT,
-    SourceConfig,
     TargetConfig,
     build_branches,
     build_phase_stages,
-    build_sequences,
     log_configs,
-    search_sources,
 )
 from scripts.data.preprocess import CONFIG_NAME, CONFIG_PATH
 from tests.scripts.conftest import (
@@ -188,7 +186,7 @@ def test_the_root_is_walked_once_however_many_runs_ask(phase_tree, monkeypatch):
         walks.append(args)
         return search_phase_bin_folders(*args, **kwargs)
 
-    monkeypatch.setattr("scripts.data._process.search_phase_bin_folders", spy)
+    monkeypatch.setattr("scripts._phase.search_phase_bin_folders", spy)
 
     first, first_contents = search_sources(SourceConfig(root=str(phase_tree)))
     second, second_contents = search_sources(SourceConfig(root=str(phase_tree)))
@@ -208,7 +206,7 @@ def test_a_source_asking_for_something_else_is_walked_again(phase_tree, monkeypa
         walks.append(args)
         return search_phase_bin_folders(*args, **kwargs)
 
-    monkeypatch.setattr("scripts.data._process.search_phase_bin_folders", spy)
+    monkeypatch.setattr("scripts._phase.search_phase_bin_folders", spy)
 
     search_sources(SourceConfig(root=str(phase_tree)))
     taken, contents = search_sources(

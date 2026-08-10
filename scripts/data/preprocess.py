@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 
 from scripts._compute import ComputeConfig, WorkerLogFolder, run_all
 from scripts._hydra import apply_schema, is_multirun, output_directory
-from scripts.data._process import SourceConfig, TargetConfig, build_phase_stages
+from scripts._trees import SourceConfig
+from scripts.data._process import TargetConfig, build_phase_stages
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig

@@ -1,47 +1,33 @@
 from __future__ import annotations
 
 __all__ = (
-    "LAST_SEARCH",
-    "SearchResult",
-    "SourceConfig",
     "TargetConfig",
-    "TreeConfig",
     "build_branches",
     "build_phase_stages",
-    "build_sequences",
     "log_configs",
     "log_filter_config",
-    "log_source_config",
     "log_target_config",
     "search_sources",
 )
 
 import logging
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from pathlib import Path, PurePath
-from typing import TYPE_CHECKING, ClassVar, Final
+from typing import TYPE_CHECKING, ClassVar
 
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
-from iivs.dhm.data.phase import PhaseFileFolder, PhaseUnit, search_phase_bin_folders
 from kaparoo.filesystem import (
     UnsupportedExtensionError,
-    contains,
     ensure_file_extension,
-    is_spec_file,
-    select,
-    stringify_path,
 )
-from kaparoo.utils import quantify, unwrap_or_default
-from omegaconf import MISSING
+from kaparoo.utils import quantify
 
 from iivs_cardio.common.logging import log_indented
 from iivs_cardio.common.pipeline import (
     EXISTING_OUTPUT_POLICIES,
-    SHORT_INPUT_POLICIES,
     UNSOURCED_OUTPUT_POLICIES,
     ensure_policy,
 )
-from iivs_cardio.data.phase import PhaseFilteredSequence
 from iivs_cardio.data.pipeline import (
     DOCUMENT_EXT,
     FRAME_POLICIES,
@@ -49,7 +35,8 @@ from iivs_cardio.data.pipeline import (
     PhaseStageFactory,
     RangeDocument,
 )
-from iivs_cardio.data.transforms.filtering import frame_indices
+from scripts._phase import build_sequences, search_sources
+from scripts._trees import SourceConfig, TreeConfig, log_source_config
 from scripts.data._filtering import describe_filter_kernel, parse_filter_config
 
 if TYPE_CHECKING:
@@ -61,100 +48,13 @@ if TYPE_CHECKING:
     from torch import Tensor
 
     from iivs_cardio.common.pipeline import SideBranch
+    from iivs_cardio.data.phase import PhaseFilteredSequence
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
 
 
 # ========================== #
 #          Settings          #
 # ========================== #
-
-
-@dataclass
-class TreeConfig:
-    """A tree of sequences, and where inside one of them the frames sit.
-
-    What a run reads and what it writes are the same shape, so the pair of
-    settings that says where a tree is lives here once. A subclass sets
-    `DEFAULT_SUBPATH` to the layout its own end of a stage uses, which is what
-    an unset `subpath` comes to when the caller offers nothing to follow.
-
-    Attributes:
-        root: The folder the sequences sit under.
-        subpath: The path to a sequence's frames inside its own folder. Defaults
-            to `None`, which follows what the caller offers and falls back to
-            this end's own layout when it offers nothing.
-    """
-
-    DEFAULT_SUBPATH: ClassVar[str]
-
-    root: str = MISSING
-    subpath: str | None = None
-
-    def resolve_subpath(self, follow: str | None = None) -> str:
-        """Return where the frames sit, settling an unset `subpath`.
-
-        The answer is always a path a sequence's own folder contains, which is
-        what lets two of them be compared as they stand: one that could reach
-        outside would leave whatever compares them looking at the wrong pair.
-
-        Args:
-            follow: The layout an unset `subpath` takes, such as the one the
-                other end of the stage keeps its frames in. Defaults to `None`,
-                which leaves it to `DEFAULT_SUBPATH`.
-
-        Raises:
-            ValueError: If the answer would reach outside a sequence's folder.
-        """
-        default = unwrap_or_default(follow, self.DEFAULT_SUBPATH)
-        subpath = unwrap_or_default(self.subpath, default)
-
-        path = PurePath(subpath)
-        if path.anchor or ".." in path.parts:
-            msg = f"invalid subpath {subpath!r}: expected a relative path, no '..'"
-            raise ValueError(msg)
-
-        return subpath
-
-
-@dataclass
-class SourceConfig(TreeConfig):
-    """Which sequences a run reads, and how much of each.
-
-    Attributes:
-        root: The dataset folder to search for sequences.
-        subpath: The path to a sequence's frames inside its time lapse. Defaults
-            to `None`, which takes the usual one.
-        include: The sequences to take, as names or as a path to a file listing
-            them. Defaults to `None`, which takes all of them.
-        exclude: The same, for sequences to leave out. Defaults to `None`.
-        frame_start: The first source frame to take. Defaults to 0.
-        frame_step: The stride to read each sequence at, so that every
-            `frame_step`th frame from `frame_start` is taken. Defaults to 1.
-        frame_count: How many frames to take once the stride has been applied.
-            Defaults to `None`, which takes them all.
-        if_frames_short: The policy for a sequence that cannot supply
-            `frame_count`, which says nothing when there is no count to fall
-            short of. `"take"` takes what there is and names the sequence in
-            the log. Defaults to `"take"`.
-    """
-
-    DEFAULT_SUBPATH: ClassVar[str] = PHASE_FLOAT_BIN
-
-    include: list[str] | str | None = None
-    exclude: list[str] | str | None = None
-    frame_start: int = 0
-    frame_step: int = 1
-    frame_count: int | None = None
-    if_frames_short: str = "take"
-
-    def frame_indices(self, total: int) -> range:
-        """Return which of `total` source frames this run takes, in order."""
-        return frame_indices(
-            total,
-            start=self.frame_start,
-            step=self.frame_step,
-            limit=self.frame_count,
-        )
 
 
 @dataclass
@@ -254,66 +154,6 @@ def _range_file(target_config: TargetConfig) -> Path:
 # ========================== #
 #          Logging           #
 # ========================== #
-
-
-SELECTION_LIMIT: Final = 5
-
-
-def _log_selection(logger: Logger, verb: str, value: list[str] | str) -> None:
-    """Log a selection, listing it only while a list is short enough to read."""
-    if isinstance(value, str):
-        if is_spec_file(value):
-            log_indented(logger, "%s as listed in %s", verb, value)
-        else:
-            log_indented(logger, "%s %s", verb, value)
-        return
-
-    if (count := len(value)) > SELECTION_LIMIT:
-        record = ".hydra/{config,overrides}.yaml"
-        log_indented(logger, "%s %d, listed in %s", verb, count, record)
-        return
-
-    log_indented(logger, "%s:", verb)
-    for item in value:
-        log_indented(logger, "%s", item, depth=2)
-
-
-def log_source_config(source_config: SourceConfig, logger: Logger) -> None:
-    """Log what a run reads, naming only the settings that were moved."""
-    log_indented(logger, "source: %s", source_config.root, depth=0)
-
-    log_indented(logger, "reading <sequence>/%s", source_config.resolve_subpath())
-
-    _log_frames(source_config, logger)
-
-    if source_config.include:
-        _log_selection(logger, "including", source_config.include)
-
-    if source_config.exclude:
-        _log_selection(logger, "excluding", source_config.exclude)
-
-
-def _log_frames(source_config: SourceConfig, logger: Logger) -> None:
-    """Log which source frames a run takes, unless it takes every one.
-
-    Shown as the first few positions rather than as the three settings, since
-    what a reader checks is whether the frames are the ones they meant and the
-    settings are what they already wrote.
-    """
-    start = source_config.frame_start
-    step = source_config.frame_step
-    count = source_config.frame_count
-    if (start, step, count) == (0, 1, None):
-        return
-
-    shown = [start + index * step for index in range(3)][: count or 3]
-    listed = ", ".join(str(index) for index in shown)
-    tail = "" if count is not None and count <= len(shown) else ", ..."
-    held = "" if count is None else f" (at most {quantify(count, 'frame')})"
-    log_indented(logger, "reading frames %s%s%s", listed, tail, held)
-
-    if count is not None and source_config.if_frames_short == "error":
-        log_indented(logger, "refusing a sequence that cannot supply them")
 
 
 def log_filter_config(kernel_config: KernelConfig, logger: Logger) -> None:
@@ -445,170 +285,6 @@ def _log_short(
 
     label = quantify(len(short), "sequence")
     logger.warning("%s gave fewer than %d: %s", label, count, listed)
-
-
-# One folder per sequence taken, against the contents of the dataset they came from.
-type SearchResult = tuple[list[PhaseFileFolder], dict[str, tuple[str, ...]]]
-
-# The newest search, held for the next job of a sweep to take.
-LAST_SEARCH: dict[tuple[object, ...], SearchResult] = {}
-
-
-def _source_key(config: SourceConfig) -> tuple[object, ...]:
-    """Return what makes two searches the same search.
-
-    Every field is read rather than a chosen few, so a setting added later
-    cannot quietly reuse an answer it would have changed. The working directory
-    joins them because a relative `root` or `include` names a different folder
-    once `hydra.job.chdir` has moved it.
-    """
-
-    def frozen(value: object) -> object:
-        return tuple(value) if isinstance(value, list) else value
-
-    settings = (frozen(getattr(config, field.name)) for field in fields(config))
-
-    return (str(Path.cwd()), *settings)
-
-
-def _search_sources(config: SourceConfig) -> SearchResult:
-    """Walk the root, open every sequence it holds, and keep the ones taken."""
-    subpath = config.resolve_subpath()
-    holds_frames = contains(subpath, kind="dir")
-
-    def descend(folder: Path) -> bool:
-        return not holds_frames(folder)
-
-    folders = search_phase_bin_folders(config.root, subpath=subpath, descend=descend)
-
-    if (num_folders := len(folders)) == 0:
-        msg = f"no time-lapse holds a {subpath!r} folder: {config.root}"
-        raise ValueError(msg)
-
-    def folder_subpath(folder: PhaseFileFolder) -> str:
-        return stringify_path(folder.root, after=config.root, before=subpath)
-
-    sources: list[PhaseFileFolder] = select(
-        folders,
-        key=folder_subpath,
-        include=config.include,
-        exclude=config.exclude,
-    )
-
-    if not sources:
-        msg = f"include/exclude left none of the {num_folders} sequences: {config.root}"
-        raise ValueError(msg)
-
-    taken = []
-    for source in sources:
-        try:
-            source.validate_if_supported(level="names")
-            taken.append(source.with_unit(PhaseUnit.RADIANS))
-        except ValueError as error:
-            msg = f"{folder_subpath(source)}: {error}"
-            raise ValueError(msg) from error
-
-    contents = {
-        folder_subpath(folder): tuple(
-            folder.files[index].name
-            for index in config.frame_indices(len(folder.files))
-        )
-        for folder in folders
-    }
-
-    if config.frame_count is not None:
-        policy = ensure_policy(
-            config.if_frames_short, SHORT_INPUT_POLICIES, "if_frames_short"
-        )
-        short = {
-            name: len(contents[name])
-            for name in map(folder_subpath, sources)
-            if len(contents[name]) < config.frame_count
-        }
-        if short and policy == "error":
-            name, held = next(iter(short.items()))
-            asked = quantify(config.frame_count, "frame")
-            short_of = f"short of the {asked} asked for"
-            msg = f"{name}: {held} frames after the stride, {short_of}"
-            raise ValueError(msg)
-
-    return taken, contents
-
-
-def search_sources(config: SourceConfig) -> SearchResult:
-    """Find the sequences a run reads, narrowed by what it was told to take.
-
-    Every sequence taken is checked for a missing frame before any of them is
-    run, since a gap is a fault in the dataset rather than in one item of work.
-    A gap otherwise opens as an ordinary shorter sequence, and what is written
-    back out is numbered without one, so nothing downstream can tell.
-
-    Nothing inside a time-lapse is descended into. Opening one lists its frames
-    already, and the walk has no reason to list them a second time looking for
-    a time-lapse that cannot be nested there.
-
-    The answer is held for the next call asking the same thing, since a sweep
-    runs every job in one process and only the filter differs between them.
-    Only the newest is held, so a call asking for something else pays what it
-    would have paid anyway. A sweep cannot write frames at all, which is what
-    leaves the answer standing for as long as one runs.
-
-    Returns:
-        One folder per sequence taken, each set to give its frames in radians,
-        and a contents of every sequence the root holds against the frames the
-        run would measure it over. The contents covers what the selection left
-        out too, which is what lets a document say it describes part of a
-        dataset rather than the whole of a smaller one, and what an output with
-        no sequence behind it is measured against. Both are the caller's own to
-        reorder or add to; the folders inside them are shared and read-only.
-
-    Raises:
-        ValueError: If the root holds no sequence at all, if the selection
-            leaves none of the ones it holds, or if a sequence taken is missing
-            a frame. The first two are told apart, since they are fixed
-            differently.
-    """
-    key = _source_key(config)
-
-    if (found := LAST_SEARCH.get(key)) is None:
-        found = _search_sources(config)
-        LAST_SEARCH.clear()
-        LAST_SEARCH[key] = found
-
-    sources, contents = found
-
-    return list(sources), dict(contents)
-
-
-def build_sequences(
-    source_config: SourceConfig, kernel_config: KernelConfig
-) -> tuple[list[PhaseFilteredSequence], dict[str, tuple[str, ...]]]:
-    """Build one filtered view per sequence, all sharing a single kernel.
-
-    A kernel holds only the shape it reads, never frames, so one serves every
-    sequence of the run.
-
-    Returns:
-        The sequences, in the order the search found them, and the contents of
-        the whole dataset they were selected from.
-    """
-    sources, contents = search_sources(source_config)
-    subpath = source_config.resolve_subpath()
-
-    kernel = kernel_config.build()
-
-    def build_sequence(source: PhaseFileFolder) -> PhaseFilteredSequence:
-        return PhaseFilteredSequence(
-            source,
-            kernel,
-            root=source_config.root,
-            subpath=subpath,
-            start=source_config.frame_start,
-            step=source_config.frame_step,
-            limit=source_config.frame_count,
-        )
-
-    return [build_sequence(source) for source in sources], contents
 
 
 def build_branches(
