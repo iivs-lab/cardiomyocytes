@@ -3,7 +3,7 @@ from __future__ import annotations
 __all__ = (
     "TargetConfig",
     "build_branches",
-    "build_phase_stages",
+    "build_preprocess_stages",
     "log_configs",
     "log_filter_config",
     "log_target_config",
@@ -377,7 +377,7 @@ def build_branches(
     return branches
 
 
-def build_phase_stages(
+def build_preprocess_stages(
     source_config: TreeConfig,
     select_config: SelectConfig,
     target_config: TargetConfig | None = None,

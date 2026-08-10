@@ -29,7 +29,7 @@ from scripts.data._filtering import parse_filter_config
 from scripts.data._process import (
     TargetConfig,
     build_branches,
-    build_phase_stages,
+    build_preprocess_stages,
     log_configs,
 )
 from scripts.data.preprocess import CONFIG_NAME, CONFIG_PATH
@@ -66,7 +66,9 @@ def _scan(
         if_ranges_exist=policy,
     )
 
-    run_all(build_phase_stages(*source, config, name=STAGE, output_root=dest), compute)
+    stages = build_preprocess_stages(*source, config, name=STAGE, output_root=dest)
+
+    run_all(stages, compute)
 
 
 def _document(dest: Path) -> dict:
@@ -262,7 +264,7 @@ def test_a_sequence_that_cannot_supply_the_count_is_taken_as_it_is(phase_tree, c
     source = source_configs(root=str(phase_tree), frame_count=FRAMES)
 
     with caplog.at_level(logging.INFO):
-        stages = build_phase_stages(*source, name=STAGE, output_root="/out")
+        stages = build_preprocess_stages(*source, name=STAGE, output_root="/out")
 
     assert len(stages) == SEQUENCES
     said = " ".join(record.getMessage() for record in caplog.records)
@@ -286,7 +288,7 @@ def test_a_count_nobody_falls_short_of_says_nothing(phase_tree, caplog):
     source = source_configs(root=str(phase_tree), frame_count=FRAMES)
 
     with caplog.at_level(logging.INFO):
-        build_phase_stages(*source, name=STAGE, output_root="/out")
+        build_preprocess_stages(*source, name=STAGE, output_root="/out")
 
     assert not [line for line in caplog.messages if "gave fewer" in line]
 
@@ -301,7 +303,9 @@ def test_a_narrowed_run_says_how_much_of_the_dataset_it_took(phase_tree, tmp_pat
     target = TargetConfig(root=str(dest), save_frames=False, save_ranges=True)
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
-    run_all(build_phase_stages(*source, target, name=STAGE, output_root=dest), compute)
+    stages = build_preprocess_stages(*source, target, name=STAGE, output_root=dest)
+
+    run_all(stages, compute)
 
     assert _document(dest)["coverage"] == {
         "found": SEQUENCES,
@@ -327,7 +331,7 @@ def test_a_stride_leaves_the_two_outputs_naming_frames_differently(
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
     with caplog.at_level(logging.INFO):
-        stages = build_phase_stages(*source, target, name=STAGE, output_root=dest)
+        stages = build_preprocess_stages(*source, target, name=STAGE, output_root=dest)
         run_all(stages, compute)
 
     (sequence,) = [
@@ -372,7 +376,7 @@ def test_a_target_asking_for_nothing_is_refused(phase_tree, tmp_path):
     target = TargetConfig(root=str(tmp_path), save_frames=False, save_ranges=False)
 
     with pytest.raises(ValueError, match=r"nothing to do"):
-        build_phase_stages(*source, target, name=STAGE, output_root=tmp_path)
+        build_preprocess_stages(*source, target, name=STAGE, output_root=tmp_path)
 
 
 def test_a_target_asking_for_nothing_is_refused_before_the_source_is_read(tmp_path):
@@ -384,7 +388,7 @@ def test_a_target_asking_for_nothing_is_refused_before_the_source_is_read(tmp_pa
     target = TargetConfig(root=str(tmp_path), save_frames=False, save_ranges=False)
 
     with pytest.raises(ValueError, match=r"nothing to do"):
-        build_phase_stages(*source, target, name=STAGE, output_root=tmp_path)
+        build_preprocess_stages(*source, target, name=STAGE, output_root=tmp_path)
 
 
 # ------------------------------ the destination --------------------------- #
@@ -469,7 +473,7 @@ def test_a_run_writing_no_frames_may_share_the_source_root(phase_tree):
 
 def test_a_factory_offers_one_stage_per_sequence(phase_tree, tmp_path):
     source = source_configs(root=str(phase_tree))
-    stages = build_phase_stages(*source, name=STAGE, output_root=tmp_path)
+    stages = build_preprocess_stages(*source, name=STAGE, output_root=tmp_path)
 
     assert len(stages) == SEQUENCES
 
@@ -483,7 +487,7 @@ def test_a_run_without_a_target_writes_nothing(phase_tree, tmp_path):
     source = source_configs(root=str(phase_tree))
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
-    run_all(build_phase_stages(*source, name=STAGE, output_root=dest), compute)
+    run_all(build_preprocess_stages(*source, name=STAGE, output_root=dest), compute)
 
     assert not dest.exists()
 
@@ -561,7 +565,9 @@ def test_a_written_sequence_says_which_frames_it_was_made_from(phase_tree, tmp_p
     )
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
-    run_all(build_phase_stages(*source, target, name=STAGE, output_root=dest), compute)
+    stages = build_preprocess_stages(*source, target, name=STAGE, output_root=dest)
+
+    run_all(stages, compute)
 
     folder = dest / "TL_00" / FILTERED
     record = json.loads((folder / RECORD_FILE).read_text(encoding="utf-8"))
@@ -586,7 +592,9 @@ def _cache(phase_tree: Path, dest: Path, **target: object) -> None:
     )
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
-    run_all(build_phase_stages(*source, config, name=STAGE, output_root=dest), compute)
+    stages = build_preprocess_stages(*source, config, name=STAGE, output_root=dest)
+
+    run_all(stages, compute)
 
 
 def _mtimes(dest: Path) -> dict[str, float]:
@@ -635,7 +643,7 @@ def test_a_sequence_whose_filter_changed_is_written_again(phase_tree, tmp_path):
         "radius": [1, 1, 0],
     }
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
-    stages = build_phase_stages(
+    stages = build_preprocess_stages(
         *source, config, OmegaConf.create(filtered), name=STAGE, output_root=dest
     )
 
@@ -712,7 +720,9 @@ def test_the_job_names_the_stage_every_line_is_filed_under(
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
     with caplog.at_level(logging.INFO):
-        stages = build_phase_stages(*source, target, name=stage, output_root=tmp_path)
+        stages = build_preprocess_stages(
+            *source, target, name=stage, output_root=tmp_path
+        )
         run_all(stages, compute)
 
     assert stages.name == stage
@@ -737,7 +747,9 @@ def test_a_sequence_leads_its_own_block(phase_tree, tmp_path, caplog):
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
     with caplog.at_level(logging.INFO):
-        stages = build_phase_stages(*source, target, name=STAGE, output_root=tmp_path)
+        stages = build_preprocess_stages(
+            *source, target, name=STAGE, output_root=tmp_path
+        )
         run_all(stages, compute)
 
     logged = [record.getMessage() for record in caplog.records]
@@ -1188,7 +1200,7 @@ def test_the_settings_record_the_subpath_that_was_read(tmp_path):
 
 
 def test_branches_are_refused_where_the_frames_would_land_on_the_source(tmp_path):
-    # The same verdict `build_phase_stages` reaches before its search, made here
+    # The same verdict `build_preprocess_stages` reaches before its search, made here
     # too, since a caller may assemble the branches without going through it.
     with pytest.raises(ValueError, match=r"frames would land on the source"):
         build_branches(
@@ -1497,7 +1509,7 @@ def test_a_run_with_no_target_does_not_blame_a_branch_for_holding_anything(
 ):
     # No branch was asked and none declined: there is simply nothing this run
     # wants. Naming reuse as the cause would send a reader looking for a cache.
-    stages = build_phase_stages(
+    stages = build_preprocess_stages(
         *source_configs(root=str(phase_tree)), name=STAGE, output_root="/out"
     )
 

@@ -310,6 +310,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the folder carries it once here, since nothing inside is one. A second
   modality would join as `hologram.py` beside the first. `scripts/_config.py`
   is gone into `hydra.py`.
+- `build_phase_stages` is `build_preprocess_stages`. It hardcodes the range
+  document and the frame tree and `preprocess.py` is its only caller, so the
+  stage is what it is specific to; the phase it reads is already said by the
+  module it lives in and by the sequences it hands back. (2) and (3) name
+  theirs the same way, beside the target config each takes.
 - The pipeline pieces sit under `iivs_cardio/data/pipeline/`, leaving
   `scripts/data/` with the two hydra bridges (`_filtering.py` for the kernel,
   `_process.py` for the stages) and one entry point. The range types moved with

@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from scripts._common.compute import ComputeConfig, WorkerLogFolder, run_all
 from scripts._common.dataset import SelectConfig, TreeConfig
 from scripts._common.hydra import apply_schema, is_multirun, output_directory
-from scripts.data._process import TargetConfig, build_phase_stages
+from scripts.data._process import TargetConfig, build_preprocess_stages
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
@@ -47,7 +47,7 @@ def main(cfg: DictConfig) -> None:
 
     log_folder = WorkerLogFolder(output_directory(), STAGE)
 
-    stages = build_phase_stages(
+    stages = build_preprocess_stages(
         source_config,
         select_config,
         target_config,
