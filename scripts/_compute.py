@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Final, NamedTuple
 
 import torch
 from kaparoo.filesystem import ensure_dir_exists
-from kaparoo.utils import Timer, unwrap_or_default
+from kaparoo.utils import Timer, quantify, unwrap_or_default
 from mpire import WorkerPool
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
@@ -222,16 +222,26 @@ class WorkerLogFolder:
     across a restart, so its file is appended to rather than replaced, and
     clearing is the job's to do once before the run.
 
+    The files are named for the run, as `<name>.worker0.log` beside the parent's
+    own `<name>.log`. Two runs may be pointed at one folder, and the deliberate
+    pairing is why they must not be pointed at one file: a stage that filters
+    and a stage that estimates hold different configurations, so what a reader
+    goes looking for is one run's lines rather than both in the order they
+    happened.
+
     Args:
         root: An existing folder to write the files into.
+        name: The run's name, which the files are named after and which the
+            parent's own lines are filed under.
     """
 
     STEM: ClassVar[str] = "worker"
 
     _FORMAT: ClassVar[str] = "[%(asctime)s][%(name)s][%(levelname)s] - %(message)s"
 
-    def __init__(self, root: StrPath) -> None:
+    def __init__(self, root: StrPath, name: str) -> None:
         self.root = ensure_dir_exists(root)
+        self.name = name
 
     def path_for(self, worker_id: int, num_workers: int) -> Path:
         """Return where worker `worker_id` of `num_workers` writes.
@@ -240,11 +250,19 @@ class WorkerLogFolder:
         one run sort the way their workers are numbered.
         """
         width = len(str(num_workers - 1))
-        return self.root / f"{self.STEM}{worker_id:0{width}d}.log"
+        return self.root / f"{self.name}.{self.STEM}{worker_id:0{width}d}.log"
+
+    def list_logs(self) -> list[Path]:
+        """Return the files this run's workers would write, that are here now.
+
+        Only this run's are listed, so a folder holding another run's files
+        reports none of them: they are that run's to clear.
+        """
+        return sorted(self.root.glob(f"{self.name}.{self.STEM}*.log"))
 
     def clear(self) -> None:
-        """Delete the worker files an earlier job left in this folder."""
-        for stale in self.root.glob(f"{self.STEM}*.log"):
+        """Delete the worker files an earlier job left under this run's name."""
+        for stale in self.list_logs():
             stale.unlink()
 
     def configure_worker(
@@ -530,15 +548,22 @@ def run_all(
         config: The device to run them on, and what to report.
         unit: The name for one item, used in the progress bar and the summary.
             Defaults to `"it"`.
-        log_folder: The folder workers write their own files into. Defaults to
-            None, which leaves their logging alone.
+        log_folder: The folder workers write their own files into, named for
+            this same run. Defaults to None, which leaves their logging alone.
 
     Raises:
+        ValueError: If the log folder is named for another run. Its files would
+            then be filed under one name and the parent's own under another,
+            which no reader could pair up again.
         IncompleteRunError: If any item failed, raised once the rest have
             finished.
     """
     name = stages.name
     logger = logging.getLogger(name)
+
+    if log_folder is not None and log_folder.name != name:
+        msg = f"log folder is named for {log_folder.name!r}: expected {name!r}"
+        raise ValueError(msg)
 
     log_compute_config(config, logger)
 
@@ -553,6 +578,11 @@ def run_all(
 
     if config.measure_workers and in_process:
         logger.warning("not measuring workers: a lone worker runs no pool")
+
+    if log_folder is not None and (stale := log_folder.list_logs()):
+        left = quantify(len(stale), "worker log")
+        listed = ", ".join(path.name for path in stale)
+        logger.warning("%s left by an earlier run: %s", left, listed)
 
     log_level = logger.getEffectiveLevel()
     context = SharedContext(name, stages, devices, log_folder, log_level)

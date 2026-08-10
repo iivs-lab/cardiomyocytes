@@ -76,10 +76,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   appending to one file interleave, and on Windows tear -- and appends, since
   `compute.tasks_per_worker` retires a worker and starts a fresh one under the
   same id.
-  One file per worker rather than per stage, so a job that filters and then
-  estimates reads in order. The parent's own file keeps the configuration, the
-  per-item verdicts and the summary; `log_insights` goes there too, and says
-  so when a lone worker means no pool collected any.
+  The files are named for the run, as `preprocess.worker0.log` beside the
+  parent's own `preprocess.log`, so two runs pointed at one folder keep their
+  own: a worker id says nothing about which run opened it, and a stage that
+  filters and one that estimates hold different configurations. `run_all`
+  refuses a folder named for another run, since the two names coincide only
+  because a script passes one constant to both. It says which worker logs an
+  earlier run left rather than deleting them, since only the job knows whether
+  another stage wrote them. The parent's own file keeps
+  the configuration, the per-item verdicts and the summary; `log_insights` goes
+  there too, and says so when a lone worker means no pool collected any.
 - `IncompleteRunError`, raised once every other item has finished. `mpire`
   re-raises a task's exception in the parent and tears the pool down, so a run
   that let one through would lose every sequence still to come -- hours of

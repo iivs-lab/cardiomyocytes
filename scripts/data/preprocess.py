@@ -45,7 +45,7 @@ def main(cfg: DictConfig) -> None:
         msg = "cannot write frames in a sweep: run the winning config alone instead"
         raise ValueError(msg)
 
-    log_folder = WorkerLogFolder(output_directory())
+    log_folder = WorkerLogFolder(output_directory(), STAGE)
 
     stages = build_phase_stages(
         source_config,

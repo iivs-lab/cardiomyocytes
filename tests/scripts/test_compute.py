@@ -258,11 +258,11 @@ def test_the_level_the_parent_runs_at_reaches_the_worker_files(tmp_path):
     run_all(
         _Talkative(2, dest),
         _compute(2),
-        log_folder=WorkerLogFolder(tmp_path),
+        log_folder=WorkerLogFolder(tmp_path, "run"),
     )
 
     written = "".join(
-        path.read_text(encoding="utf-8") for path in tmp_path.glob("worker*.log")
+        path.read_text(encoding="utf-8") for path in tmp_path.glob("run.worker*.log")
     )
     assert "had something to say" in written
 
@@ -273,13 +273,13 @@ def test_a_starting_worker_takes_the_level_the_parent_was_at(tmp_path):
     # carried across leaves its file without a single line of the run. Nothing
     # held that: every other test names the level when it configures a worker,
     # so the field could be dropped and they would all still pass.
-    folder = WorkerLogFolder(tmp_path)
+    folder = WorkerLogFolder(tmp_path, "run")
     context = SharedContext("run", _Stages(2, tmp_path), (Device("cpu"),) * 2, folder)
 
     _init_worker(1, replace(context, log_level=logging.DEBUG))
     logging.getLogger("run").debug("a line only DEBUG lets through")
 
-    assert "only DEBUG" in (tmp_path / "worker1.log").read_text(encoding="utf-8")
+    assert "only DEBUG" in (tmp_path / "run.worker1.log").read_text(encoding="utf-8")
 
 
 def test_a_worker_with_nowhere_to_write_keeps_the_logging_it_started_with(tmp_path):
@@ -292,7 +292,7 @@ def test_a_worker_with_nowhere_to_write_keeps_the_logging_it_started_with(tmp_pa
     _init_worker(0, context)
 
     assert logging.getLogger().handlers == before
-    assert not list(tmp_path.glob("worker*.log"))
+    assert not list(tmp_path.glob("*.worker*.log"))
 
 
 @pytest.fixture()
@@ -312,11 +312,11 @@ def restored_root_logger():
 def test_the_sequences_one_worker_takes_share_its_file(tmp_path):
     # `worker_init` runs once per worker process, not once per task, so a second
     # sequence on the same worker writes through the handler the first opened.
-    WorkerLogFolder(tmp_path).configure_worker(0, 2, logging.INFO)
+    WorkerLogFolder(tmp_path, "preprocess").configure_worker(0, 2, logging.INFO)
     for line in ("TL_00", "TL_02"):
         logging.getLogger("preprocess").info(line)
 
-    written = (tmp_path / "worker0.log").read_text(encoding="utf-8")
+    written = (tmp_path / "preprocess.worker0.log").read_text(encoding="utf-8")
     assert "TL_00" in written
     assert "TL_02" in written
 
@@ -326,35 +326,87 @@ def test_a_worker_that_restarts_keeps_what_it_already_wrote(tmp_path):
     # `tasks_per_worker` retires a worker and starts a fresh one under the same
     # id, so truncating would take everything the retired one wrote with it.
     for line in ("before", "after"):
-        WorkerLogFolder(tmp_path).configure_worker(0, 2, logging.INFO)
+        WorkerLogFolder(tmp_path, "preprocess").configure_worker(0, 2, logging.INFO)
         logging.getLogger("preprocess").info(line)
 
-    written = (tmp_path / "worker0.log").read_text(encoding="utf-8")
+    written = (tmp_path / "preprocess.worker0.log").read_text(encoding="utf-8")
     assert "before" in written
     assert "after" in written
 
 
 @pytest.mark.usefixtures("restored_root_logger")
-def test_two_stages_of_one_job_land_in_the_same_file(tmp_path):
-    # Which stage wrote a line is the logger's name to say; splitting the files
-    # by stage would only make a job that runs both read out of order.
+def test_two_runs_sharing_a_folder_keep_their_own_files(tmp_path):
+    # A worker id says nothing about which run opened it, so two runs pointed at
+    # one folder wrote one file between them and a reader could not tell whose
+    # configuration a line belonged to. The name the parent's own file carries
+    # is the one that separates them.
     for name in ("preprocess", "optical_flow"):
-        WorkerLogFolder(tmp_path).configure_worker(0, 2, logging.INFO)
+        WorkerLogFolder(tmp_path, name).configure_worker(0, 2, logging.INFO)
         logging.getLogger(name).info("%s here", name)
 
-    written = (tmp_path / "worker0.log").read_text(encoding="utf-8")
-    assert [path.name for path in tmp_path.glob("*.log")] == ["worker0.log"]
-    assert "[preprocess]" in written
-    assert "[optical_flow]" in written
+    assert sorted(path.name for path in tmp_path.glob("*.log")) == [
+        "optical_flow.worker0.log",
+        "preprocess.worker0.log",
+    ]
 
 
 def test_clearing_drops_what_an_earlier_job_left(tmp_path):
-    stale = tmp_path / "worker9.log"
+    stale = tmp_path / "preprocess.worker9.log"
     stale.write_text("from a job that is over", encoding="utf-8")
 
-    WorkerLogFolder(tmp_path).clear()
+    WorkerLogFolder(tmp_path, "preprocess").clear()
 
     assert not stale.exists()
+
+
+def test_clearing_leaves_another_run_its_own_files(tmp_path):
+    # The one that would go unnoticed: a job running two stages into one folder
+    # clears before each of them, and a glob over every worker file would have
+    # the second stage delete what the first had just written.
+    mine = tmp_path / "optical_flow.worker0.log"
+    theirs = tmp_path / "preprocess.worker0.log"
+    for path in (mine, theirs):
+        path.write_text("a line", encoding="utf-8")
+
+    WorkerLogFolder(tmp_path, "optical_flow").clear()
+
+    assert not mine.exists()
+    assert theirs.exists()
+
+
+def test_a_run_says_which_worker_logs_an_earlier_one_left(tmp_path, caplog):
+    # Clearing is the job's to do, so a job that forgets leaves files that read
+    # as this run's: the ids a smaller pool does not reach are never written
+    # over, and the ones it does reach are appended to. Said rather than
+    # deleted, since only the job knows whether another stage wrote them.
+    for worker in (0, 1):
+        (tmp_path / f"run.worker{worker}.log").write_text("older", encoding="utf-8")
+    (tmp_path / "other.worker0.log").write_text("another run", encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        run_all(
+            _Stages(1, tmp_path / "done"),
+            _compute(0),
+            log_folder=WorkerLogFolder(tmp_path, "run"),
+        )
+
+    said = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    left = "2 worker logs left by an earlier run: run.worker0.log, run.worker1.log"
+
+    assert said == [left]
+
+
+def test_a_folder_named_for_another_run_is_refused(tmp_path):
+    # The two names coincide only because a script passes one constant to both,
+    # so a copy into the next stage's script can leave the workers filing under
+    # the stage it was copied from. Refused before a worker starts, since the
+    # lines are already written by the time a reader notices they are apart.
+    folder = WorkerLogFolder(tmp_path, "optical_flow")
+
+    with pytest.raises(ValueError, match=r"named for 'optical_flow': expected 'run'"):
+        run_all(_Stages(1, tmp_path / "done"), _compute(0), log_folder=folder)
+
+    assert not list(tmp_path.glob("*.log"))
 
 
 @pytest.mark.parametrize(("workers", "expected"), ((0, 1), (2, 0)))
@@ -378,17 +430,17 @@ def test_insights_nobody_will_collect_are_said_out_loud(
 @pytest.mark.parametrize(
     ("workers", "expected"),
     (
-        (2, "worker0.log"),
-        (10, "worker0.log"),
-        (11, "worker00.log"),
-        (128, "worker000.log"),
+        (2, "run.worker0.log"),
+        (10, "run.worker0.log"),
+        (11, "run.worker00.log"),
+        (128, "run.worker000.log"),
     ),
 )
 def test_a_worker_file_is_padded_to_the_pool_it_belongs_to(tmp_path, workers, expected):
     # A fixed width misaligns the moment a pool outgrows it, and 64 cores is a
     # size this project has already run at. The width follows the highest id
     # rather than the count, so ten workers, ids 0 to 9, still take one.
-    assert WorkerLogFolder(tmp_path).path_for(0, workers).name == expected
+    assert WorkerLogFolder(tmp_path, "run").path_for(0, workers).name == expected
 
 
 @pytest.mark.parametrize(
