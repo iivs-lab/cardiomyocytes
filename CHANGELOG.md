@@ -405,6 +405,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that computed nothing the pool's bar reached the end and closed while four
   more results were still being logged beneath it. The bar now trails a slow
   item, since `imap` returns in order, and catches up by the end.
+- The range document, its parts, and a written folder's record are all written
+  without `indent=2`. The whitespace was a large share of a file that carries an
+  entry per frame, and nothing reads these by eye.
 
 ### Removed
 

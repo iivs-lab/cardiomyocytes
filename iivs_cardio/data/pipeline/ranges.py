@@ -429,7 +429,7 @@ class SequenceRangeMeter:
             make_parents=True,
             encoding="utf-8",
         ) as file:
-            file.write(json.dumps(document, indent=2, allow_nan=False))
+            file.write(json.dumps(document, allow_nan=False))
 
         self._cached = cache
         self._saved = True
@@ -570,7 +570,7 @@ def save_range_document(
         make_parents=True,
         encoding="utf-8",
     ) as file:
-        file.write(json.dumps(document, indent=2, allow_nan=False))
+        file.write(json.dumps(document, allow_nan=False))
 
     return path
 

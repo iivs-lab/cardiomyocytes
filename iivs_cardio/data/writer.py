@@ -147,7 +147,7 @@ class KoalaFrameWriter[T]:
             return
 
         document = {**self._record, "frames": self._taken}
-        written = json.dumps(document, indent=2, allow_nan=False)
+        written = json.dumps(document, allow_nan=False)
         (self._root.workdir / RECORD_FILE).write_text(written, encoding="utf-8")
 
     def _abort(self) -> None:
