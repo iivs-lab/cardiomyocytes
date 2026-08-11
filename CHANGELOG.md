@@ -83,7 +83,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   refuses a folder named for another run, since the two names coincide only
   because a script passes one constant to both. It says which worker logs an
   earlier run left rather than deleting them, since only the job knows whether
-  another stage wrote them. The parent's own file keeps
+  another stage wrote them. The level is padded in that format and in hydra's
+  own, so the message column holds where a `WARNING` follows an `INFO`. The
+  parent's own file keeps
   the configuration, the per-item verdicts and the summary; `log_insights` goes
   there too, and says so when a lone worker means no pool collected any.
 - `IncompleteRunError`, raised once every other item has finished. `mpire`

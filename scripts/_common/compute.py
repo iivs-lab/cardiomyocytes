@@ -237,7 +237,10 @@ class WorkerLogFolder:
 
     STEM: ClassVar[str] = "worker"
 
-    _FORMAT: ClassVar[str] = "[%(asctime)s][%(name)s][%(levelname)s] - %(message)s"
+    # Kept the same as `hydra.job_logging` so a worker file and the parent's read
+    # alike. The level is padded to the longest of them, or the message column
+    # would step in and out as the level changed.
+    _FORMAT: ClassVar[str] = "[%(asctime)s][%(name)s][%(levelname)-8s] - %(message)s"
 
     def __init__(self, root: StrPath, name: str) -> None:
         self.root = ensure_dir_exists(root)

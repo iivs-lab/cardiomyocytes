@@ -33,3 +33,7 @@ hydra:
   sweep:
     dir: ${target.root}
     subdir: ${hydra.job.num} # a group override's `/` would nest the job directories
+  job_logging:
+    formatters:
+      simple: # the level is padded so the message column holds across levels
+        format: "[%(asctime)s][%(name)s][%(levelname)-8s] - %(message)s"
