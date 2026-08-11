@@ -1094,6 +1094,8 @@ C가 필요한 이유는 비용이다. 448,800 프레임에 흐름을 다시 계
 source:                    # 위상. 셋 다 필요하다 — 평가가 프레임을 본다
   root: ???
   subpath: null            # Phase/Float/Bin
+
+select:                    # 실행에 한 벌, 소스가 둘이어도 하나다
   include: null
   exclude: null
   frame_start: 0
