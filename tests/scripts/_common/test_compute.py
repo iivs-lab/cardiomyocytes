@@ -723,9 +723,9 @@ def test_a_default_run_says_nothing_beyond_its_head(caplog):
 @pytest.mark.parametrize(
     ("config", "said"),
     (
-        ({"tasks_per_worker": 8}, "  replacing a worker after 8 tasks"),
-        ({"measure_workers": True}, "  reporting how busy each worker was"),
-        ({"show_progress": False}, "  showing no progress bar"),
+        ({"tasks_per_worker": 8}, "  starting a fresh worker every 8 tasks"),
+        ({"measure_workers": True}, "  measuring how each worker spends its time"),
+        ({"show_progress": False}, "  drawing no progress bar"),
     ),
 )
 def test_a_setting_a_run_moved_gets_a_line(caplog, config, said):

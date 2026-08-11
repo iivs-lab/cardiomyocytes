@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-__all__ = (
-    "LAST_SEARCH",
-    "SearchResult",
-    "build_sequences",
-    "search_sources",
-)
+__all__ = ("LAST_SEARCH", "SearchResult", "build_sequences", "search_sources")
 
 from dataclasses import fields
 from pathlib import Path
@@ -44,13 +39,12 @@ def _source_key(
     def frozen(value: object) -> object:
         return tuple(value) if isinstance(value, list) else value
 
-    settings = (
-        frozen(getattr(config, field.name))
-        for config in (source_config, select_config)
-        for field in fields(config)
-    )
+    values: list[object] = [str(Path.cwd())]
 
-    return (str(Path.cwd()), *settings)
+    for config in (source_config, select_config):
+        values.extend(getattr(config, field.name) for field in fields(config))
+
+    return tuple(frozen(value) for value in values)
 
 
 def _search_sources(
@@ -93,29 +87,28 @@ def _search_sources(
             msg = f"{folder_subpath(source)}: {error}"
             raise ValueError(msg) from error
 
-    contents = {
-        folder_subpath(folder): tuple(
-            folder.files[index].name
-            for index in select_config.frame_indices(len(folder.files))
-        )
-        for folder in folders
-    }
+    contents: dict[str, tuple[str, ...]] = {}
+    for folder in folders:
+        indices = select_config.frame_indices(len(folder.files))
+        names = tuple(folder.files[index].name for index in indices)
+        contents[folder_subpath(folder)] = names
 
-    if select_config.frame_count is not None:
+    count = select_config.frame_count
+    if count is not None:
         policy = ensure_policy(
-            select_config.if_frames_short, SHORT_INPUT_POLICIES, "if_frames_short"
+            select_config.if_frames_short,
+            SHORT_INPUT_POLICIES,
+            "if_frames_short",
         )
-        short = {
-            name: len(contents[name])
-            for name in map(folder_subpath, sources)
-            if len(contents[name]) < select_config.frame_count
-        }
-        if short and policy == "error":
-            name, held = next(iter(short.items()))
-            asked = quantify(select_config.frame_count, "frame")
-            short_of = f"short of the {asked} asked for"
-            msg = f"{name}: {held} frames after the stride, {short_of}"
-            raise ValueError(msg)
+
+        for source in sources:
+            name = folder_subpath(source)
+            held = len(contents[name])
+            if policy == "error" and held < count:
+                asked = quantify(count, "frame")
+                short_of = f"short of the {asked} asked for"
+                msg = f"{name}: {held} frames after the stride, {short_of}"
+                raise ValueError(msg)
 
     return taken, contents
 

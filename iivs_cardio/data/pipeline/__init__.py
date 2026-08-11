@@ -1,6 +1,5 @@
 __all__ = (
     "DOCUMENT_EXT",
-    "FRAME_POLICIES",
     "CompositeRange",
     "Coverage",
     "DatasetRange",
@@ -15,7 +14,7 @@ __all__ = (
     "save_range_document",
 )
 
-from iivs_cardio.data.pipeline.frames import FRAME_POLICIES, FrameTree
+from iivs_cardio.data.pipeline.frames import FrameTree
 from iivs_cardio.data.pipeline.ranges import (
     DOCUMENT_EXT,
     CompositeRange,

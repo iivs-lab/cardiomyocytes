@@ -414,6 +414,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `str.endswith`, so `.JSON` counts and a file named `.json` does not. That is
   the test `select` itself applies, so the log now agrees with the selection it
   describes.
+- The preprocess log helpers say which half of the selection each is about:
+  `_log_frame_selection` and `_log_sequence_selection`, where one of the two
+  was `_log_selection` and frames are selected too. `log_filter_config` sits
+  beside `describe_filter_kernel` in `_filtering.py`, `_range_file` and
+  `_log_short_sequences` under the logging banner they belong to, and every
+  helper takes its logger last, as the ones taking a config already did.
+- The configuration log names what each line is about. A selection that is too
+  long to list says `excluding 6 sequences` where it said `excluding 6`, and one
+  given as a file says `the sequences listed in <path>` where the verb stood
+  alone. A policy is set in under the output it belongs to, and says
+  `overwriting the frames it finds` / `reusing the ranges that match this run`
+  in the verb the setting itself uses. `log_target_config` asks whether each
+  output is written once rather than twice, so what it writes and what it does
+  with what is there arrive together.
 - A stage that finds outputs with no source says `1 output with no source`
   rather than `1 output(s) have no source`, matching the line `FrameTree`
   already writes beside it.
@@ -451,6 +465,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   which raises on anything that does not resolve to a `Literal` rather than
   reporting it as empty. `get_args` on a PEP 695 alias returns an empty tuple,
   which every membership check downstream then accepts.
+- `FRAME_POLICIES`, an alias for `EXISTING_OUTPUT_POLICIES`. `build_branches`
+  reached for both in one function, which read as two vocabularies where there
+  is one: `if_frames_exist` and `if_ranges_exist` take the same three values.
 
 ### Fixed
 

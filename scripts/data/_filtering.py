@@ -1,15 +1,18 @@
 from __future__ import annotations
 
-__all__ = ("describe_filter_kernel", "parse_filter_config")
+__all__ = ("describe_filter_kernel", "log_filter_config", "parse_filter_config")
 
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any, Final
 
 from hydra.utils import instantiate
 
+from iivs_cardio.common.logging import log_indented
 from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig, KernelConfig
 
 if TYPE_CHECKING:
+    from logging import Logger
+
     from omegaconf import DictConfig
 
 _WHITELIST: Final = ("iivs_cardio.data.transforms.filtering.kernel.*",)
@@ -58,3 +61,12 @@ def describe_filter_kernel(config: KernelConfig) -> dict[str, Any]:
     reaching the settings anyone else was given.
     """
     return {"kind": config.kind, **asdict(config)}
+
+
+def log_filter_config(kernel_config: KernelConfig, logger: Logger) -> None:
+    """Log the filter a run applies, with the settings that shape it."""
+    described = describe_filter_kernel(kernel_config)
+    kind = described.pop("kind")
+    settings = ", ".join(f"{key}={value}" for key, value in described.items())
+    settings = f" ({settings})" if settings else ""
+    log_indented(logger, "filter: %s kernel%s", kind, settings, depth=0)

@@ -27,15 +27,14 @@ def frame_indices(
 ) -> range:
     """Return which of `total` source frames a run takes, in order.
 
-    The one place the three settings become positions. A run reads its frames
-    through a sequence and names them again when it lists what the source
-    holds, and the two have to agree exactly: a document counts what it covers
-    by matching one against the other, so a difference between them shows up as
-    every output being stale rather than as a wrong index.
+    The one place the three settings become positions: a run reads its frames
+    through a sequence and lists them again when it says what it covered, so a
+    difference between the two shows up as every output being stale.
 
-    A `start` past the end takes nothing, and a `count` past what is left takes
-    what is left. Neither is refused here, since how short a sequence is
-    allowed to come is the caller's policy.
+    A selection overrunning the source is clamped rather than refused, since
+    how short a sequence may come is the caller's policy. `total` alone is
+    unchecked, being measured from a source where the rest are read from a
+    config: measure it rather than pick a length that shapes the answer.
 
     Args:
         total: How many frames the source holds.

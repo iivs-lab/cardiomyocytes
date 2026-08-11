@@ -23,7 +23,7 @@ from iivs_cardio.data.pipeline import FrameTree, PhaseStageFactory, RangeDocumen
 from iivs_cardio.data.transforms.filtering.kernel import MedianConfig
 from iivs_cardio.data.writer import RECORD_FILE
 from scripts._common.compute import ComputeConfig, IncompleteRunError, run_all
-from scripts._common.dataset import SELECTION_LIMIT, TreeConfig
+from scripts._common.dataset import _LISTING_LIMIT, TreeConfig
 from scripts._common.phase import build_sequences, search_sources
 from scripts.data._filtering import parse_filter_config
 from scripts.data._process import (
@@ -1289,7 +1289,7 @@ def test_a_selection_naming_a_file_points_at_the_file(caplog):
     # the two cannot read the same.
     logged = _logged(caplog, source_configs(root="/d", include="/cfg/keep.json"))
 
-    assert "  including as listed in /cfg/keep.json" in logged
+    assert "  including the sequences listed in /cfg/keep.json" in logged
 
 
 def test_a_selection_naming_one_thing_says_it_outright(caplog):
@@ -1300,7 +1300,7 @@ def test_a_selection_naming_one_thing_says_it_outright(caplog):
 
 def test_a_short_selection_is_listed_one_to_a_line(caplog):
     logged = _logged(caplog, source_configs(root="/d", exclude=["TL_07", "TL_09"]))
-    head = logged.index("  excluding:")
+    head = logged.index("  excluding 2 sequences:")
 
     assert logged[head + 1 : head + 3] == ["    TL_07", "    TL_09"]
 
@@ -1312,13 +1312,12 @@ def test_a_long_selection_points_at_the_config_instead(caplog):
     # usual way, since both selections default to null. The path stays relative
     # because the log file naming it already sits in that directory, which is
     # what keeps a sweep's jobs pointing at their own copies.
-    names = [f"TL_{index:02d}" for index in range(SELECTION_LIMIT + 1)]
+    names = [f"TL_{index:02d}" for index in range(_LISTING_LIMIT + 1)]
+    record = ".hydra/{config,overrides}.yaml"
 
     logged = _logged(caplog, source_configs(root="/d", exclude=names))
 
-    assert f"  excluding {len(names)}, listed in .hydra/{{config,overrides}}.yaml" in (
-        logged
-    )
+    assert f"  excluding {len(names)} sequences, listed in {record}" in logged
     assert "    TL_00" not in logged
 
 
@@ -1428,20 +1427,23 @@ def test_a_target_naming_a_subpath_says_that_one(caplog):
 @pytest.mark.parametrize(
     ("policy", "said"),
     (
-        ("overwrite", "  replacing the ranges already there"),
-        ("reuse", "  keeping the ranges already there that still describe this run"),
+        ("overwrite", "    overwriting the ranges it finds"),
+        ("reuse", "    reusing the ranges that match this run"),
     ),
 )
-def test_a_run_says_what_it_does_with_what_is_already_there(caplog, policy, said):
+def test_a_run_says_what_it_does_with_an_output_it_finds(caplog, policy, said):
     # Refusing is the default and says nothing; each of the other two is named,
-    # since silence can separate two states but not three.
+    # since silence can separate two states but not three. Matched on the verbs
+    # the two policies own, since the line above says `the value ranges` too.
     target = TargetConfig(root="/o", if_ranges_exist=policy)
 
     assert said in _logged(caplog, source_configs(root="/d"), target)
 
     caplog.clear()
     refused = _logged(caplog, source_configs(root="/d"), TargetConfig(root="/o"))
-    assert not [line for line in refused if "already there" in line]
+    verbs = ("overwriting", "reusing")
+
+    assert not [line for line in refused if line.lstrip().startswith(verbs)]
 
 
 def test_a_run_that_will_delete_says_so_before_it_reads_anything(caplog):
@@ -1486,16 +1488,36 @@ def test_a_run_says_which_frames_it_takes_unless_it_takes_them_all(
         assert said in logged
 
 
+@pytest.mark.parametrize(
+    "select",
+    (
+        {"frame_step": 2},
+        {"frame_start": 5},
+        {"frame_start": 1, "frame_step": 3, "frame_count": 2},
+        {"frame_start": 4, "frame_step": 7, "frame_count": 100},
+    ),
+)
+def test_the_positions_shown_are_the_ones_the_run_would_read(caplog, select):
+    # The line is written before the search, so it cannot ask a source what it
+    # holds and works the positions out for itself. Nothing in the code holds
+    # that arithmetic to `frame_indices`, which is what the run reads by, so
+    # this does: a source long enough to clamp nothing is where they must meet.
+    source, config = source_configs(root="/d", **select)
+    listed = ", ".join(str(index) for index in config.frame_indices(10_000)[:3])
+
+    assert f"  reading frames {listed}" in "\n".join(_logged(caplog, (source, config)))
+
+
 def test_a_run_that_will_refuse_a_short_sequence_says_so_up_front(caplog):
     # The one value of `if_frames_short` that can end the run, so it is named
     # with the rest of what the run was told rather than only in the failure.
     source = source_configs(root="/d", frame_count=9, if_frames_short="error")
 
-    assert "  refusing a sequence that cannot supply them" in _logged(caplog, source)
+    assert "    a sequence with fewer stops the run" in _logged(caplog, source)
 
     caplog.clear()
     taking = source_configs(root="/d", frame_count=9)
-    assert not [line for line in _logged(caplog, taking) if "refusing" in line]
+    assert not [line for line in _logged(caplog, taking) if "stops the run" in line]
 
 
 def test_a_run_without_a_target_says_nothing_about_writing(caplog):

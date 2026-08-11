@@ -68,7 +68,7 @@ class ComputeConfig:
             answer: every core on cpu, every visible gpu on cuda.
         tasks_per_worker: How many items a worker takes before it is replaced.
             Defaults to None, which keeps it for the whole run.
-        measure_workers: Whether to ask the pool how busy each worker was.
+        measure_workers: Whether to ask the pool how each worker spent its time.
             Defaults to False.
         show_progress: Whether to draw a progress bar, when there is a terminal to draw
             it on. A redirected run says so and leaves it undrawn. Defaults to True.
@@ -367,13 +367,13 @@ def log_compute_config(config: ComputeConfig, logger: Logger) -> None:
     log_indented(logger, "compute: %s", config.device, depth=0)
 
     if (tasks := config.tasks_per_worker) is not None:
-        log_indented(logger, "replacing a worker after %d tasks", tasks)
+        log_indented(logger, "starting a fresh worker every %d tasks", tasks)
 
     if config.measure_workers:
-        log_indented(logger, "reporting how busy each worker was")
+        log_indented(logger, "measuring how each worker spends its time")
 
     if not config.show_progress:
-        log_indented(logger, "showing no progress bar")
+        log_indented(logger, "drawing no progress bar")
 
 
 def log_insights(insights: dict[str, Any], name: str, *, unit: str = "it") -> None:
@@ -592,7 +592,7 @@ def run_all(
 
     watched = sys.stderr.isatty()
     if config.show_progress and not watched:
-        logger.warning("not drawing progress: stderr is not a terminal")
+        logger.warning("not drawing the progress bar: stderr is not a terminal")
 
     progress = config.show_progress and watched and num_stages > 1
 

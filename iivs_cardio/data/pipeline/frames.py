@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-__all__ = ("FRAME_POLICIES", "FrameTree")
+__all__ = ("FrameTree",)
 
 import json
 import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Self
+from typing import TYPE_CHECKING, Self
 
 from kaparoo.filesystem import contains, prune_upward, search_dirs
 from kaparoo.utils import quantify
@@ -36,8 +36,6 @@ if TYPE_CHECKING:
     )
     from iivs_cardio.data.phase import PhaseFilteredSequence
     from iivs_cardio.data.writer import KoalaFrameWriter
-
-FRAME_POLICIES: Final[tuple[ExistingOutputPolicy, ...]] = EXISTING_OUTPUT_POLICIES
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,7 +91,7 @@ class FrameTree:
     _dropped: list[str] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        ensure_policy(self.if_frames_exist, FRAME_POLICIES, "if_frames_exist")
+        ensure_policy(self.if_frames_exist, EXISTING_OUTPUT_POLICIES, "if_frames_exist")
 
         names = unwrap_or_default(self.selected, tuple(self.contents))
         if unknown := [name for name in names if name not in self.contents]:
@@ -306,9 +304,9 @@ class FrameTree:
             here = self._written()
             self._reused.update(name for name in here if self._still_describes(name))
         elif self.if_frames_exist == "error" and (written := self._written()):
-            counts = quantify(len(written), "sequence")
+            sequences = quantify(len(written), "sequence")
             fix = "set `if_frames_exist` to 'overwrite' or 'reuse'"
-            msg = f"{counts} already written, from {written[0]!r}: {fix}"
+            msg = f"{sequences} already written, from {written[0]!r}: {fix}"
             raise FileExistsError(msg)
 
         return self

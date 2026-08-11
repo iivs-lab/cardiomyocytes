@@ -5,7 +5,6 @@ __all__ = (
     "build_branches",
     "build_preprocess_stages",
     "log_configs",
-    "log_filter_config",
     "log_target_config",
     "search_sources",
 )
@@ -29,14 +28,17 @@ from iivs_cardio.common.pipeline import (
 )
 from iivs_cardio.data.pipeline import (
     DOCUMENT_EXT,
-    FRAME_POLICIES,
     FrameTree,
     PhaseStageFactory,
     RangeDocument,
 )
 from scripts._common.dataset import TreeConfig, log_source_config
 from scripts._common.phase import build_sequences, search_sources
-from scripts.data._filtering import describe_filter_kernel, parse_filter_config
+from scripts.data._filtering import (
+    describe_filter_kernel,
+    log_filter_config,
+    parse_filter_config,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -134,6 +136,11 @@ def _validate_output(
         raise ValueError(msg)
 
 
+# ========================== #
+#          Logging           #
+# ========================== #
+
+
 def _range_file(target_config: TargetConfig) -> Path:
     """Return what the range document is called, given `.json` if it has none.
 
@@ -149,24 +156,24 @@ def _range_file(target_config: TargetConfig) -> Path:
         raise ValueError(msg) from error
 
 
-# ========================== #
-#          Logging           #
-# ========================== #
+def _log_policy(output: str, policy: str, logger: Logger) -> None:
+    """Say what a run does with an output it finds, unless it refuses to run.
 
-
-def log_filter_config(kernel_config: KernelConfig, logger: Logger) -> None:
-    """Log the filter a run applies, with the settings that shape it."""
-    described = describe_filter_kernel(kernel_config)
-    kind = described.pop("kind")
-    settings = ", ".join(f"{key}={value}" for key, value in described.items())
-    settings = f" ({settings})" if settings else ""
-    log_indented(logger, "filter: %s kernel%s", kind, settings, depth=0)
+    Set in under the line naming the output it belongs to, since the target
+    writes two and a policy at the same depth as both would read as either.
+    """
+    said = {
+        "overwrite": f"overwriting the {output} it finds",
+        "reuse": f"reusing the {output} that match this run",
+    }
+    if (line := said.get(policy)) is not None:
+        log_indented(logger, "%s", line, depth=2)
 
 
 def log_target_config(
     target_config: TargetConfig,
-    logger: Logger,
     output_root: StrPath,
+    logger: Logger,
     *,
     subpath: str | None = None,
 ) -> None:
@@ -174,44 +181,31 @@ def log_target_config(
 
     Args:
         target_config: The settings saying what the run was told to write.
-        logger: The logger the lines go to.
         output_root: The folder the branches actually write under, which is not
             `target.root`: that setting places the job's directory, and a sweep
             gives each of its jobs one of its own beneath it.
+        logger: The logger the lines go to.
         subpath: The layout a written sequence is given, when frames are
             written. Defaults to `None`, which leaves the layout unnamed.
     """
     log_indented(logger, "target: %s", output_root, depth=0)
 
+    if not (target_config.save_frames or target_config.save_ranges):
+        log_indented(logger, "writing nothing")
+        return
+
     if target_config.save_frames:
         layout = f"<sequence>/{subpath}" if subpath else "<sequence>/*"
         log_indented(logger, "writing the filtered frames to %s", layout)
+        _log_policy("frames", target_config.if_frames_exist, logger)
 
     if target_config.save_ranges:
         name = _range_file(target_config)
         log_indented(logger, "writing the value ranges to %s", name)
-
-    if not (target_config.save_frames or target_config.save_ranges):
-        log_indented(logger, "writing nothing")
-
-    if target_config.save_frames:
-        _log_policy(logger, "frames", target_config.if_frames_exist)
-
-    if target_config.save_ranges:
-        _log_policy(logger, "ranges", target_config.if_ranges_exist)
+        _log_policy("ranges", target_config.if_ranges_exist, logger)
 
     if target_config.if_sources_gone != "keep":
         log_indented(logger, "dropping outputs whose sequence the source has lost")
-
-
-def _log_policy(logger: Logger, what: str, policy: str) -> None:
-    """Say what a run does where that output is already there, unless it refuses."""
-    said = {
-        "overwrite": f"replacing the {what} already there",
-        "reuse": f"keeping the {what} already there that still describe this run",
-    }
-    if (line := said.get(policy)) is not None:
-        log_indented(logger, "%s", line)
 
 
 def log_configs(
@@ -240,7 +234,7 @@ def log_configs(
 
     if target_config is not None:
         subpath = target_config.resolve_subpath(source_config.resolve_subpath())
-        log_target_config(target_config, logger, output_root, subpath=subpath)
+        log_target_config(target_config, output_root, logger, subpath=subpath)
 
         renumbered = (select_config.frame_start, select_config.frame_step) != (0, 1)
         if target_config.save_frames and renumbered:
@@ -248,14 +242,9 @@ def log_configs(
             logger.warning("the cache renumbers the frames it keeps: %s", fix)
 
 
-# ========================== #
-#          Building          #
-# ========================== #
-
-
-def _log_short(
+def _log_short_sequences(
     select_config: SelectConfig,
-    sequences: Sequence[PhaseFilteredSequence],
+    taken: Sequence[PhaseFilteredSequence],
     contents: Mapping[str, Sequence[str]],
     *,
     name: str,
@@ -271,7 +260,7 @@ def _log_short(
         return
 
     short = []
-    for sequence in sequences:
+    for sequence in taken:
         held = len(contents[sequence.name])
         if held < count:
             short.append(f"{sequence.name} ({held})")
@@ -282,8 +271,13 @@ def _log_short(
     logger = logging.getLogger(name)
     listed = ", ".join(short)
 
-    label = quantify(len(short), "sequence")
-    logger.warning("%s gave fewer than %d: %s", label, count, listed)
+    sequences = quantify(len(short), "sequence")
+    logger.warning("%s gave fewer than %d: %s", sequences, count, listed)
+
+
+# ========================== #
+#          Building          #
+# ========================== #
 
 
 def build_branches(
@@ -325,7 +319,9 @@ def build_branches(
 
     subpath = source_config.resolve_subpath()
     source_policy = ensure_policy(
-        target_config.if_sources_gone, UNSOURCED_OUTPUT_POLICIES, "if_sources_gone"
+        target_config.if_sources_gone,
+        UNSOURCED_OUTPUT_POLICIES,
+        "if_sources_gone",
     )
 
     settings = {
@@ -341,8 +337,11 @@ def build_branches(
     if target_config.save_frames:
         target_subpath = target_config.resolve_subpath(subpath)
         frame_policy = ensure_policy(
-            target_config.if_frames_exist, FRAME_POLICIES, "if_frames_exist"
+            target_config.if_frames_exist,
+            EXISTING_OUTPUT_POLICIES,
+            "if_frames_exist",
         )
+
         branches.append(
             FrameTree(
                 output_root,
@@ -359,7 +358,9 @@ def build_branches(
         path = Path(output_root, target_config.range_file)
         source = source_config.root
         range_policy = ensure_policy(
-            target_config.if_ranges_exist, EXISTING_OUTPUT_POLICIES, "if_ranges_exist"
+            target_config.if_ranges_exist,
+            EXISTING_OUTPUT_POLICIES,
+            "if_ranges_exist",
         )
 
         branches.append(
@@ -425,7 +426,7 @@ def build_preprocess_stages(
         _validate_output(source_config, target_config, output_root)
 
     sequences, contents = build_sequences(source_config, select_config, kernel_config)
-    _log_short(select_config, sequences, contents, name=name)
+    _log_short_sequences(select_config, sequences, contents, name=name)
 
     branches = []
 

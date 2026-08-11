@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-__all__ = (
-    "SELECTION_LIMIT",
-    "SelectConfig",
-    "TreeConfig",
-    "log_source_config",
-)
+__all__ = ("SelectConfig", "TreeConfig", "log_source_config")
 
 from dataclasses import dataclass
 from pathlib import PurePath
@@ -24,7 +19,7 @@ if TYPE_CHECKING:
 
 
 # ========================== #
-#           Trees            #
+#          Configs           #
 # ========================== #
 
 
@@ -126,63 +121,70 @@ class SelectConfig:
 # ========================== #
 
 
-SELECTION_LIMIT: Final = 5
+# How many of the positions a run takes are shown before the line trails off.
+_PREVIEW_LIMIT: Final = 3
+
+# How many sequences are named before the line points at the config instead.
+_LISTING_LIMIT: Final = 5
 
 
-def _log_selection(logger: Logger, verb: str, value: list[str] | str) -> None:
-    """Log a selection, listing it only while a list is short enough to read."""
-    if isinstance(value, str):
-        if is_spec_file(value):
-            log_indented(logger, "%s as listed in %s", verb, value)
-        else:
-            log_indented(logger, "%s %s", verb, value)
-        return
-
-    if (count := len(value)) > SELECTION_LIMIT:
-        record = ".hydra/{config,overrides}.yaml"
-        log_indented(logger, "%s %d, listed in %s", verb, count, record)
-        return
-
-    log_indented(logger, "%s:", verb)
-    for item in value:
-        log_indented(logger, "%s", item, depth=2)
-
-
-def log_source_config(
-    source_config: TreeConfig, select_config: SelectConfig, logger: Logger
-) -> None:
-    """Log what a run reads, naming only the settings that were moved."""
-    log_indented(logger, "source: %s", source_config.root, depth=0)
-
-    log_indented(logger, "reading <sequence>/%s", source_config.resolve_subpath())
-
-    _log_frames(select_config, logger)
-
-    if select_config.include:
-        _log_selection(logger, "including", select_config.include)
-
-    if select_config.exclude:
-        _log_selection(logger, "excluding", select_config.exclude)
-
-
-def _log_frames(select_config: SelectConfig, logger: Logger) -> None:
-    """Log which source frames a run takes, unless it takes every one.
-
-    Shown as the first few positions rather than as the three settings, since
-    what a reader checks is whether the frames are the ones they meant and the
-    settings are what they already wrote.
-    """
+def _log_frame_selection(select_config: SelectConfig, logger: Logger) -> None:
     start = select_config.frame_start
     step = select_config.frame_step
     count = select_config.frame_count
     if (start, step, count) == (0, 1, None):
         return
 
-    shown = [start + index * step for index in range(3)][: count or 3]
-    listed = ", ".join(str(index) for index in shown)
-    tail = "" if count is not None and count <= len(shown) else ", ..."
-    held = "" if count is None else f" (at most {quantify(count, 'frame')})"
-    log_indented(logger, "reading frames %s%s%s", listed, tail, held)
+    counted = count is not None
+    preview = min(count, _PREVIEW_LIMIT) if counted else _PREVIEW_LIMIT
 
-    if count is not None and select_config.if_frames_short == "error":
-        log_indented(logger, "refusing a sequence that cannot supply them")
+    listed = ", ".join(str(start + index * step) for index in range(preview))
+    if not counted or count > preview:
+        listed = f"{listed}, ..."
+    if counted:
+        listed = f"{listed} (at most {quantify(count, 'frame')})"
+
+    log_indented(logger, "reading frames %s", listed)
+
+    if counted and select_config.if_frames_short == "error":
+        log_indented(logger, "a sequence with fewer stops the run", depth=2)
+
+
+def _log_sequence_selection(label: str, value: list[str] | str, logger: Logger) -> None:
+    if isinstance(value, str):
+        if is_spec_file(value):
+            log_indented(logger, "%s the sequences listed in %s", label, value)
+        else:
+            log_indented(logger, "%s %s", label, value)
+        return
+
+    count = len(value)
+    sequences = quantify(count, "sequence")
+
+    if count > _LISTING_LIMIT:
+        record = ".hydra/{config,overrides}.yaml"
+        log_indented(logger, "%s %s, listed in %s", label, sequences, record)
+        return
+
+    log_indented(logger, "%s %s:", label, sequences)
+    for item in value:
+        log_indented(logger, "%s", item, depth=2)
+
+
+def log_source_config(
+    source_config: TreeConfig,
+    select_config: SelectConfig,
+    logger: Logger,
+) -> None:
+    """Log what a run reads, naming only the settings that were moved."""
+    log_indented(logger, "source: %s", source_config.root, depth=0)
+
+    log_indented(logger, "reading <sequence>/%s", source_config.resolve_subpath())
+
+    _log_frame_selection(select_config, logger)
+
+    if select_config.include:
+        _log_sequence_selection("including", select_config.include, logger)
+
+    if select_config.exclude:
+        _log_sequence_selection("excluding", select_config.exclude, logger)
