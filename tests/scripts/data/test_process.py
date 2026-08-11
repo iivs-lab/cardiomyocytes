@@ -575,9 +575,7 @@ def test_a_written_sequence_says_which_frames_it_was_made_from(phase_tree, tmp_p
     assert record["source"] == "TL_00"
     assert record["settings"]["source"] == {
         "subpath": PHASE_FLOAT_BIN,
-        "frame_start": 0,
-        "frame_step": 2,
-        "frame_count": None,
+        "frames": {"start": 0, "step": 2, "count": None},
     }
     kept = range(0, FRAMES, 2)
     assert record["frames"] == [f"{index:05d}_phase.bin" for index in kept]
@@ -1069,12 +1067,12 @@ def _branches(
     step=1,
     **target,
 ):
-    source = source_configs(root="/dataset", subpath=subpath, frame_step=step)
+    source, _ = source_configs(root="/dataset", subpath=subpath, frame_step=step)
     config = TargetConfig(root=str(tmp_path), **target)
     contents = dict.fromkeys(sequence_names, ("00000_phase.bin",))
 
     return build_branches(
-        *source,
+        source,
         config,
         parse_filter_config(None),
         tmp_path,
@@ -1104,9 +1102,7 @@ def test_the_settings_carry_what_would_change_the_numbers(tmp_path):
 
     assert document.settings["source"] == {
         "subpath": "Phase/Float/Other",
-        "frame_start": 0,
-        "frame_step": 3,
-        "frame_count": None,
+        "frames": {"start": 0, "step": 3, "count": None},
     }
     assert document.settings["filter"]["kind"] == "identity"
 
@@ -1123,19 +1119,14 @@ def test_the_selection_stays_out_of_the_settings(tmp_path):
     # `include` / `exclude` change which sequences a run covers, not what any
     # sequence's numbers mean, and `coverage` already reports that. Recording
     # them here would refuse reuse to a run that narrowed its selection.
-    source = source_configs(root="/dataset", include=["TL_00"], exclude=["TL_09"])
+    source, _ = source_configs(root="/dataset", include=["TL_00"], exclude=["TL_09"])
     config = TargetConfig(root=str(tmp_path), save_ranges=True)
 
     (document,) = build_branches(
-        *source, config, parse_filter_config(None), tmp_path, {"TL_00": ()}
+        source, config, parse_filter_config(None), tmp_path, {"TL_00": ()}
     )
 
-    assert set(document.settings["source"]) == {
-        "subpath",
-        "frame_start",
-        "frame_step",
-        "frame_count",
-    }
+    assert set(document.settings["source"]) == {"subpath", "frames"}
 
 
 def test_the_contents_reaches_the_document_that_reports_on_it(tmp_path):
@@ -1164,7 +1155,7 @@ def test_branches_are_refused_before_any_of_them_is_built(tmp_path):
 
 def _frame_tree(tmp_path, **target):
     return build_branches(
-        *source_configs(root="/dataset"),
+        source_configs(root="/dataset")[0],
         TargetConfig(root=str(tmp_path), save_frames=True, save_ranges=False, **target),
         parse_filter_config(None),
         tmp_path,
@@ -1189,11 +1180,11 @@ def test_an_unset_target_subpath_follows_the_source(tmp_path):
 def test_the_settings_record_the_subpath_that_was_read(tmp_path):
     # A later run compares against where the frames came from, so writing them
     # somewhere else must not change what the document says it describes.
-    source = source_configs(root="/dataset")
+    source, _ = source_configs(root="/dataset")
     config = TargetConfig(root=str(tmp_path), subpath=FILTERED, save_ranges=True)
 
     (document,) = build_branches(
-        *source, config, parse_filter_config(None), tmp_path, {"TL_00": ()}
+        source, config, parse_filter_config(None), tmp_path, {"TL_00": ()}
     )
 
     assert document.settings["source"]["subpath"] == PHASE_FLOAT_BIN
@@ -1204,7 +1195,7 @@ def test_branches_are_refused_where_the_frames_would_land_on_the_source(tmp_path
     # too, since a caller may assemble the branches without going through it.
     with pytest.raises(ValueError, match=r"frames would land on the source"):
         build_branches(
-            *source_configs(root=str(tmp_path)),
+            source_configs(root=str(tmp_path))[0],
             TargetConfig(root=str(tmp_path), save_frames=True),
             parse_filter_config(None),
             tmp_path,
@@ -1502,10 +1493,13 @@ def test_the_positions_shown_are_the_ones_the_run_would_read(caplog, select):
     # holds and works the positions out for itself. Nothing in the code holds
     # that arithmetic to `frame_indices`, which is what the run reads by, so
     # this does: a source long enough to clamp nothing is where they must meet.
-    source, config = source_configs(root="/d", **select)
-    listed = ", ".join(str(index) for index in config.frame_indices(10_000)[:3])
+    source, sequences = source_configs(root="/d", **select)
+    taken = source.frames.indices(10_000)[:3]
+    listed = ", ".join(str(index) for index in taken)
 
-    assert f"  reading frames {listed}" in "\n".join(_logged(caplog, (source, config)))
+    logged = "\n".join(_logged(caplog, (source, sequences)))
+
+    assert f"  reading frames {listed}" in logged
 
 
 def test_a_run_that_will_refuse_a_short_sequence_says_so_up_front(caplog):

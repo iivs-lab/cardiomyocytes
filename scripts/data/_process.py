@@ -10,15 +10,13 @@ __all__ = (
 )
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 from typing import TYPE_CHECKING
 
-from kaparoo.filesystem import (
-    UnsupportedExtensionError,
-    ensure_file_extension,
-)
+from kaparoo.filesystem import UnsupportedExtensionError, ensure_file_extension
 from kaparoo.utils import quantify
+from omegaconf import MISSING
 
 from iivs_cardio.common.logging import log_indented
 from iivs_cardio.common.pipeline import (
@@ -32,8 +30,8 @@ from iivs_cardio.data.pipeline import (
     PhaseStageFactory,
     RangeDocument,
 )
-from scripts._common.dataset import TreeConfig, log_source_config
-from scripts._common.phase import build_sequences, search_sources
+from scripts._common.dataset import SourceConfig, log_source_config, resolve_subpath
+from scripts._common.phase import DEFAULT_SUBPATH, build_sequences, search_sources
 from scripts.data._filtering import (
     describe_filter_kernel,
     log_filter_config,
@@ -49,9 +47,13 @@ if TYPE_CHECKING:
     from torch import Tensor
 
     from iivs_cardio.common.pipeline import SideBranch
+    from iivs_cardio.common.pipeline.branch import (
+        ExistingOutputPolicy,
+        UnsourcedOutputPolicy,
+    )
     from iivs_cardio.data.phase import PhaseFilteredSequence
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
-    from scripts._common.dataset import SelectConfig
+    from scripts._common.dataset import FrameSelectConfig, SequenceSelectConfig
 
 
 # ========================== #
@@ -60,48 +62,104 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class TargetConfig(TreeConfig):
-    """What a run writes, and where.
+class BranchConfig:
+    """What one side branch writes, and what it does where it finds an output.
 
-    Both `"reuse"` policies judge by the settings and by the source frames'
-    names, never by what those frames hold. A source re-exported under the same
-    names is kept rather than written again, so a run that follows one takes
-    `"overwrite"` instead.
+    Every branch answers the same three questions, so a stage adding one adds a
+    block of this shape rather than another three keys beside the others.
 
     Attributes:
-        root: The folder the run's outputs land under.
+        save: Whether to write this output at all. Defaults to `False`.
+        if_exists: The policy for a sequence this output already covers.
+            `"reuse"` keeps what an earlier run left that still describes this
+            one, and writes the rest. Defaults to `"error"`.
+        if_unsourced: The policy for part of this output whose sequence the
+            source no longer holds. Defaults to `"keep"`: the same absence is
+            what a half mounted share looks like, and what is kept is always
+            said out loud.
+    """
+
+    save: bool = False
+    if_exists: str = "error"
+    if_unsourced: str = "keep"
+
+
+@dataclass
+class FrameBranchConfig(BranchConfig):
+    """The branch that writes each sequence back out as a tree of frames.
+
+    Attributes:
+        save: Whether to write the filtered frames. Defaults to `False`.
         subpath: The path a written sequence keeps its frames at inside its own
             folder. Naming one is what lets a run write beside the frames it
             read rather than over them. Defaults to `None`, which puts them
             where the source keeps its own.
-        save_frames: Whether to write the filtered frames, laid out like the
-            source. Defaults to `False`.
-        save_ranges: Whether to write the value ranges as one document. Defaults
-            to `True`.
-        range_file: The name that document is given, given `.json` if it has no
-            extension. Defaults to `"value_range"`.
-        if_frames_exist: The policy for a sequence that already has a frame
-            folder. `"reuse"` keeps the ones an earlier run left whose record
-            still describes this one, and writes the rest. Defaults to
-            `"error"`.
-        if_ranges_exist: The policy for a sequence that already has a range
-            part. `"reuse"` keeps the ones an earlier run left that still
-            describe this one, and measures the rest. Defaults to `"error"`.
-        if_sources_gone: The policy for an output whose sequence the source no
-            longer holds. Defaults to `"keep"`: the same absence is what a half
-            mounted share looks like, and what is kept is always said out loud.
+        record_file: The name of the file each written folder keeps its own
+            account in, given `.json` if it has no extension. A later run reads
+            it to decide whether what is there still describes this run.
+            Defaults to `"source"`.
+        if_exists: As `BranchConfig`, judged by the settings and the source
+            frames' names rather than by what those frames hold. A source
+            re-exported under the same names is kept rather than written again,
+            so a run that follows one takes `"overwrite"`.
+        if_unsourced: As `BranchConfig`.
     """
 
-    save_frames: bool = False
-    save_ranges: bool = True
-    range_file: str = "value_range"
-    if_frames_exist: str = "error"
-    if_ranges_exist: str = "error"
-    if_sources_gone: str = "keep"
+    subpath: str | None = None
+    record_file: str = "source"
+
+
+@dataclass
+class RangeBranchConfig(BranchConfig):
+    """The branch that gathers every sequence's value range into one document.
+
+    Attributes:
+        save: Whether to write the document. Defaults to `True`.
+        file: The name the document is given, given `.json` if it has no
+            extension. Defaults to `"value_range"`.
+        if_exists: As `BranchConfig`, judged by the settings and the source
+            frames' names rather than by what those frames hold.
+        if_unsourced: As `BranchConfig`.
+    """
+
+    save: bool = True
+    file: str = "value_range"
+
+
+@dataclass
+class TargetConfig:
+    """Where a run's outputs land, and which of them it writes.
+
+    Not a tree of its own: the frames go out as one and the ranges as a single
+    file, so what the two share is the root they sit under and nothing else.
+
+    Attributes:
+        root: The folder the run's outputs land under.
+        frames: The branch writing the filtered frames.
+        ranges: The branch writing the value ranges.
+    """
+
+    root: str = MISSING
+    frames: FrameBranchConfig = field(default_factory=FrameBranchConfig)
+    ranges: RangeBranchConfig = field(default_factory=RangeBranchConfig)
+
+
+def _existing(branch: BranchConfig, output: str) -> ExistingOutputPolicy:
+    """Read a branch's `if_exists`, naming the key a reader has to go and change."""
+    return ensure_policy(
+        branch.if_exists, EXISTING_OUTPUT_POLICIES, f"target.{output}.if_exists"
+    )
+
+
+def _unsourced(branch: BranchConfig, output: str) -> UnsourcedOutputPolicy:
+    """Read a branch's `if_unsourced`, naming the key a reader has to change."""
+    return ensure_policy(
+        branch.if_unsourced, UNSOURCED_OUTPUT_POLICIES, f"target.{output}.if_unsourced"
+    )
 
 
 def _validate_output(
-    source_config: TreeConfig, target_config: TargetConfig, output_root: StrPath
+    source_config: SourceConfig, target_config: TargetConfig, output_root: StrPath
 ) -> None:
     """Raise unless the target names an output this run can safely write.
 
@@ -114,9 +172,9 @@ def _validate_output(
         ValueError: If the target writes nothing, or the frames it writes would
             land on the source they are read from.
     """
-    if not target_config.save_frames:
-        if not target_config.save_ranges:
-            msg = "nothing to do: set `target.save_ranges` or `target.save_frames`"
+    if not target_config.frames.save:
+        if not target_config.ranges.save:
+            msg = "nothing to do: set `target.ranges.save` or `target.frames.save`"
             raise ValueError(msg)
         return
 
@@ -126,12 +184,16 @@ def _validate_output(
     if not output_root.is_relative_to(source_root):
         return
 
-    subpath = PurePath(source_config.resolve_subpath())
-    target_subpath = PurePath(target_config.resolve_subpath(subpath.as_posix()))
+    subpath = PurePath(resolve_subpath(source_config.subpath, default=DEFAULT_SUBPATH))
+    written = PurePath(
+        resolve_subpath(
+            target_config.frames.subpath, subpath.as_posix(), default=DEFAULT_SUBPATH
+        )
+    )
 
-    if subpath.is_relative_to(target_subpath) or target_subpath.is_relative_to(subpath):
-        where = f"{output_root.as_posix()}/*/{target_subpath.as_posix()}"
-        fix = "`target.subpath` beside it, or `target.root` outside the source"
+    if subpath.is_relative_to(written) or written.is_relative_to(subpath):
+        where = f"{output_root.as_posix()}/*/{written.as_posix()}"
+        fix = "`target.frames.subpath` beside it, or `target.root` outside the source"
         msg = f"frames would land on the source at {where}: set {fix}"
         raise ValueError(msg)
 
@@ -150,14 +212,15 @@ def _range_file(target_config: TargetConfig) -> Path:
             which is the only part a reader has to go and change.
     """
     try:
-        return ensure_file_extension(target_config.range_file, DOCUMENT_EXT, add=True)
+        return ensure_file_extension(target_config.ranges.file, DOCUMENT_EXT, add=True)
     except UnsupportedExtensionError as error:
-        msg = f"invalid `target.range_file` {target_config.range_file!r}: {error}"
+        named = target_config.ranges.file
+        msg = f"invalid `target.ranges.file` {named!r}: {error}"
         raise ValueError(msg) from error
 
 
-def _log_policy(output: str, policy: str, logger: Logger) -> None:
-    """Say what a run does with an output it finds, unless it refuses to run.
+def _log_branch(output: str, branch: BranchConfig, logger: Logger) -> None:
+    """Say what a branch does with what it finds, unless it refuses to run.
 
     Set in under the line naming the output it belongs to, since the target
     writes two and a policy at the same depth as both would read as either.
@@ -166,8 +229,11 @@ def _log_policy(output: str, policy: str, logger: Logger) -> None:
         "overwrite": f"overwriting the {output} it finds",
         "reuse": f"reusing the {output} that match this run",
     }
-    if (line := said.get(policy)) is not None:
+    if (line := said.get(branch.if_exists)) is not None:
         log_indented(logger, "%s", line, depth=2)
+
+    if branch.if_unsourced != "keep":
+        log_indented(logger, "dropping the %s a source no longer has", output, depth=2)
 
 
 def log_target_config(
@@ -190,27 +256,24 @@ def log_target_config(
     """
     log_indented(logger, "target: %s", output_root, depth=0)
 
-    if not (target_config.save_frames or target_config.save_ranges):
+    if not (target_config.frames.save or target_config.ranges.save):
         log_indented(logger, "writing nothing")
         return
 
-    if target_config.save_frames:
+    if target_config.frames.save:
         layout = f"<sequence>/{subpath}" if subpath else "<sequence>/*"
         log_indented(logger, "writing the filtered frames to %s", layout)
-        _log_policy("frames", target_config.if_frames_exist, logger)
+        _log_branch("frames", target_config.frames, logger)
 
-    if target_config.save_ranges:
+    if target_config.ranges.save:
         name = _range_file(target_config)
         log_indented(logger, "writing the value ranges to %s", name)
-        _log_policy("ranges", target_config.if_ranges_exist, logger)
-
-    if target_config.if_sources_gone != "keep":
-        log_indented(logger, "dropping outputs whose sequence the source has lost")
+        _log_branch("ranges", target_config.ranges, logger)
 
 
 def log_configs(
-    source_config: TreeConfig,
-    select_config: SelectConfig,
+    source_config: SourceConfig,
+    sequence_config: SequenceSelectConfig,
     target_config: TargetConfig | None,
     kernel_config: KernelConfig,
     output_root: StrPath,
@@ -228,22 +291,25 @@ def log_configs(
     the run says which of them a reader should join by.
     """
     logger = logging.getLogger(name)
+    read = resolve_subpath(source_config.subpath, default=DEFAULT_SUBPATH)
 
-    log_source_config(source_config, select_config, logger)
+    log_source_config(source_config, sequence_config, logger, subpath=read)
     log_filter_config(kernel_config, logger)
 
     if target_config is not None:
-        subpath = target_config.resolve_subpath(source_config.resolve_subpath())
+        subpath = resolve_subpath(
+            target_config.frames.subpath, read, default=DEFAULT_SUBPATH
+        )
         log_target_config(target_config, output_root, logger, subpath=subpath)
 
-        renumbered = (select_config.frame_start, select_config.frame_step) != (0, 1)
-        if target_config.save_frames and renumbered:
+        renumbered = (source_config.frames.start, source_config.frames.step) != (0, 1)
+        if target_config.frames.save and renumbered:
             fix = "join the value ranges to it by position rather than by name"
             logger.warning("the cache renumbers the frames it keeps: %s", fix)
 
 
 def _log_short_sequences(
-    select_config: SelectConfig,
+    frame_config: FrameSelectConfig,
     taken: Sequence[PhaseFilteredSequence],
     contents: Mapping[str, Sequence[str]],
     *,
@@ -255,7 +321,7 @@ def _log_short_sequences(
     since it is what the dataset turned out to hold and not what the run was
     told to do. `"error"` never reaches here: the search refuses there.
     """
-    count = select_config.frame_count
+    count = frame_config.count
     if count is None:
         return
 
@@ -281,8 +347,7 @@ def _log_short_sequences(
 
 
 def build_branches(
-    source_config: TreeConfig,
-    select_config: SelectConfig,
+    source_config: SourceConfig,
     target_config: TargetConfig,
     kernel_config: KernelConfig,
     output_root: StrPath,
@@ -291,11 +356,14 @@ def build_branches(
 ) -> list[SideBranch[PhaseFilteredSequence, Tensor, Path]]:
     """Build the branches a target describes, in the order they will watch.
 
+    Which sequences a run took is not recorded, since it changes what the run
+    covers rather than what any sequence's numbers mean, and `coverage` reports
+    it already. Recording it would refuse reuse to a run that narrowed itself,
+    and the signature is what keeps it out: no selection reaches here.
+
     Args:
         source_config: The tree the run reads, recorded in what the branches
             write.
-        select_config: The sequences and frames it takes from that tree,
-            recorded alongside it.
         target_config: The settings saying what the run writes.
         kernel_config: The filter, recorded for a later run to compare against.
         output_root: The folder the branches write under.
@@ -317,61 +385,44 @@ def build_branches(
 
     branches = []
 
-    subpath = source_config.resolve_subpath()
-    source_policy = ensure_policy(
-        target_config.if_sources_gone,
-        UNSOURCED_OUTPUT_POLICIES,
-        "if_sources_gone",
-    )
+    subpath = resolve_subpath(source_config.subpath, default=DEFAULT_SUBPATH)
+    frames = source_config.frames
 
     settings = {
         "source": {
             "subpath": subpath,
-            "frame_start": select_config.frame_start,
-            "frame_step": select_config.frame_step,
-            "frame_count": select_config.frame_count,
+            "frames": {
+                "start": frames.start,
+                "step": frames.step,
+                "count": frames.count,
+            },
         },
         "filter": describe_filter_kernel(kernel_config),
     }
 
-    if target_config.save_frames:
-        target_subpath = target_config.resolve_subpath(subpath)
-        frame_policy = ensure_policy(
-            target_config.if_frames_exist,
-            EXISTING_OUTPUT_POLICIES,
-            "if_frames_exist",
-        )
-
+    if (branch := target_config.frames).save:
         branches.append(
             FrameTree(
                 output_root,
-                target_subpath,
+                resolve_subpath(branch.subpath, subpath, default=DEFAULT_SUBPATH),
                 contents,
                 settings,
                 selected=selected,
-                if_frames_exist=frame_policy,
-                if_sources_gone=source_policy,
+                if_frames_exist=_existing(branch, "frames"),
+                if_sources_gone=_unsourced(branch, "frames"),
             )
         )
 
-    if target_config.save_ranges:
-        path = Path(output_root, target_config.range_file)
-        source = source_config.root
-        range_policy = ensure_policy(
-            target_config.if_ranges_exist,
-            EXISTING_OUTPUT_POLICIES,
-            "if_ranges_exist",
-        )
-
+    if (branch := target_config.ranges).save:
         branches.append(
             RangeDocument(
-                path,
-                source,
+                Path(output_root, branch.file),
+                source_config.root,
                 contents,
                 settings,
                 selected=selected,
-                if_ranges_exist=range_policy,
-                if_sources_gone=source_policy,
+                if_ranges_exist=_existing(branch, "ranges"),
+                if_sources_gone=_unsourced(branch, "ranges"),
             )
         )
 
@@ -379,8 +430,8 @@ def build_branches(
 
 
 def build_preprocess_stages(
-    source_config: TreeConfig,
-    select_config: SelectConfig,
+    source_config: SourceConfig,
+    sequence_config: SequenceSelectConfig,
     target_config: TargetConfig | None = None,
     filter_config: DictConfig | None = None,
     *,
@@ -396,7 +447,7 @@ def build_preprocess_stages(
 
     Args:
         source_config: The tree the sequences are read from.
-        select_config: Which of them to read, and how much of each.
+        sequence_config: Which of its sequences to read.
         target_config: The settings saying what to write. Defaults to `None`,
             for a run that only reads.
         filter_config: The filter to apply. Defaults to `None`, which leaves the
@@ -415,7 +466,7 @@ def build_preprocess_stages(
 
     log_configs(
         source_config,
-        select_config,
+        sequence_config,
         target_config,
         kernel_config,
         output_root,
@@ -425,15 +476,14 @@ def build_preprocess_stages(
     if target_config is not None:
         _validate_output(source_config, target_config, output_root)
 
-    sequences, contents = build_sequences(source_config, select_config, kernel_config)
-    _log_short_sequences(select_config, sequences, contents, name=name)
+    sequences, contents = build_sequences(source_config, sequence_config, kernel_config)
+    _log_short_sequences(source_config.frames, sequences, contents, name=name)
 
     branches = []
 
     if target_config is not None:
         branches = build_branches(
             source_config,
-            select_config,
             target_config,
             kernel_config,
             output_root,

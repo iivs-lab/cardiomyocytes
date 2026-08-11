@@ -9,7 +9,11 @@ import pytest
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import save_phase_bin
 
-from scripts._common.dataset import SelectConfig, TreeConfig
+from scripts._common.dataset import (
+    FrameSelectConfig,
+    SequenceSelectConfig,
+    SourceConfig,
+)
 from scripts._common.phase import LAST_SEARCH
 
 if TYPE_CHECKING:
@@ -26,16 +30,37 @@ SEQUENCES = 3
 FRAMES = 4
 
 
+# The flat keyword a test writes, against the field it fills on the frame config.
+_FRAME_KEYWORDS = {
+    "frame_start": "start",
+    "frame_step": "step",
+    "frame_count": "count",
+    "if_frames_short": "if_fewer",
+}
+
+
 def source_configs(
-    root: StrPath, subpath: str | None = None, **select: Any
-) -> tuple[TreeConfig, SelectConfig]:
+    root: StrPath, subpath: str | None = None, **settings: Any
+) -> tuple[SourceConfig, SequenceSelectConfig]:
     """Return the two configs a run reads a tree by, as one call.
 
     Every reader takes both, so the pair travels together in a test the way it
     does in a config file. Star it into the call, as the readers take them as
     two arguments: `search_sources(*source_configs(root))`.
+
+    The frame settings are written flat here and nested on the way in, which
+    keeps a test saying what it varies rather than how the config is shaped.
     """
-    return TreeConfig(root=str(root), subpath=subpath), SelectConfig(**select)
+    frames = FrameSelectConfig(
+        **{
+            field: settings.pop(key)
+            for key, field in _FRAME_KEYWORDS.items()
+            if key in settings
+        }
+    )
+    source = SourceConfig(root=str(root), subpath=subpath, frames=frames)
+
+    return source, SequenceSelectConfig(**settings)
 
 
 @pytest.fixture(autouse=True)

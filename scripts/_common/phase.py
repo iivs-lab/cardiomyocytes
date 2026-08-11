@@ -1,22 +1,34 @@
 from __future__ import annotations
 
-__all__ = ("LAST_SEARCH", "SearchResult", "build_sequences", "search_sources")
+__all__ = (
+    "DEFAULT_SUBPATH",
+    "LAST_SEARCH",
+    "SearchResult",
+    "build_sequences",
+    "search_sources",
+)
 
-from dataclasses import fields
+from dataclasses import astuple, fields, is_dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
+from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import PhaseFileFolder, PhaseUnit, search_phase_bin_folders
 from kaparoo.filesystem import contains, select, stringify_path
 from kaparoo.utils import quantify
 
 from iivs_cardio.common.pipeline import SHORT_INPUT_POLICIES, ensure_policy
 from iivs_cardio.data.phase import PhaseFilteredSequence
+from scripts._common.dataset import resolve_subpath
 
 if TYPE_CHECKING:
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
-    from scripts._common.dataset import SelectConfig, TreeConfig
+    from scripts._common.dataset import SequenceSelectConfig, SourceConfig
 
+
+# Where a phase sequence keeps its frames, for a tree that names no layout of
+# its own. The reader's to know, since a hologram search takes no subpath.
+DEFAULT_SUBPATH: Final = PHASE_FLOAT_BIN
 
 # One folder per sequence taken, against the contents of the dataset they came from.
 type SearchResult = tuple[list[PhaseFileFolder], dict[str, tuple[str, ...]]]
@@ -26,7 +38,8 @@ LAST_SEARCH: dict[tuple[object, ...], SearchResult] = {}
 
 
 def _source_key(
-    source_config: TreeConfig, select_config: SelectConfig
+    source_config: SourceConfig,
+    select_config: SequenceSelectConfig,
 ) -> tuple[object, ...]:
     """Return what makes two searches the same search.
 
@@ -37,7 +50,12 @@ def _source_key(
     """
 
     def frozen(value: object) -> object:
-        return tuple(value) if isinstance(value, list) else value
+        if isinstance(value, list):
+            return tuple(value)
+        if is_dataclass(value) and not isinstance(value, type):
+            return astuple(value)
+
+        return value
 
     values: list[object] = [str(Path.cwd())]
 
@@ -48,11 +66,12 @@ def _source_key(
 
 
 def _search_sources(
-    source_config: TreeConfig, select_config: SelectConfig
+    source_config: SourceConfig,
+    select_config: SequenceSelectConfig,
 ) -> SearchResult:
     """Walk the root, open every sequence it holds, and keep the ones taken."""
     root = source_config.root
-    subpath = source_config.resolve_subpath()
+    subpath = resolve_subpath(source_config.subpath, default=DEFAULT_SUBPATH)
     holds_frames = contains(subpath, kind="dir")
 
     def descend(folder: Path) -> bool:
@@ -87,19 +106,17 @@ def _search_sources(
             msg = f"{folder_subpath(source)}: {error}"
             raise ValueError(msg) from error
 
+    frames = source_config.frames
+
     contents: dict[str, tuple[str, ...]] = {}
     for folder in folders:
-        indices = select_config.frame_indices(len(folder.files))
+        indices = frames.indices(len(folder.files))
         names = tuple(folder.files[index].name for index in indices)
         contents[folder_subpath(folder)] = names
 
-    count = select_config.frame_count
+    count = frames.count
     if count is not None:
-        policy = ensure_policy(
-            select_config.if_frames_short,
-            SHORT_INPUT_POLICIES,
-            "if_frames_short",
-        )
+        policy = ensure_policy(frames.if_fewer, SHORT_INPUT_POLICIES, "frames.if_fewer")
 
         for source in sources:
             name = folder_subpath(source)
@@ -114,7 +131,8 @@ def _search_sources(
 
 
 def search_sources(
-    source_config: TreeConfig, select_config: SelectConfig
+    source_config: SourceConfig,
+    select_config: SequenceSelectConfig,
 ) -> SearchResult:
     """Find the sequences a run reads, narrowed by what it was told to take.
 
@@ -161,7 +179,9 @@ def search_sources(
 
 
 def build_sequences(
-    source_config: TreeConfig, select_config: SelectConfig, kernel_config: KernelConfig
+    source_config: SourceConfig,
+    select_config: SequenceSelectConfig,
+    kernel_config: KernelConfig,
 ) -> tuple[list[PhaseFilteredSequence], dict[str, tuple[str, ...]]]:
     """Build one filtered view per sequence, all sharing a single kernel.
 
@@ -173,7 +193,8 @@ def build_sequences(
         the whole dataset they were selected from.
     """
     sources, contents = search_sources(source_config, select_config)
-    subpath = source_config.resolve_subpath()
+    subpath = resolve_subpath(source_config.subpath, default=DEFAULT_SUBPATH)
+    frames = source_config.frames
 
     kernel = kernel_config.build()
 
@@ -183,9 +204,9 @@ def build_sequences(
             kernel,
             root=source_config.root,
             subpath=subpath,
-            start=select_config.frame_start,
-            step=select_config.frame_step,
-            count=select_config.frame_count,
+            start=frames.start,
+            step=frames.step,
+            count=frames.count,
         )
 
     return [build_sequence(source) for source in sources], contents

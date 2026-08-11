@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-__all__ = ("SelectConfig", "TreeConfig", "log_source_config")
+__all__ = (
+    "FrameSelectConfig",
+    "SequenceSelectConfig",
+    "SourceConfig",
+    "log_source_config",
+    "resolve_subpath",
+)
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePath
-from typing import TYPE_CHECKING, ClassVar, Final
+from typing import TYPE_CHECKING, Final
 
-from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from kaparoo.filesystem import is_spec_file
 from kaparoo.utils import quantify, unwrap_or_default
 from omegaconf import MISSING
@@ -23,97 +28,103 @@ if TYPE_CHECKING:
 # ========================== #
 
 
+def resolve_subpath(
+    subpath: str | None, follow: str | None = None, *, default: str
+) -> str:
+    """Return where a sequence's frames sit, settling an unset `subpath`.
+
+    The answer is always a path a sequence's own folder contains, which is what
+    lets two of them be compared as they stand: one that could reach outside
+    would leave whatever compares them looking at the wrong pair.
+
+    Args:
+        subpath: The layout that was asked for, or `None` for whichever the
+            other two arguments settle on.
+        follow: The layout an unset `subpath` takes, such as the one the other
+            end of the stage keeps its frames in. Defaults to `None`, which
+            leaves it to `default`.
+        default: The layout to fall back to, which the reader supplies: a
+            phase tree keeps its frames somewhere a flow tree does not, and
+            nothing here knows which is being read.
+
+    Raises:
+        ValueError: If the answer would reach outside a sequence's folder.
+    """
+    settled = unwrap_or_default(subpath, unwrap_or_default(follow, default))
+
+    path = PurePath(settled)
+    if path.anchor or ".." in path.parts:
+        msg = f"invalid subpath {settled!r}: expected a relative path, no '..'"
+        raise ValueError(msg)
+
+    return settled
+
+
 @dataclass
-class TreeConfig:
-    """A tree of sequences, and where inside one of them the frames sit.
+class FrameSelectConfig:
+    """Which frames of a sequence a run takes, and how much of it they are.
 
-    What a run reads and what it writes are the same shape, so the pair of
-    settings that says where a tree is lives here once. A subclass may set
-    `DEFAULT_SUBPATH` to the layout its own end of a stage uses, which is what
-    an unset `subpath` comes to when the caller offers nothing to follow.
+    Held per tree rather than per run, since two trees a run reads may be at
+    different rates: a source at 20 Hz asked for 10 Hz takes every second
+    frame, where a flow cache already written at 10 Hz takes every one. The
+    numbers differ because the trees differ, and what they arrive at is the
+    same rate.
 
-    `DEFAULT_SUBPATH` is the one thing here that assumes a modality. It sits on
-    the base while phase is the only one read, and moves to whatever names the
-    reader when a second arrives: a hologram search takes no `subpath` at all,
-    so the layout is the reader's to know rather than the tree's.
+    Attributes:
+        start: The first source frame to take. Defaults to 0.
+        step: The stride to read the tree at, so that every `step`th frame from
+            `start` is taken. Defaults to 1.
+        count: How many frames to take once the stride has been applied.
+            Defaults to `None`, which takes them all.
+        if_fewer: The policy for a sequence that cannot supply `count`, which
+            says nothing when there is no count to fall short of. `"take"`
+            takes what there is and names the sequence in the log. Defaults to
+            `"take"`.
+    """
+
+    start: int = 0
+    step: int = 1
+    count: int | None = None
+    if_fewer: str = "take"
+
+    def indices(self, total: int) -> range:
+        """Return which of `total` source frames this run takes, in order."""
+        return frame_indices(total, start=self.start, step=self.step, count=self.count)
+
+
+@dataclass
+class SourceConfig:
+    """A tree a run reads frames from, and which of them it takes.
 
     Attributes:
         root: The folder the sequences sit under.
         subpath: The path to a sequence's frames inside its own folder. Defaults
-            to `None`, which follows what the caller offers and falls back to
-            this end's own layout when it offers nothing.
+            to `None`, which takes whichever layout the reader knows.
+        frames: Which frames of each sequence to take. Defaults to all of them.
     """
-
-    DEFAULT_SUBPATH: ClassVar[str] = PHASE_FLOAT_BIN
 
     root: str = MISSING
     subpath: str | None = None
-
-    def resolve_subpath(self, follow: str | None = None) -> str:
-        """Return where the frames sit, settling an unset `subpath`.
-
-        The answer is always a path a sequence's own folder contains, which is
-        what lets two of them be compared as they stand: one that could reach
-        outside would leave whatever compares them looking at the wrong pair.
-
-        Args:
-            follow: The layout an unset `subpath` takes, such as the one the
-                other end of the stage keeps its frames in. Defaults to `None`,
-                which leaves it to `DEFAULT_SUBPATH`.
-
-        Raises:
-            ValueError: If the answer would reach outside a sequence's folder.
-        """
-        default = unwrap_or_default(follow, self.DEFAULT_SUBPATH)
-        subpath = unwrap_or_default(self.subpath, default)
-
-        path = PurePath(subpath)
-        if path.anchor or ".." in path.parts:
-            msg = f"invalid subpath {subpath!r}: expected a relative path, no '..'"
-            raise ValueError(msg)
-
-        return subpath
+    frames: FrameSelectConfig = field(default_factory=FrameSelectConfig)
 
 
 @dataclass
-class SelectConfig:
-    """Which sequences a run takes, and how much of each.
+class SequenceSelectConfig:
+    """Which sequences of a tree a run takes.
 
-    Held apart from the tree they are taken from, since a run reading two trees
-    takes the same sequences and the same frames from both. Two copies of this
-    could disagree, and a run that paired frames which do not correspond would
-    compute on them quietly.
+    One per run rather than one per tree, since a sequence keeps its name
+    wherever it is written: a cache holds `plate_A/TL_01` under that name too,
+    so the same two settings pick the same sequences from every tree. Frame
+    numbers do not survive that way, which is why they are the tree's.
 
     Attributes:
         include: The sequences to take, as names or as a path to a file listing
             them. Defaults to `None`, which takes all of them.
         exclude: The same, for sequences to leave out. Defaults to `None`.
-        frame_start: The first source frame to take. Defaults to 0.
-        frame_step: The stride to read each sequence at, so that every
-            `frame_step`th frame from `frame_start` is taken. Defaults to 1.
-        frame_count: How many frames to take once the stride has been applied.
-            Defaults to `None`, which takes them all.
-        if_frames_short: The policy for a sequence that cannot supply
-            `frame_count`, which says nothing when there is no count to fall
-            short of. `"take"` takes what there is and names the sequence in
-            the log. Defaults to `"take"`.
     """
 
     include: list[str] | str | None = None
     exclude: list[str] | str | None = None
-    frame_start: int = 0
-    frame_step: int = 1
-    frame_count: int | None = None
-    if_frames_short: str = "take"
-
-    def frame_indices(self, total: int) -> range:
-        """Return which of `total` source frames this run takes, in order."""
-        return frame_indices(
-            total,
-            start=self.frame_start,
-            step=self.frame_step,
-            count=self.frame_count,
-        )
 
 
 # ========================== #
@@ -128,10 +139,10 @@ _PREVIEW_LIMIT: Final = 3
 _LISTING_LIMIT: Final = 5
 
 
-def _log_frame_selection(select_config: SelectConfig, logger: Logger) -> None:
-    start = select_config.frame_start
-    step = select_config.frame_step
-    count = select_config.frame_count
+def _log_frame_selection(frame_config: FrameSelectConfig, logger: Logger) -> None:
+    start = frame_config.start
+    step = frame_config.step
+    count = frame_config.count
     if (start, step, count) == (0, 1, None):
         return
 
@@ -146,7 +157,7 @@ def _log_frame_selection(select_config: SelectConfig, logger: Logger) -> None:
 
     log_indented(logger, "reading frames %s", listed)
 
-    if counted and select_config.if_frames_short == "error":
+    if counted and frame_config.if_fewer == "error":
         log_indented(logger, "a sequence with fewer stops the run", depth=2)
 
 
@@ -172,19 +183,29 @@ def _log_sequence_selection(label: str, value: list[str] | str, logger: Logger) 
 
 
 def log_source_config(
-    source_config: TreeConfig,
-    select_config: SelectConfig,
+    source_config: SourceConfig,
+    sequence_config: SequenceSelectConfig,
     logger: Logger,
+    *,
+    subpath: str,
 ) -> None:
-    """Log what a run reads, naming only the settings that were moved."""
+    """Log what a run reads, naming only the settings that were moved.
+
+    Args:
+        source_config: The tree the run reads.
+        sequence_config: Which of its sequences it takes.
+        logger: The logger the lines go to.
+        subpath: The layout it reads them at, already settled: which one an
+            unset `source.subpath` comes to is the reader's to know.
+    """
     log_indented(logger, "source: %s", source_config.root, depth=0)
 
-    log_indented(logger, "reading <sequence>/%s", source_config.resolve_subpath())
+    log_indented(logger, "reading <sequence>/%s", subpath)
 
-    _log_frame_selection(select_config, logger)
+    _log_frame_selection(source_config.frames, logger)
 
-    if select_config.include:
-        _log_sequence_selection("including", select_config.include, logger)
+    if sequence_config.include:
+        _log_sequence_selection("including", sequence_config.include, logger)
 
-    if select_config.exclude:
-        _log_sequence_selection("excluding", select_config.exclude, logger)
+    if sequence_config.exclude:
+        _log_sequence_selection("excluding", sequence_config.exclude, logger)

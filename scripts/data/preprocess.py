@@ -7,7 +7,7 @@ import hydra
 from dotenv import load_dotenv
 
 from scripts._common.compute import ComputeConfig, WorkerLogFolder, run_all
-from scripts._common.dataset import SelectConfig, TreeConfig
+from scripts._common.dataset import SequenceSelectConfig, SourceConfig
 from scripts._common.hydra import apply_schema, is_multirun, output_directory
 from scripts.data._process import TargetConfig, build_preprocess_stages
 
@@ -36,12 +36,12 @@ def main(cfg: DictConfig) -> None:
         IncompleteRunError: If any sequence failed.
     """
     compute_config = apply_schema(ComputeConfig, cfg.compute)
-    source_config = apply_schema(TreeConfig, cfg.source)
-    select_config = apply_schema(SelectConfig, cfg.select)
+    source_config = apply_schema(SourceConfig, cfg.source)
+    select_config = apply_schema(SequenceSelectConfig, cfg.select)
     target_config = apply_schema(TargetConfig, cfg.target)
     filter_config: DictConfig | None = cfg.get("filter")
 
-    if target_config.save_frames and is_multirun():
+    if target_config.frames.save and is_multirun():
         msg = "cannot write frames in a sweep: run the winning config alone instead"
         raise ValueError(msg)
 
