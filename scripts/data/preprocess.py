@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Final
 
 import hydra
 from dotenv import load_dotenv
+from kaparoo.filesystem import ensure_dir_exists
 
 from scripts._common.compute import ComputeConfig, WorkerLogFolder, run_all
 from scripts._common.dataset import SequenceSelectConfig, SourceConfig
@@ -24,39 +25,31 @@ STAGE: Final = "preprocess"
 
 
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name=CONFIG_NAME)
-def main(cfg: DictConfig) -> None:
-    """Run one job: read the settings, build the run, and carry it out.
-
-    Writing frames is refused in a sweep, since every job of a sweep would
-    write the same tree and the last one would be all that was left.
-
-    Raises:
-        ValueError: If the settings ask for frames in a sweep, or describe
-            a run that cannot be built.
-        IncompleteRunError: If any sequence failed.
-    """
-    compute_config = apply_schema(ComputeConfig, cfg.compute)
-    source_config = apply_schema(SourceConfig, cfg.source)
-    select_config = apply_schema(SequenceSelectConfig, cfg.select)
-    target_config = apply_schema(TargetConfig, cfg.target)
-    filter_config: DictConfig | None = cfg.get("filter")
+def main(config: DictConfig) -> None:
+    compute_config = apply_schema(ComputeConfig, config.compute)
+    source_config = apply_schema(SourceConfig, config.source)
+    target_config = apply_schema(TargetConfig, config.target)
+    sequence_config = apply_schema(SequenceSelectConfig, config.select)
+    filter_config: DictConfig | None = config.get("filter")
 
     if target_config.frames.save and is_multirun():
         msg = "cannot write frames in a sweep: run the winning config alone instead"
         raise ValueError(msg)
 
-    log_folder = WorkerLogFolder(output_directory(), STAGE)
+    output_root = ensure_dir_exists(output_directory())
 
     stages = build_preprocess_stages(
         source_config,
-        select_config,
+        sequence_config,
         target_config,
         filter_config,
-        output_root=log_folder.root,
+        output_root=output_root,
         name=STAGE,
     )
 
+    log_folder = WorkerLogFolder(output_root, stages.name)
     log_folder.clear()
+
     run_all(stages, compute_config, unit="seq", log_folder=log_folder)
 
 
