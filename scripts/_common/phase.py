@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 __all__ = (
-    "DEFAULT_SUBPATH",
     "LAST_SEARCH",
     "SearchResult",
     "build_sequences",
@@ -10,25 +9,20 @@ __all__ = (
 
 from dataclasses import astuple, fields, is_dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING
 
-from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import PhaseFileFolder, PhaseUnit, search_phase_bin_folders
 from kaparoo.filesystem import contains, select, stringify_path
 from kaparoo.utils import quantify
 
 from iivs_cardio.common.pipeline import ensure_policy
 from iivs_cardio.data.phase import PhaseFilteredSequence
-from scripts._common.dataset import SHORT_SEQUENCE_POLICIES, resolve_subpath
+from scripts._common.dataset import SHORT_SEQUENCE_POLICIES
 
 if TYPE_CHECKING:
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
     from scripts._common.dataset import SequenceSelectConfig, SourceConfig
 
-
-# Where a phase sequence keeps its frames, for a tree that names no layout of
-# its own. The reader's to know, since a hologram search takes no subpath.
-DEFAULT_SUBPATH: Final = PHASE_FLOAT_BIN
 
 # One folder per sequence taken, against the contents of the dataset they came from.
 type SearchResult = tuple[list[PhaseFileFolder], dict[str, tuple[str, ...]]]
@@ -71,7 +65,7 @@ def _search_sources(
 ) -> SearchResult:
     """Walk the root, open every sequence it holds, and keep the ones taken."""
     root = source_config.root
-    subpath = resolve_subpath(source_config.subpath, default=DEFAULT_SUBPATH)
+    subpath = source_config.resolve_subpath()
     holds_frames = contains(subpath, kind="dir")
 
     def descend(folder: Path) -> bool:
@@ -195,7 +189,7 @@ def build_sequences(
         the whole dataset they were selected from.
     """
     sources, contents = search_sources(source_config, select_config)
-    subpath = resolve_subpath(source_config.subpath, default=DEFAULT_SUBPATH)
+    subpath = source_config.resolve_subpath()
     frames = source_config.frames
 
     kernel = kernel_config.build()

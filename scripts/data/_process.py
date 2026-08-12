@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 __all__ = (
+    "PreprocessSourceConfig",
     "TargetConfig",
     "build_branches",
     "build_preprocess_stages",
@@ -12,8 +13,9 @@ __all__ = (
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
+from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from kaparoo.utils import quantify, unwrap_or_factory
 
 from iivs_cardio.common.logging import log_indented
@@ -24,8 +26,8 @@ from iivs_cardio.common.pipeline.branch import (
 )
 from iivs_cardio.data.pipeline import FrameTree, PhaseStageFactory, RangeDocument
 from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig
-from scripts._common.dataset import SourceConfig, log_source_config, resolve_subpath
-from scripts._common.phase import DEFAULT_SUBPATH, build_sequences, search_sources
+from scripts._common.dataset import SequenceLayout, SourceConfig, log_source_config
+from scripts._common.phase import build_sequences, search_sources
 from scripts.data._filtering import describe_filter_kernel, log_filter_config
 
 if TYPE_CHECKING:
@@ -44,6 +46,22 @@ if TYPE_CHECKING:
 # ========================== #
 #          Settings          #
 # ========================== #
+
+
+@dataclass
+class PreprocessSourceConfig(SourceConfig):
+    """The tree this stage reads, laid out the way an acquisition arrives.
+
+    Attributes:
+        DEFAULT_SUBPATH: Koala's own layout, which is where a phase sequence
+            comes off the microscope. A tree holding another modality names its
+            own `subpath`, and one that names the wrong layout is found empty.
+        subpath: As `SourceConfig`.
+        root: As `SourceConfig`.
+        frames: As `SourceConfig`.
+    """
+
+    DEFAULT_SUBPATH: ClassVar[str] = PHASE_FLOAT_BIN
 
 
 @dataclass
@@ -70,10 +88,14 @@ class BranchConfig:
 
 
 @dataclass
-class FrameBranchConfig(BranchConfig):
+class FrameBranchConfig(BranchConfig, SequenceLayout):
     """The branch that writes each sequence back out as a tree of frames.
 
     Attributes:
+        DEFAULT_SUBPATH: Where the frames go for a branch that names no layout
+            and is given nothing to follow. Never reached while the run has a
+            source to follow, and there to keep a caller without one from
+            writing into the sequence folder itself.
         save: Whether to write the filtered frames. Defaults to `False`.
         subpath: The path a written sequence keeps its frames at inside its own
             folder. Naming one is what lets a run write beside the frames it
@@ -90,7 +112,8 @@ class FrameBranchConfig(BranchConfig):
         if_unsourced: As `BranchConfig`.
     """
 
-    subpath: str | None = None
+    DEFAULT_SUBPATH: ClassVar[str] = "frames"
+
     record_file: str = "source"
 
 
@@ -155,12 +178,8 @@ def _validate_output(
     if not output_root.is_relative_to(source_root):
         return
 
-    subpath = PurePath(resolve_subpath(source_config.subpath, default=DEFAULT_SUBPATH))
-    written = PurePath(
-        resolve_subpath(
-            target_config.frames.subpath, subpath.as_posix(), default=DEFAULT_SUBPATH
-        )
-    )
+    subpath = PurePath(source_config.resolve_subpath())
+    written = PurePath(target_config.frames.resolve_subpath(subpath.as_posix()))
 
     if subpath.is_relative_to(written) or written.is_relative_to(subpath):
         where = f"{output_root.as_posix()}/*/{written.as_posix()}"
@@ -261,15 +280,13 @@ def log_configs(
     the run says which of them a reader should join by.
     """
     logger = logging.getLogger(name)
-    read = resolve_subpath(source_config.subpath, default=DEFAULT_SUBPATH)
 
-    log_source_config(source_config, sequence_config, logger, subpath=read)
+    log_source_config(source_config, sequence_config, logger)
     log_filter_config(kernel_config, logger)
 
     if target_config is not None:
-        subpath = resolve_subpath(
-            target_config.frames.subpath, read, default=DEFAULT_SUBPATH
-        )
+        read = source_config.resolve_subpath()
+        subpath = target_config.frames.resolve_subpath(read)
         log_target_config(
             target_config, logger, output_root=output_root, subpath=subpath
         )
@@ -359,7 +376,7 @@ def build_branches(
 
     branches = []
 
-    subpath = resolve_subpath(source_config.subpath, default=DEFAULT_SUBPATH)
+    subpath = source_config.resolve_subpath()
     frames = source_config.frames
 
     settings = {
@@ -378,7 +395,7 @@ def build_branches(
         branches.append(
             FrameTree(
                 output_root,
-                resolve_subpath(branch.subpath, subpath, default=DEFAULT_SUBPATH),
+                branch.resolve_subpath(subpath),
                 contents,
                 settings,
                 selected=selected,

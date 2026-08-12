@@ -9,12 +9,9 @@ import pytest
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import save_phase_bin
 
-from scripts._common.dataset import (
-    FrameSelectConfig,
-    SequenceSelectConfig,
-    SourceConfig,
-)
+from scripts._common.dataset import FrameSelectConfig, SequenceSelectConfig
 from scripts._common.phase import LAST_SEARCH
+from scripts.data._process import PreprocessSourceConfig
 
 if TYPE_CHECKING:
     from kaparoo.filesystem.types import StrPath
@@ -41,7 +38,7 @@ _FRAME_KEYWORDS = {
 
 def source_configs(
     root: StrPath, subpath: str | None = None, **settings: Any
-) -> tuple[SourceConfig, SequenceSelectConfig]:
+) -> tuple[PreprocessSourceConfig, SequenceSelectConfig]:
     """Return the two configs a run reads a tree by, as one call.
 
     Every reader takes both, so the pair travels together in a test the way it
@@ -58,7 +55,7 @@ def source_configs(
             if key in settings
         }
     )
-    source = SourceConfig(root=str(root), subpath=subpath, frames=frames)
+    source = PreprocessSourceConfig(root=str(root), subpath=subpath, frames=frames)
 
     return source, SequenceSelectConfig(**settings)
 

@@ -23,15 +23,12 @@ from iivs_cardio.data.pipeline import FrameTree, PhaseStageFactory, RangeDocumen
 from iivs_cardio.data.transforms.filtering.kernel import MedianConfig
 from iivs_cardio.data.writer import RECORD_FILE
 from scripts._common.compute import ComputeConfig, IncompleteRunError, run_all
-from scripts._common.dataset import _LISTING_LIMIT, resolve_subpath
-from scripts._common.phase import (
-    DEFAULT_SUBPATH,
-    build_sequences,
-    search_sources,
-)
+from scripts._common.dataset import _LISTING_LIMIT
+from scripts._common.phase import build_sequences, search_sources
 from scripts.data._filtering import parse_filter_config
 from scripts.data._process import (
     FrameBranchConfig,
+    PreprocessSourceConfig,
     RangeBranchConfig,
     TargetConfig,
     build_branches,
@@ -439,8 +436,9 @@ def test_a_target_asking_for_nothing_is_refused_before_the_source_is_read(tmp_pa
 FILTERED = "Phase/Float/FilteredBin"
 
 
+@pytest.mark.parametrize("config", (PreprocessSourceConfig, FrameBranchConfig))
 @pytest.mark.parametrize("subpath", ("/elsewhere", "../raw", "Phase/../../raw"))
-def test_a_subpath_that_reaches_outside_a_sequence_is_refused(subpath):
+def test_a_subpath_that_reaches_outside_a_sequence_is_refused(config, subpath):
     # The destination check compares the two subpaths as they stand, so a `..`
     # walks straight past it and `Path(root, name, subpath)` lands wherever it
     # points: back inside the source, on a run the check just cleared. Refused
@@ -449,7 +447,7 @@ def test_a_subpath_that_reaches_outside_a_sequence_is_refused(subpath):
     # it still resets the path to the drive root, and the anchor is what says so
     # on both platforms.
     with pytest.raises(ValueError, match=r"invalid subpath"):
-        resolve_subpath(subpath, default=DEFAULT_SUBPATH)
+        config(subpath=subpath).resolve_subpath()
 
 
 def test_a_subpath_reaching_outside_stops_the_run_before_it_starts(

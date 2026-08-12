@@ -3,16 +3,16 @@ from __future__ import annotations
 __all__ = (
     "SHORT_SEQUENCE_POLICIES",
     "FrameSelectConfig",
+    "SequenceLayout",
     "SequenceSelectConfig",
     "ShortSequencePolicy",
     "SourceConfig",
     "log_source_config",
-    "resolve_subpath",
 )
 
 from dataclasses import dataclass, field
 from pathlib import PurePath
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, ClassVar, Final, Literal
 
 from kaparoo.filesystem import is_spec_file
 from kaparoo.utils import literal_values, quantify, unwrap_or_default
@@ -37,36 +37,50 @@ SHORT_SEQUENCE_POLICIES: Final[tuple[ShortSequencePolicy, ...]] = literal_values
 )
 
 
-def resolve_subpath(
-    subpath: str | None, follow: str | None = None, *, default: str
-) -> str:
-    """Return where a sequence's frames sit, settling an unset `subpath`.
+@dataclass
+class SequenceLayout:
+    """Where one end of a stage keeps a sequence's frames, inside its own folder.
 
-    The answer is always a path a sequence's own folder contains, which is what
-    lets two of them be compared as they stand: one that could reach outside
-    would leave whatever compares them looking at the wrong pair.
+    A subclass supplies `DEFAULT_SUBPATH`, since a phase tree keeps its frames
+    somewhere a flow tree does not and nothing here knows which end this is.
+    One that does not is refused the moment it has to settle an unset `subpath`.
 
-    Args:
-        subpath: The layout that was asked for, or `None` for whichever the
-            other two arguments settle on.
-        follow: The layout an unset `subpath` takes, such as the one the other
-            end of the stage keeps its frames in. Defaults to `None`, which
-            leaves it to `default`.
-        default: The layout to fall back to, which the reader supplies: a
-            phase tree keeps its frames somewhere a flow tree does not, and
-            nothing here knows which is being read.
-
-    Raises:
-        ValueError: If the answer would reach outside a sequence's folder.
+    Attributes:
+        DEFAULT_SUBPATH: The layout this end keeps its frames in, for a config
+            that names none and follows nothing.
+        subpath: The layout that was asked for. Defaults to `None`, which takes
+            whichever the class or the other end settles on.
     """
-    settled = unwrap_or_default(subpath, unwrap_or_default(follow, default))
 
-    path = PurePath(settled)
-    if path.anchor or ".." in path.parts:
-        msg = f"invalid subpath {settled!r}: expected a relative path, no '..'"
-        raise ValueError(msg)
+    DEFAULT_SUBPATH: ClassVar[str]
 
-    return settled
+    subpath: str | None = None
+
+    def resolve_subpath(self, follow: str | None = None) -> str:
+        """Return where the frames sit, settling an unset `subpath`.
+
+        The answer is always a path a sequence's own folder contains, which is
+        what lets two of them be compared as they stand: one that could reach
+        outside would leave whatever compares them looking at the wrong pair.
+
+        Args:
+            follow: The layout an unset `subpath` takes, such as the one the
+                other end of the stage keeps its frames in. Defaults to `None`,
+                which leaves it to `DEFAULT_SUBPATH`.
+
+        Raises:
+            ValueError: If the answer would reach outside a sequence's folder.
+        """
+        settled = unwrap_or_default(
+            self.subpath, unwrap_or_default(follow, self.DEFAULT_SUBPATH)
+        )
+
+        path = PurePath(settled)
+        if path.anchor or ".." in path.parts:
+            msg = f"invalid subpath {settled!r}: expected a relative path, no '..'"
+            raise ValueError(msg)
+
+        return settled
 
 
 @dataclass
@@ -102,18 +116,21 @@ class FrameSelectConfig:
 
 
 @dataclass
-class SourceConfig:
+class SourceConfig(SequenceLayout):
     """A tree a run reads frames from, and which of them it takes.
 
+    A stage names the subclass it reads, so the layout a bare `subpath` falls
+    back to is the one that stage's own trees keep their frames in.
+
     Attributes:
-        root: The folder the sequences sit under.
+        DEFAULT_SUBPATH: As `SequenceLayout`, supplied by the stage's subclass.
         subpath: The path to a sequence's frames inside its own folder. Defaults
-            to `None`, which takes whichever layout the reader knows.
+            to `None`, which takes `DEFAULT_SUBPATH`.
+        root: The folder the sequences sit under.
         frames: Which frames of each sequence to take. Defaults to all of them.
     """
 
     root: str = MISSING
-    subpath: str | None = None
     frames: FrameSelectConfig = field(default_factory=FrameSelectConfig)
 
 
@@ -195,8 +212,6 @@ def log_source_config(
     source_config: SourceConfig,
     sequence_config: SequenceSelectConfig,
     logger: Logger,
-    *,
-    subpath: str,
 ) -> None:
     """Log what a run reads, naming only the settings that were moved.
 
@@ -204,12 +219,10 @@ def log_source_config(
         source_config: The tree the run reads.
         sequence_config: Which of its sequences it takes.
         logger: The logger the lines go to.
-        subpath: The layout it reads them at, already settled: which one an
-            unset `source.subpath` comes to is the reader's to know.
     """
     log_indented(logger, "source: %s", source_config.root, depth=0)
 
-    log_indented(logger, "reading <sequence>/%s", subpath)
+    log_indented(logger, "reading <sequence>/%s", source_config.resolve_subpath())
 
     _log_frame_selection(source_config.frames, logger)
 
