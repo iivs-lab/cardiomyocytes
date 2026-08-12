@@ -131,7 +131,9 @@ class TargetConfig:
 
 
 def _validate_output(
-    source_config: SourceConfig, target_config: TargetConfig, output_root: StrPath
+    source_config: SourceConfig,
+    target_config: TargetConfig,
+    output_root: StrPath,
 ) -> None:
     """Raise unless the target names an output this run can safely write.
 
@@ -196,11 +198,11 @@ def _log_branch(output: str, branch: BranchConfig, logger: Logger) -> None:
     Set in under the line naming the output it belongs to, since the target
     writes two and a policy at the same depth as both would read as either.
     """
-    said = {
+    lines = {
         "overwrite": f"overwriting the {output} it finds",
         "reuse": f"reusing the {output} that match this run",
     }
-    if (line := said.get(branch.if_present)) is not None:
+    if (line := lines.get(branch.if_present)) is not None:
         log_indented(logger, "%s", line, depth=2)
 
     if branch.if_unsourced != "keep":
@@ -209,19 +211,19 @@ def _log_branch(output: str, branch: BranchConfig, logger: Logger) -> None:
 
 def log_target_config(
     target_config: TargetConfig,
-    output_root: StrPath,
     logger: Logger,
     *,
+    output_root: StrPath,
     subpath: str | None = None,
 ) -> None:
     """Log what a run writes and where, naming each output it will produce.
 
     Args:
         target_config: The settings saying what the run was told to write.
+        logger: The logger the lines go to.
         output_root: The folder the branches actually write under, which is not
             `target.root`: that setting places the job's directory, and a sweep
             gives each of its jobs one of its own beneath it.
-        logger: The logger the lines go to.
         subpath: The layout a written sequence is given, when frames are
             written. Defaults to `None`, which leaves the layout unnamed.
     """
@@ -247,8 +249,8 @@ def log_configs(
     sequence_config: SequenceSelectConfig,
     target_config: TargetConfig | None,
     kernel_config: KernelConfig,
-    output_root: StrPath,
     *,
+    output_root: StrPath,
     name: str,
 ) -> None:
     """Log the whole configuration of a run, as one block per part.
@@ -271,7 +273,9 @@ def log_configs(
         subpath = resolve_subpath(
             target_config.frames.subpath, read, default=DEFAULT_SUBPATH
         )
-        log_target_config(target_config, output_root, logger, subpath=subpath)
+        log_target_config(
+            target_config, logger, output_root=output_root, subpath=subpath
+        )
 
         renumbered = (source_config.frames.start, source_config.frames.step) != (0, 1)
         if target_config.frames.save and renumbered:
@@ -281,9 +285,9 @@ def log_configs(
 
 def _log_short_sequences(
     frame_config: FrameSelectConfig,
-    taken: Sequence[PhaseFilteredSequence],
-    contents: Mapping[str, Sequence[str]],
     *,
+    contents: Mapping[str, Sequence[str]],
+    sequences: Sequence[PhaseFilteredSequence],
     name: str,
 ) -> None:
     """Name the sequences that could not supply the count that was asked for.
@@ -297,7 +301,7 @@ def _log_short_sequences(
         return
 
     short = []
-    for sequence in taken:
+    for sequence in sequences:
         held = len(contents[sequence.name])
         if held < count:
             short.append(f"{sequence.name} ({held})")
@@ -306,10 +310,11 @@ def _log_short_sequences(
         return
 
     logger = logging.getLogger(name)
-    listed = ", ".join(short)
 
-    sequences = quantify(len(short), "sequence")
-    logger.warning("%s gave fewer than %d: %s", sequences, count, listed)
+    listed = ", ".join(short)
+    counted = quantify(len(short), "sequence")
+
+    logger.warning("%s gave fewer than %d: %s", counted, count, listed)
 
 
 # ========================== #
@@ -321,6 +326,7 @@ def build_branches(
     source_config: SourceConfig,
     target_config: TargetConfig,
     kernel_config: KernelConfig,
+    *,
     output_root: StrPath,
     contents: Mapping[str, Sequence[str]],
     selected: Sequence[str] | None = None,
@@ -338,8 +344,8 @@ def build_branches(
         target_config: The settings saying what the run writes.
         kernel_config: The filter, recorded for a later run to compare against.
         output_root: The folder the branches write under.
-        contents: Every sequence the source holds, against the frames each would
-            be measured over.
+        contents: Every sequence the source holds, against the frames each
+            would be measured over.
         selected: The sequences of those this run was given. Defaults to `None`,
             which takes all of them.
 
@@ -441,7 +447,7 @@ def build_preprocess_stages(
         sequence_config,
         target_config,
         kernel_config,
-        output_root,
+        output_root=output_root,
         name=name,
     )
 
@@ -449,18 +455,22 @@ def build_preprocess_stages(
         _validate_output(source_config, target_config, output_root)
 
     sequences, contents = build_sequences(source_config, sequence_config, kernel_config)
-    _log_short_sequences(source_config.frames, sequences, contents, name=name)
+    _log_short_sequences(
+        source_config.frames, contents=contents, sequences=sequences, name=name
+    )
 
     branches = []
 
     if target_config is not None:
+        selected = [sequence.name for sequence in sequences]
+
         branches = build_branches(
             source_config,
             target_config,
             kernel_config,
-            output_root,
-            contents,
-            [sequence.name for sequence in sequences],
+            output_root=output_root,
+            contents=contents,
+            selected=selected,
         )
 
     return PhaseStageFactory(sequences, *branches, name=name)
