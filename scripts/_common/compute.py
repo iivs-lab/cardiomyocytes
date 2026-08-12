@@ -28,7 +28,7 @@ from mpire import WorkerPool
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
-from iivs_cardio.common.device import Device
+from iivs_cardio.common.device import Device, DeviceKind
 from iivs_cardio.common.logging import log_indented
 from iivs_cardio.common.pipeline import StageFactory
 
@@ -73,7 +73,7 @@ class ComputeConfig:
             it on. A redirected run says so and leaves it undrawn. Defaults to True.
     """
 
-    device: str = "cpu"
+    device: DeviceKind = "cpu"
     workers: int | list[int] | None = None
     tasks_per_worker: int | None = None
     measure_workers: bool = False
