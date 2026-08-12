@@ -229,7 +229,7 @@ def log_target_config(
     logger: Logger,
     *,
     output_root: StrPath,
-    subpath: str | None = None,
+    follow: str | None = None,
 ) -> None:
     """Log what a run writes and where, naming each output it will produce.
 
@@ -239,18 +239,19 @@ def log_target_config(
         output_root: The folder the branches write under, which hydra made for
             this job. A sweep gives each of its jobs one of its own beneath
             `run_root`, so the two are the same path only in a lone run.
-        subpath: The layout a written sequence is given, when frames are
-            written. Defaults to `None`, which leaves the layout unnamed.
+        follow: The layout the source reads at, which the frames branch takes
+            where it names none of its own. Defaults to `None`, which leaves
+            the branch to its own.
     """
-    log_indented(logger, "target: %s", output_root, depth=0)
+    log_indented(logger, "target: %s", PurePath(output_root).as_posix(), depth=0)
 
     if not (target_config.frames.save or target_config.ranges.save):
         log_indented(logger, "writing nothing")
         return
 
     if target_config.frames.save:
-        subpath = target_config.frames.resolve_subpath(subpath)
-        layout = f"<sequence>/{subpath}" if subpath else "<sequence>/*"
+        written = target_config.frames.resolve_subpath(follow)
+        layout = f"<sequence>/{written}" if written else "<sequence>/*"
         log_indented(logger, "writing the filtered frames to %s", layout)
         _log_branch("frames", target_config.frames, logger)
 
@@ -285,10 +286,8 @@ def log_configs(
     log_filter_config(kernel_config, logger)
 
     if target_config is not None:
-        subpath = source_config.resolve_subpath()
-        log_target_config(
-            target_config, logger, output_root=output_root, subpath=subpath
-        )
+        read = source_config.resolve_subpath()
+        log_target_config(target_config, logger, output_root=output_root, follow=read)
 
         renumbered = (source_config.frames.start, source_config.frames.step) != (0, 1)
         if target_config.frames.save and renumbered:
