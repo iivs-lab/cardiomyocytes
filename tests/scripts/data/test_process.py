@@ -326,6 +326,23 @@ def test_a_sequence_that_cannot_supply_the_count_can_be_refused_instead(phase_tr
         search_sources(*source)
 
 
+def test_a_selection_that_lands_on_no_frame_is_refused_before_the_run(
+    phase_tree, tmp_path
+):
+    # Not `if_short`'s to decide: that is for a sequence the dataset came up
+    # short on, and this is a setting written wrong. Left to the run, every
+    # sequence failed on its own once the whole search had been paid for.
+    dest = tmp_path / "out"
+    source = source_configs(root=str(phase_tree), frame_start=FRAMES)
+
+    with pytest.raises(ValueError, match=r"TL_00: the frame selection takes none"):
+        build_preprocess_stages(
+            *source, target_config=_target(), name=STAGE, output_root=dest
+        )
+
+    assert not dest.exists()
+
+
 def test_a_count_nobody_falls_short_of_says_nothing(phase_tree, caplog):
     source = source_configs(root=str(phase_tree), frame_count=FRAMES)
 
@@ -458,6 +475,28 @@ def test_a_subpath_that_reaches_outside_a_sequence_is_refused(config, subpath):
     # on both platforms.
     with pytest.raises(ValueError, match=r"invalid subpath"):
         config(subpath=subpath).resolve_subpath()
+
+
+@pytest.mark.parametrize("config", (PreprocessSourceConfig, FrameBranchConfig))
+@pytest.mark.parametrize("subpath", ("", ".", "./"))
+def test_a_subpath_naming_the_sequence_folder_itself_comes_back_empty(config, subpath):
+    # A layout is compared and joined as it stands, so the two spellings of
+    # "no layout at all" have to arrive as one.
+    assert config(subpath=subpath).resolve_subpath() == ""
+
+
+def test_a_tree_that_could_not_find_its_own_frames_again_is_refused(tmp_path):
+    # A sequence is recognised by holding the layout, so with none to hold the
+    # walk stops at the first level: `plate_A` reads as a sequence and the ones
+    # under it never do. `if_present` then guards nothing and `if_unsourced`
+    # would take the plate whole.
+    nested = {"plate_A/TL_00": (), "plate_A/TL_01": ()}
+
+    with pytest.raises(ValueError, match=r"a nested dataset cannot be found again"):
+        FrameTree(tmp_path, "", nested)
+
+    flat = {"TL_00": (), "TL_01": ()}
+    assert FrameTree(tmp_path, "", flat).subpath == ""
 
 
 def test_a_subpath_reaching_outside_stops_the_run_before_it_starts(

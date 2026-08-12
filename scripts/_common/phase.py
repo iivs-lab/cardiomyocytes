@@ -104,19 +104,23 @@ def _search_sources(
         contents[folder_subpath(folder)] = names
 
     count = frames.count
-    if count is not None:
-        policy = ensure_policy(
-            frames.if_short, SHORT_SEQUENCE_POLICIES, "frames.if_short"
-        )
+    policy = ensure_policy(frames.if_short, SHORT_SEQUENCE_POLICIES, "frames.if_short")
 
-        for source in sources:
-            name = folder_subpath(source)
-            held = len(contents[name])
-            if policy == "error" and held < count:
-                asked = quantify(count, "frame")
-                short_of = f"short of the {asked} asked for"
-                msg = f"{name}: {held} frames after the stride, {short_of}"
-                raise ValueError(msg)
+    for source in sources:
+        name = folder_subpath(source)
+        held = len(contents[name])
+
+        if not held:
+            whole = quantify(len(source.files), "frame")
+            fix = "lower `source.frames.start` or `source.frames.step`"
+            msg = f"{name}: the frame selection takes none of its {whole}: {fix}"
+            raise ValueError(msg)
+
+        if count is not None and policy == "error" and held < count:
+            asked = quantify(count, "frame")
+            short_of = f"short of the {asked} asked for"
+            msg = f"{name}: {held} frames after the stride, {short_of}"
+            raise ValueError(msg)
 
     return taken, contents
 
@@ -131,6 +135,10 @@ def search_sources(
     run, since a gap is a fault in the dataset rather than in one item of work.
     A gap otherwise opens as an ordinary shorter sequence, and what is written
     back out is numbered without one, so nothing downstream can tell.
+
+    A selection that lands on none of a sequence's frames is refused there too,
+    and is not the policy's to decide: a run reading nothing at all is a
+    setting that was written wrong rather than a dataset that came up short.
 
     Nothing inside a time-lapse is descended into. Opening one lists its frames
     already, and the walk has no reason to list them a second time looking for

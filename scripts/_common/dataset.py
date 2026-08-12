@@ -68,6 +68,11 @@ class SequenceLayout:
                 other end of the stage keeps its frames in. Defaults to `None`,
                 which leaves it to `DEFAULT_SUBPATH`.
 
+        Returns:
+            The layout, in posix form, and empty for one naming the sequence's
+            own folder. Both spellings of that come back the same, so whatever
+            reads the answer has one of them to handle rather than two.
+
         Raises:
             ValueError: If the answer would reach outside a sequence's folder.
         """
@@ -79,7 +84,7 @@ class SequenceLayout:
             msg = f"invalid subpath {subpath!r}: expected a relative path, no '..'"
             raise ValueError(msg)
 
-        return subpath
+        return "/".join(path.parts)
 
 
 @dataclass

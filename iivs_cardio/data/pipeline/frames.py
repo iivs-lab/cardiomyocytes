@@ -53,7 +53,11 @@ class FrameTree:
 
     Attributes:
         root: The directory the tree is written under.
-        subpath: The path to a sequence's frames inside its own folder.
+        subpath: The path to a sequence's frames inside its own folder. Empty
+            puts them in the folder itself, which only a dataset whose names
+            are one level deep can be read back from: a sequence is recognised
+            by holding this, so with nothing to hold the walk stops at the
+            first level and calls the folders there sequences.
         contents: Every sequence the source holds, which is what tells a folder
             with no sequence behind it from one this run simply did not take.
             Given rather than defaulted, since an empty one leaves every folder
@@ -76,7 +80,8 @@ class FrameTree:
             Defaults to `"keep"`.
 
     Raises:
-        ValueError: If `if_present` is not a policy a tree offers, if
+        ValueError: If `subpath` is empty for a dataset whose names are
+            nested, if `if_present` is not a policy a tree offers, if
             `record_file` carries a directory part, or if `selected` names
             something the contents does not hold.
     """
@@ -97,6 +102,11 @@ class FrameTree:
     def __post_init__(self) -> None:
         ensure_policy(self.if_present, PRESENT_POLICIES, "if_present")
         object.__setattr__(self, "record_file", ensure_json_name(self.record_file))
+
+        if not self.subpath and any("/" in name for name in self.contents):
+            fix = "give the branch a `subpath`"
+            msg = f"a nested dataset cannot be found again without a layout: {fix}"
+            raise ValueError(msg)
 
         names = unwrap_or_default(self.selected, tuple(self.contents))
         if unknown := [name for name in names if name not in self.contents]:
