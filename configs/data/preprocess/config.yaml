@@ -5,41 +5,41 @@ defaults:
   - /compute@compute: cpu
   - /filter@filter: median_ellipsoid_2x2x2
 
-run_root: ??? # where the job directory goes; a sweep puts each job under it by number
+run_root: ???
 
 source:
-  root: ??? # the folder to search for phase .bin sequences
-  subpath: null # a sequence's path in its time-lapse; null takes Koala's Phase/Float/Bin
-  frames: # per tree: two trees at different rates reach one rate by different steps
-    start: 0 # the first source frame to take
-    step: 1 # take every step'th from there
-    count: null # at most this many after the stride; null takes them all
-    if_short: take # take | error (only where count is set)
+  root: ???
+  subpath: null
+  frames:
+    start: 0
+    step: 1
+    count: null
+    if_short: take
 
 select:
-  include: null # a file of subpaths, or the subpaths as a list; null takes all
-  exclude: null # same, for sequences to skip
+  include: null
+  exclude: null
 
 target:
-  frames: # the filtered frames as a .bin tree, laid out like the source
+  frames:
     save: false
-    subpath: null # a written sequence's frame folder; null follows source.subpath
-    record_file: source # what each folder says about itself; `.json` added if absent
-    if_present: error # error | overwrite | reuse
-    if_unsourced: keep # keep | delete (outputs the source no longer has)
-  ranges: # one JSON of the dataset, sequence, and frame ranges
+    subpath: null
+    record_file: source
+    if_present: error
+    if_unsourced: keep
+  ranges:
     save: true
-    file: value_range # `.json` is added if absent
-    if_present: error # error | overwrite | reuse
-    if_unsourced: keep # keep | delete (outputs the source no longer has)
+    file: value_range
+    if_present: error
+    if_unsourced: keep
 
 hydra:
   run:
-    dir: ${run_root} # pinned, not timestamped: a re-run needs an `if_present`
+    dir: ${run_root}
   sweep:
     dir: ${run_root}
-    subdir: ${hydra.job.num} # a group override's `/` would nest the job directories
+    subdir: ${hydra.job.num}
   job_logging:
     formatters:
-      simple: # the level is padded so the message column holds across levels
+      simple:
         format: "[%(asctime)s][%(name)s][%(levelname)-8s] - %(message)s"
