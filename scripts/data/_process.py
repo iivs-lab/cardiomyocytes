@@ -2,12 +2,11 @@ from __future__ import annotations
 
 __all__ = (
     "PreprocessSourceConfig",
-    "TargetConfig",
+    "PreprocessTargetConfig",
     "build_branches",
     "build_preprocess_stages",
     "log_configs",
     "log_target_config",
-    "search_sources",
 )
 
 import logging
@@ -24,10 +23,10 @@ from iivs_cardio.common.pipeline.branch import (
     UnsourcedPolicy,
     ensure_json_name,
 )
-from iivs_cardio.data.pipeline import FrameTree, PhaseStageFactory, RangeDocument
+from iivs_cardio.data.pipeline import FrameTree, RangeDocument, SequenceStageFactory
 from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig
 from scripts._common.dataset import SequenceLayout, SourceConfig, log_source_config
-from scripts._common.phase import build_sequences, search_sources
+from scripts._common.phase import build_sequences
 from scripts.data._filtering import describe_filter_kernel, log_filter_config
 
 if TYPE_CHECKING:
@@ -135,7 +134,7 @@ class RangeBranchConfig(BranchConfig):
 
 
 @dataclass
-class TargetConfig:
+class PreprocessTargetConfig:
     """What a run writes, one block per branch.
 
     Where they land is not here: `run_root` places the job's directory, and the
@@ -152,7 +151,7 @@ class TargetConfig:
 
 def _validate_output(
     source_config: SourceConfig,
-    target_config: TargetConfig,
+    target_config: PreprocessTargetConfig,
     output_root: StrPath,
 ) -> None:
     """Raise unless the target names an output this run can safely write.
@@ -193,7 +192,7 @@ def _validate_output(
 # ========================== #
 
 
-def _range_file(target_config: TargetConfig) -> str:
+def _range_file(target_config: PreprocessTargetConfig) -> str:
     """Return what the range document is called, given `.json` if it has none.
 
     Raises:
@@ -226,7 +225,7 @@ def _log_branch(output: str, branch: BranchConfig, logger: Logger) -> None:
 
 
 def log_target_config(
-    target_config: TargetConfig,
+    target_config: PreprocessTargetConfig,
     logger: Logger,
     *,
     output_root: StrPath,
@@ -263,7 +262,7 @@ def log_target_config(
 def log_configs(
     source_config: SourceConfig,
     sequence_config: SequenceSelectConfig,
-    target_config: TargetConfig | None,
+    target_config: PreprocessTargetConfig | None,
     kernel_config: KernelConfig,
     *,
     output_root: StrPath,
@@ -338,7 +337,7 @@ def _log_short_sequences(
 
 def build_branches(
     source_config: SourceConfig,
-    target_config: TargetConfig,
+    target_config: PreprocessTargetConfig,
     kernel_config: KernelConfig,
     *,
     output_root: StrPath,
@@ -424,12 +423,12 @@ def build_branches(
 def build_preprocess_stages(
     source_config: SourceConfig,
     sequence_config: SequenceSelectConfig,
-    target_config: TargetConfig | None = None,
+    target_config: PreprocessTargetConfig | None = None,
     kernel_config: KernelConfig | None = None,
     *,
     output_root: StrPath,
     name: str,
-) -> PhaseStageFactory:
+) -> SequenceStageFactory:
     """Assemble everything a run needs from the configuration it was given.
 
     The configuration is logged before the sources are searched, so a run says
@@ -487,4 +486,4 @@ def build_preprocess_stages(
             selected=selected,
         )
 
-    return PhaseStageFactory(sequences, *branches, name=name)
+    return SequenceStageFactory(sequences, *branches, name=name)

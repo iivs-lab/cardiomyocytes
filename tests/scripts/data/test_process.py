@@ -19,7 +19,7 @@ from iivs.dhm.data.phase import (
 from omegaconf import OmegaConf
 
 from iivs_cardio.common.device import Device
-from iivs_cardio.data.pipeline import FrameTree, PhaseStageFactory, RangeDocument
+from iivs_cardio.data.pipeline import FrameTree, RangeDocument, SequenceStageFactory
 from iivs_cardio.data.transforms.filtering.kernel import MedianConfig
 from iivs_cardio.data.writer import RECORD_FILE
 from scripts._common.compute import ComputeConfig, IncompleteRunError, run_all
@@ -29,8 +29,8 @@ from scripts.data._filtering import parse_filter_config
 from scripts.data._process import (
     FrameBranchConfig,
     PreprocessSourceConfig,
+    PreprocessTargetConfig,
     RangeBranchConfig,
-    TargetConfig,
     build_branches,
     build_preprocess_stages,
     log_configs,
@@ -60,7 +60,7 @@ _BRANCH_KEYWORDS = {
 }
 
 
-def _target(**settings) -> TargetConfig:
+def _target(**settings) -> PreprocessTargetConfig:
     """Return a target whose branch settings are written flat.
 
     The two blocks are nested on the way in, which keeps a test saying what it
@@ -80,7 +80,7 @@ def _target(**settings) -> TargetConfig:
         msg = f"unexpected target settings: {sorted(settings)}"
         raise TypeError(msg)
 
-    return TargetConfig(
+    return PreprocessTargetConfig(
         FrameBranchConfig(**branches["frames"]),
         RangeBranchConfig(**branches["ranges"]),
     )
@@ -890,7 +890,7 @@ def test_a_finished_sequence_lets_go_of_its_window(phase_tree, monkeypatch, bran
     sequences, _ = build_sequences(
         *source_configs(root=str(phase_tree)), parse_filter_config(None)
     )
-    stages = PhaseStageFactory(sequences, branch, name=STAGE)
+    stages = SequenceStageFactory(sequences, branch, name=STAGE)
     released: list[str] = []
     monkeypatch.setattr(sequences[0], "release", lambda: released.append("let go"))
 
@@ -936,7 +936,7 @@ def _factory(phase_tree, *branches):
         *source_configs(root=str(phase_tree)), parse_filter_config(None)
     )
 
-    return PhaseStageFactory(sequences, *branches, name=STAGE)
+    return SequenceStageFactory(sequences, *branches, name=STAGE)
 
 
 class _Unsourced:
@@ -1073,7 +1073,7 @@ def test_a_branch_with_nothing_to_say_adds_no_line(phase_tree, caplog):
     # nothing, and the block has to leave it out rather than log an empty line.
     # Both scopes are covered here: a hook reports per sequence, a branch once.
     def lines(said: str | None) -> list[str]:
-        stages = PhaseStageFactory(
+        stages = SequenceStageFactory(
             build_sequences(
                 *source_configs(root=str(phase_tree)), parse_filter_config(None)
             )[0],

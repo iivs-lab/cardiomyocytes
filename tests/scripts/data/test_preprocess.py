@@ -11,8 +11,8 @@ from hydra.core.singleton import Singleton
 from omegaconf import OmegaConf
 
 from scripts._common.compute import ComputeConfig
-from scripts._common.dataset import SequenceSelectConfig, SourceConfig
-from scripts.data._process import TargetConfig
+from scripts._common.dataset import SequenceSelectConfig
+from scripts.data._process import PreprocessSourceConfig, PreprocessTargetConfig
 from scripts.data.preprocess import CONFIG_NAME, CONFIG_PATH, main
 
 if TYPE_CHECKING:
@@ -30,9 +30,9 @@ def _composed(*overrides: str):
 @pytest.mark.parametrize(
     ("group", "schema"),
     (
-        ("source", SourceConfig),
+        ("source", PreprocessSourceConfig),
         ("select", SequenceSelectConfig),
-        ("target", TargetConfig),
+        ("target", PreprocessTargetConfig),
     ),
 )
 def test_every_schema_field_is_reachable_from_the_command_line(group, schema):

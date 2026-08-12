@@ -71,16 +71,15 @@ class SequenceLayout:
         Raises:
             ValueError: If the answer would reach outside a sequence's folder.
         """
-        settled = unwrap_or_default(
-            self.subpath, unwrap_or_default(follow, self.DEFAULT_SUBPATH)
-        )
+        default = unwrap_or_default(follow, self.DEFAULT_SUBPATH)
+        subpath = unwrap_or_default(self.subpath, default)
 
-        path = PurePath(settled)
+        path = PurePath(subpath)
         if path.anchor or ".." in path.parts:
-            msg = f"invalid subpath {settled!r}: expected a relative path, no '..'"
+            msg = f"invalid subpath {subpath!r}: expected a relative path, no '..'"
             raise ValueError(msg)
 
-        return settled
+        return subpath
 
 
 @dataclass

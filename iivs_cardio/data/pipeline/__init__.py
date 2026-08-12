@@ -5,10 +5,10 @@ __all__ = (
     "FrameRange",
     "FrameTree",
     "Named",
-    "PhaseStageFactory",
     "RangeDocument",
     "SequenceRange",
     "SequenceRangeMeter",
+    "SequenceStageFactory",
     "ValueRange",
     "save_range_document",
 )
@@ -26,4 +26,4 @@ from iivs_cardio.data.pipeline.ranges import (
     ValueRange,
     save_range_document,
 )
-from iivs_cardio.data.pipeline.stage import PhaseStageFactory
+from iivs_cardio.data.pipeline.stage import SequenceStageFactory

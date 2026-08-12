@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("PhaseStageFactory",)
+__all__ = ("SequenceStageFactory",)
 
 import logging
 from contextlib import AbstractContextManager, contextmanager
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from iivs_cardio.data.phase import PhaseFilteredSequence
 
 
-class PhaseStageFactory:
+class SequenceStageFactory:
     """The sequences of one job, and how to run and report on each of them.
 
     The name is the job's to give rather than the factory's to assume: the same

@@ -13,7 +13,7 @@ from scripts._common.hydra import apply_schema, is_multirun, output_directory
 from scripts.data._filtering import parse_filter_config
 from scripts.data._process import (
     PreprocessSourceConfig,
-    TargetConfig,
+    PreprocessTargetConfig,
     build_preprocess_stages,
 )
 
@@ -33,7 +33,7 @@ STAGE: Final = "preprocess"
 def main(config: DictConfig) -> None:
     compute_config = apply_schema(ComputeConfig, config.compute)
     source_config = apply_schema(PreprocessSourceConfig, config.source)
-    target_config = apply_schema(TargetConfig, config.target)
+    target_config = apply_schema(PreprocessTargetConfig, config.target)
     sequence_config = apply_schema(SequenceSelectConfig, config.select)
     kernel_config = parse_filter_config(config.get("filter"))
 

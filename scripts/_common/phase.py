@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-__all__ = (
-    "LAST_SEARCH",
-    "SearchResult",
-    "build_sequences",
-    "search_sources",
-)
+__all__ = ("LAST_SEARCH", "SearchResult", "build_sequences", "search_sources")
 
 from dataclasses import astuple, fields, is_dataclass
 from pathlib import Path
