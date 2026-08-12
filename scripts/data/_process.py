@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 from typing import TYPE_CHECKING
 
-from kaparoo.utils import quantify
+from kaparoo.utils import quantify, unwrap_or_factory
 from omegaconf import MISSING
 
 from iivs_cardio.common.logging import log_indented
@@ -24,20 +24,16 @@ from iivs_cardio.common.pipeline.branch import (
     ensure_json_name,
 )
 from iivs_cardio.data.pipeline import FrameTree, PhaseStageFactory, RangeDocument
+from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig
 from scripts._common.dataset import SourceConfig, log_source_config, resolve_subpath
 from scripts._common.phase import DEFAULT_SUBPATH, build_sequences, search_sources
-from scripts.data._filtering import (
-    describe_filter_kernel,
-    log_filter_config,
-    parse_filter_config,
-)
+from scripts.data._filtering import describe_filter_kernel, log_filter_config
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from logging import Logger
 
     from kaparoo.filesystem.types import StrPath
-    from omegaconf import DictConfig
     from torch import Tensor
 
     from iivs_cardio.common.pipeline import SideBranch
@@ -409,7 +405,7 @@ def build_preprocess_stages(
     source_config: SourceConfig,
     sequence_config: SequenceSelectConfig,
     target_config: TargetConfig | None = None,
-    filter_config: DictConfig | None = None,
+    kernel_config: KernelConfig | None = None,
     *,
     output_root: StrPath,
     name: str,
@@ -426,7 +422,7 @@ def build_preprocess_stages(
         sequence_config: Which of its sequences to read.
         target_config: The settings saying what to write. Defaults to `None`,
             for a run that only reads.
-        filter_config: The filter to apply. Defaults to `None`, which leaves the
+        kernel_config: The filter to apply. Defaults to `None`, which leaves the
             frames as they are.
         output_root: The folder the branches write under.
         name: The name the run is called by.
@@ -438,7 +434,7 @@ def build_preprocess_stages(
         ValueError: If the target writes nothing, if it would write over the
             source, or if the source search finds nothing to run.
     """
-    kernel_config = parse_filter_config(filter_config)
+    kernel_config = unwrap_or_factory(kernel_config, IdentityConfig)
 
     log_configs(
         source_config,

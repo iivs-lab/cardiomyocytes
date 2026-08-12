@@ -10,6 +10,7 @@ from kaparoo.filesystem import ensure_dir_exists
 from scripts._common.compute import ComputeConfig, WorkerLogFolder, run_all
 from scripts._common.dataset import SequenceSelectConfig, SourceConfig
 from scripts._common.hydra import apply_schema, is_multirun, output_directory
+from scripts.data._filtering import parse_filter_config
 from scripts.data._process import TargetConfig, build_preprocess_stages
 
 if TYPE_CHECKING:
@@ -30,7 +31,7 @@ def main(config: DictConfig) -> None:
     source_config = apply_schema(SourceConfig, config.source)
     target_config = apply_schema(TargetConfig, config.target)
     sequence_config = apply_schema(SequenceSelectConfig, config.select)
-    filter_config: DictConfig | None = config.get("filter")
+    kernel_config = parse_filter_config(config.get("filter"))
 
     if target_config.frames.save and is_multirun():
         msg = "cannot write frames in a sweep: run the winning config alone instead"
@@ -42,7 +43,7 @@ def main(config: DictConfig) -> None:
         source_config,
         sequence_config,
         target_config,
-        filter_config,
+        kernel_config,
         output_root=output_root,
         name=STAGE,
     )
