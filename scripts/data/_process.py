@@ -150,7 +150,7 @@ class PreprocessTargetConfig:
 
 
 def _validate_output(
-    source_config: SourceConfig,
+    source_config: PreprocessSourceConfig,
     target_config: PreprocessTargetConfig,
     output_root: StrPath,
 ) -> None:
@@ -249,6 +249,7 @@ def log_target_config(
         return
 
     if target_config.frames.save:
+        subpath = target_config.frames.resolve_subpath(subpath)
         layout = f"<sequence>/{subpath}" if subpath else "<sequence>/*"
         log_indented(logger, "writing the filtered frames to %s", layout)
         _log_branch("frames", target_config.frames, logger)
@@ -260,10 +261,10 @@ def log_target_config(
 
 
 def log_configs(
-    source_config: SourceConfig,
+    source_config: PreprocessSourceConfig,
     sequence_config: SequenceSelectConfig,
-    target_config: PreprocessTargetConfig | None,
     kernel_config: KernelConfig,
+    target_config: PreprocessTargetConfig | None,
     *,
     output_root: StrPath,
     name: str,
@@ -284,8 +285,7 @@ def log_configs(
     log_filter_config(kernel_config, logger)
 
     if target_config is not None:
-        read = source_config.resolve_subpath()
-        subpath = target_config.frames.resolve_subpath(read)
+        subpath = source_config.resolve_subpath()
         log_target_config(
             target_config, logger, output_root=output_root, subpath=subpath
         )
@@ -299,8 +299,8 @@ def log_configs(
 def _log_short_sequences(
     frame_config: FrameSelectConfig,
     *,
-    contents: Mapping[str, Sequence[str]],
     sequences: Sequence[PhaseFilteredSequence],
+    contents: Mapping[str, Sequence[str]],
     name: str,
 ) -> None:
     """Name the sequences that could not supply the count that was asked for.
@@ -336,9 +336,9 @@ def _log_short_sequences(
 
 
 def build_branches(
-    source_config: SourceConfig,
-    target_config: PreprocessTargetConfig,
+    source_config: PreprocessSourceConfig,
     kernel_config: KernelConfig,
+    target_config: PreprocessTargetConfig,
     *,
     output_root: StrPath,
     contents: Mapping[str, Sequence[str]],
@@ -421,10 +421,10 @@ def build_branches(
 
 
 def build_preprocess_stages(
-    source_config: SourceConfig,
+    source_config: PreprocessSourceConfig,
     sequence_config: SequenceSelectConfig,
-    target_config: PreprocessTargetConfig | None = None,
     kernel_config: KernelConfig | None = None,
+    target_config: PreprocessTargetConfig | None = None,
     *,
     output_root: StrPath,
     name: str,
@@ -458,8 +458,8 @@ def build_preprocess_stages(
     log_configs(
         source_config,
         sequence_config,
-        target_config,
         kernel_config,
+        target_config,
         output_root=output_root,
         name=name,
     )
@@ -468,8 +468,12 @@ def build_preprocess_stages(
         _validate_output(source_config, target_config, output_root)
 
     sequences, contents = build_sequences(source_config, sequence_config, kernel_config)
+
     _log_short_sequences(
-        source_config.frames, contents=contents, sequences=sequences, name=name
+        source_config.frames,
+        sequences=sequences,
+        contents=contents,
+        name=name,
     )
 
     branches = []
@@ -479,8 +483,8 @@ def build_preprocess_stages(
 
         branches = build_branches(
             source_config,
-            target_config,
             kernel_config,
+            target_config,
             output_root=output_root,
             contents=contents,
             selected=selected,

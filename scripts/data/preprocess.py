@@ -31,11 +31,11 @@ STAGE: Final = "preprocess"
 
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name=CONFIG_NAME)
 def main(config: DictConfig) -> None:
-    compute_config = apply_schema(ComputeConfig, config.compute)
     source_config = apply_schema(PreprocessSourceConfig, config.source)
-    target_config = apply_schema(PreprocessTargetConfig, config.target)
     sequence_config = apply_schema(SequenceSelectConfig, config.select)
     kernel_config = parse_filter_config(config.get("filter"))
+    target_config = apply_schema(PreprocessTargetConfig, config.target)
+    compute_config = apply_schema(ComputeConfig, config.compute)
 
     if target_config.frames.save and is_multirun():
         msg = "cannot write frames in a sweep: run the winning config alone instead"
@@ -46,8 +46,8 @@ def main(config: DictConfig) -> None:
     stages = build_preprocess_stages(
         source_config,
         sequence_config,
-        target_config,
         kernel_config,
+        target_config,
         output_root=output_root,
         name=STAGE,
     )

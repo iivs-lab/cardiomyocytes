@@ -106,7 +106,9 @@ def _scan(
         if_present=policy,
     )
 
-    stages = build_preprocess_stages(*source, config, name=STAGE, output_root=dest)
+    stages = build_preprocess_stages(
+        *source, target_config=config, name=STAGE, output_root=dest
+    )
 
     run_all(stages, compute)
 
@@ -343,7 +345,9 @@ def test_a_narrowed_run_says_how_much_of_the_dataset_it_took(phase_tree, tmp_pat
     target = _target()
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
-    stages = build_preprocess_stages(*source, target, name=STAGE, output_root=dest)
+    stages = build_preprocess_stages(
+        *source, target_config=target, name=STAGE, output_root=dest
+    )
 
     run_all(stages, compute)
 
@@ -371,7 +375,9 @@ def test_a_stride_leaves_the_two_outputs_naming_frames_differently(
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
     with caplog.at_level(logging.INFO):
-        stages = build_preprocess_stages(*source, target, name=STAGE, output_root=dest)
+        stages = build_preprocess_stages(
+            *source, target_config=target, name=STAGE, output_root=dest
+        )
         run_all(stages, compute)
 
     (sequence,) = [
@@ -416,7 +422,9 @@ def test_a_target_asking_for_nothing_is_refused(phase_tree, tmp_path):
     target = _target(save_ranges=False)
 
     with pytest.raises(ValueError, match=r"nothing to do"):
-        build_preprocess_stages(*source, target, name=STAGE, output_root=tmp_path)
+        build_preprocess_stages(
+            *source, target_config=target, name=STAGE, output_root=tmp_path
+        )
 
 
 def test_a_target_asking_for_nothing_is_refused_before_the_source_is_read(tmp_path):
@@ -428,7 +436,9 @@ def test_a_target_asking_for_nothing_is_refused_before_the_source_is_read(tmp_pa
     target = _target(save_ranges=False)
 
     with pytest.raises(ValueError, match=r"nothing to do"):
-        build_preprocess_stages(*source, target, name=STAGE, output_root=tmp_path)
+        build_preprocess_stages(
+            *source, target_config=target, name=STAGE, output_root=tmp_path
+        )
 
 
 # ------------------------------ the destination --------------------------- #
@@ -603,7 +613,9 @@ def test_a_written_sequence_says_which_frames_it_was_made_from(phase_tree, tmp_p
     target = _target(subpath=FILTERED, save_frames=True, save_ranges=False)
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
-    stages = build_preprocess_stages(*source, target, name=STAGE, output_root=dest)
+    stages = build_preprocess_stages(
+        *source, target_config=target, name=STAGE, output_root=dest
+    )
 
     run_all(stages, compute)
 
@@ -626,7 +638,9 @@ def _cache(phase_tree: Path, dest: Path, **target: object) -> None:
     config = _target(subpath=FILTERED, save_frames=True, save_ranges=False, **target)
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
-    stages = build_preprocess_stages(*source, config, name=STAGE, output_root=dest)
+    stages = build_preprocess_stages(
+        *source, target_config=config, name=STAGE, output_root=dest
+    )
 
     run_all(stages, compute)
 
@@ -678,8 +692,8 @@ def test_a_sequence_whose_filter_changed_is_written_again(phase_tree, tmp_path):
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
     stages = build_preprocess_stages(
         *source,
-        config,
         parse_filter_config(OmegaConf.create(filtered)),
+        config,
         name=STAGE,
         output_root=dest,
     )
@@ -758,7 +772,7 @@ def test_the_job_names_the_stage_every_line_is_filed_under(
 
     with caplog.at_level(logging.INFO):
         stages = build_preprocess_stages(
-            *source, target, name=stage, output_root=tmp_path
+            *source, target_config=target, name=stage, output_root=tmp_path
         )
         run_all(stages, compute)
 
@@ -785,7 +799,7 @@ def test_a_sequence_leads_its_own_block(phase_tree, tmp_path, caplog):
 
     with caplog.at_level(logging.INFO):
         stages = build_preprocess_stages(
-            *source, target, name=STAGE, output_root=tmp_path
+            *source, target_config=target, name=STAGE, output_root=tmp_path
         )
         run_all(stages, compute)
 
@@ -1112,8 +1126,8 @@ def _branches(
 
     return build_branches(
         source,
-        config,
         parse_filter_config(None),
+        config,
         output_root=tmp_path,
         contents=contents,
         selected=selected,
@@ -1163,8 +1177,8 @@ def test_the_selection_stays_out_of_the_settings(tmp_path):
 
     (document,) = build_branches(
         source,
-        config,
         parse_filter_config(None),
+        config,
         output_root=tmp_path,
         contents={"TL_00": ()},
     )
@@ -1199,8 +1213,8 @@ def test_branches_are_refused_before_any_of_them_is_built(tmp_path):
 def _frame_tree(tmp_path, **target):
     return build_branches(
         source_configs(root="/dataset")[0],
-        _target(save_frames=True, save_ranges=False, **target),
         parse_filter_config(None),
+        _target(save_frames=True, save_ranges=False, **target),
         output_root=tmp_path,
         contents={"TL_00": ()},
     )
@@ -1228,8 +1242,8 @@ def test_the_settings_record_the_subpath_that_was_read(tmp_path):
 
     (document,) = build_branches(
         source,
-        config,
         parse_filter_config(None),
+        config,
         output_root=tmp_path,
         contents={"TL_00": ()},
     )
@@ -1243,8 +1257,8 @@ def test_branches_are_refused_where_the_frames_would_land_on_the_source(tmp_path
     with pytest.raises(ValueError, match=r"frames would land on the source"):
         build_branches(
             source_configs(root=str(tmp_path))[0],
-            _target(save_frames=True),
             parse_filter_config(None),
+            _target(save_frames=True),
             output_root=tmp_path,
             contents={"TL_00": ()},
         )
@@ -1257,8 +1271,8 @@ def _logged(caplog, source, target=None, kernel=None, output_root="/out"):
     with caplog.at_level(logging.INFO):
         log_configs(
             *source,
-            target,
             kernel or parse_filter_config(None),
+            target,
             output_root=output_root,
             name=STAGE,
         )
