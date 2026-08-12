@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from iivs.dhm.data.phase import PhaseFileFolder, PhaseUnit, search_phase_bin_folders
-from kaparoo.filesystem import contains, select, stringify_path
+from kaparoo.filesystem import contains, is_spec_file, select, stringify_path
 from kaparoo.utils import quantify
 
 from iivs_cardio.common.pipeline import ensure_policy
@@ -54,11 +54,37 @@ def _source_key(
     return tuple(frozen(value) for value in values)
 
 
+def _ensure_listing(value: list[str] | str | None, key: str) -> None:
+    """Raise unless a selection given as a file names one that is there.
+
+    The reader opens it only once the walk is done, so a mistyped path spent
+    the whole search before saying so, and said it in the library's words
+    rather than naming the setting that carried the path.
+
+    Args:
+        value: What the setting holds: names, a path to a file of them, or
+            `None`.
+        key: The setting's own name, so a refusal says where to go and fix it.
+
+    Raises:
+        ValueError: If `value` is a path to a file that is not there.
+    """
+    if not isinstance(value, str) or not is_spec_file(value):
+        return
+
+    if not Path(value).is_file():
+        msg = f"no such {key} listing: {value}"
+        raise ValueError(msg)
+
+
 def _search_sources(
     source_config: SourceConfig,
     select_config: SequenceSelectConfig,
 ) -> SearchResult:
     """Walk the root, open every sequence it holds, and keep the ones taken."""
+    _ensure_listing(select_config.include, "select.include")
+    _ensure_listing(select_config.exclude, "select.exclude")
+
     root = source_config.root
     subpath = source_config.resolve_subpath()
     holds_frames = contains(subpath, kind="dir")

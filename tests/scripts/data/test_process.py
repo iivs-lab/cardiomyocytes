@@ -23,7 +23,7 @@ from iivs_cardio.data.pipeline import FrameTree, RangeDocument, SequenceStageFac
 from iivs_cardio.data.transforms.filtering.kernel import MedianConfig
 from iivs_cardio.data.writer import RECORD_FILE
 from scripts._common.compute import ComputeConfig, IncompleteRunError, run_all
-from scripts._common.dataset import _LISTING_LIMIT
+from scripts._common.dataset import _LISTING_LIMIT, SequenceSelectConfig
 from scripts._common.phase import build_sequences, search_sources
 from scripts.data._filtering import parse_filter_config
 from scripts.data._process import (
@@ -169,6 +169,38 @@ def test_a_root_holding_nothing_and_an_empty_selection_are_told_apart(
                 exclude=[f"TL_{s:02d}" for s in range(SEQUENCES)],
             )
         )
+
+
+def test_a_selection_listing_a_file_that_is_not_there_names_the_setting(
+    phase_tree, tmp_path
+):
+    # The reader opens it after the walk, so a mistyped path spent the whole
+    # search before failing, and failed in the library's words.
+    source, _ = source_configs(root=str(phase_tree))
+    missing = str(tmp_path / "nowhere.txt")
+
+    with pytest.raises(ValueError, match=r"no such select.include listing"):
+        search_sources(source, SequenceSelectConfig(include=missing))
+
+    with pytest.raises(ValueError, match=r"no such select.exclude listing"):
+        search_sources(source, SequenceSelectConfig(exclude=missing))
+
+
+def test_a_selection_can_be_a_file_of_the_names_to_take(phase_tree, tmp_path):
+    # The shape a run over a whole plate is given: too many names for a command
+    # line, so they arrive as a file the search reads.
+    source, _ = source_configs(root=str(phase_tree))
+    listing = tmp_path / "taken.txt"
+    listing.write_text("TL_00\nTL_02\n", encoding="utf-8")
+
+    sources, contents = search_sources(
+        source, SequenceSelectConfig(include=str(listing))
+    )
+
+    taken = [folder.root.relative_to(phase_tree).parts[0] for folder in sources]
+
+    assert taken == ["TL_00", "TL_02"]
+    assert sorted(contents) == [f"TL_{index:02d}" for index in range(SEQUENCES)]
 
 
 def test_a_sequence_missing_a_frame_is_refused_by_name(phase_tree, tmp_path):
