@@ -14,22 +14,16 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 from typing import TYPE_CHECKING
 
-from kaparoo.filesystem import UnsupportedExtensionError, ensure_file_extension
 from kaparoo.utils import quantify
 from omegaconf import MISSING
 
 from iivs_cardio.common.logging import log_indented
-from iivs_cardio.common.pipeline import (
-    EXISTING_OUTPUT_POLICIES,
-    UNSOURCED_OUTPUT_POLICIES,
-    ensure_policy,
+from iivs_cardio.common.pipeline.branch import (
+    PresentPolicy,
+    UnsourcedPolicy,
+    ensure_json_name,
 )
-from iivs_cardio.data.pipeline import (
-    DOCUMENT_EXT,
-    FrameTree,
-    PhaseStageFactory,
-    RangeDocument,
-)
+from iivs_cardio.data.pipeline import FrameTree, PhaseStageFactory, RangeDocument
 from scripts._common.dataset import SourceConfig, log_source_config, resolve_subpath
 from scripts._common.phase import DEFAULT_SUBPATH, build_sequences, search_sources
 from scripts.data._filtering import (
@@ -47,10 +41,6 @@ if TYPE_CHECKING:
     from torch import Tensor
 
     from iivs_cardio.common.pipeline import SideBranch
-    from iivs_cardio.common.pipeline.branch import (
-        ExistingOutputPolicy,
-        UnsourcedOutputPolicy,
-    )
     from iivs_cardio.data.phase import PhaseFilteredSequence
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
     from scripts._common.dataset import FrameSelectConfig, SequenceSelectConfig
@@ -70,7 +60,7 @@ class BranchConfig:
 
     Attributes:
         save: Whether to write this output at all. Defaults to `False`.
-        if_exists: The policy for a sequence this output already covers.
+        if_present: The policy for a sequence this output already covers.
             `"reuse"` keeps what an earlier run left that still describes this
             one, and writes the rest. Defaults to `"error"`.
         if_unsourced: The policy for part of this output whose sequence the
@@ -80,8 +70,8 @@ class BranchConfig:
     """
 
     save: bool = False
-    if_exists: str = "error"
-    if_unsourced: str = "keep"
+    if_present: PresentPolicy = "error"
+    if_unsourced: UnsourcedPolicy = "keep"
 
 
 @dataclass
@@ -98,7 +88,7 @@ class FrameBranchConfig(BranchConfig):
             account in, given `.json` if it has no extension. A later run reads
             it to decide whether what is there still describes this run.
             Defaults to `"source"`.
-        if_exists: As `BranchConfig`, judged by the settings and the source
+        if_present: As `BranchConfig`, judged by the settings and the source
             frames' names rather than by what those frames hold. A source
             re-exported under the same names is kept rather than written again,
             so a run that follows one takes `"overwrite"`.
@@ -117,7 +107,7 @@ class RangeBranchConfig(BranchConfig):
         save: Whether to write the document. Defaults to `True`.
         file: The name the document is given, given `.json` if it has no
             extension. Defaults to `"value_range"`.
-        if_exists: As `BranchConfig`, judged by the settings and the source
+        if_present: As `BranchConfig`, judged by the settings and the source
             frames' names rather than by what those frames hold.
         if_unsourced: As `BranchConfig`.
     """
@@ -142,20 +132,6 @@ class TargetConfig:
     root: str = MISSING
     frames: FrameBranchConfig = field(default_factory=FrameBranchConfig)
     ranges: RangeBranchConfig = field(default_factory=RangeBranchConfig)
-
-
-def _existing(branch: BranchConfig, output: str) -> ExistingOutputPolicy:
-    """Read a branch's `if_exists`, naming the key a reader has to go and change."""
-    return ensure_policy(
-        branch.if_exists, EXISTING_OUTPUT_POLICIES, f"target.{output}.if_exists"
-    )
-
-
-def _unsourced(branch: BranchConfig, output: str) -> UnsourcedOutputPolicy:
-    """Read a branch's `if_unsourced`, naming the key a reader has to change."""
-    return ensure_policy(
-        branch.if_unsourced, UNSOURCED_OUTPUT_POLICIES, f"target.{output}.if_unsourced"
-    )
 
 
 def _validate_output(
@@ -203,19 +179,18 @@ def _validate_output(
 # ========================== #
 
 
-def _range_file(target_config: TargetConfig) -> Path:
+def _range_file(target_config: TargetConfig) -> str:
     """Return what the range document is called, given `.json` if it has none.
 
     Raises:
-        ValueError: If the name carries some other extension. The library's own
-            refusal names the extensions but not the setting that holds one,
-            which is the only part a reader has to go and change.
+        ValueError: If the name is a path or carries some other extension. The
+            library's own refusal says what is wrong with the name but not
+            which setting holds it, which is where a reader has to go.
     """
     try:
-        return ensure_file_extension(target_config.ranges.file, DOCUMENT_EXT, add=True)
-    except UnsupportedExtensionError as error:
-        named = target_config.ranges.file
-        msg = f"invalid `target.ranges.file` {named!r}: {error}"
+        return ensure_json_name(target_config.ranges.file)
+    except ValueError as error:
+        msg = f"`target.ranges.file`: {error}"
         raise ValueError(msg) from error
 
 
@@ -229,7 +204,7 @@ def _log_branch(output: str, branch: BranchConfig, logger: Logger) -> None:
         "overwrite": f"overwriting the {output} it finds",
         "reuse": f"reusing the {output} that match this run",
     }
-    if (line := said.get(branch.if_exists)) is not None:
+    if (line := said.get(branch.if_present)) is not None:
         log_indented(logger, "%s", line, depth=2)
 
     if branch.if_unsourced != "keep":
@@ -408,21 +383,22 @@ def build_branches(
                 contents,
                 settings,
                 selected=selected,
-                if_frames_exist=_existing(branch, "frames"),
-                if_sources_gone=_unsourced(branch, "frames"),
+                record_file=branch.record_file,
+                if_present=branch.if_present,
+                if_unsourced=branch.if_unsourced,
             )
         )
 
     if (branch := target_config.ranges).save:
         branches.append(
             RangeDocument(
-                Path(output_root, branch.file),
+                Path(output_root, _range_file(target_config)),
                 source_config.root,
                 contents,
                 settings,
                 selected=selected,
-                if_ranges_exist=_existing(branch, "ranges"),
-                if_sources_gone=_unsourced(branch, "ranges"),
+                if_present=branch.if_present,
+                if_unsourced=branch.if_unsourced,
             )
         )
 

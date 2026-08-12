@@ -17,9 +17,9 @@ from iivs.dhm.data.phase import PhaseFileFolder, PhaseUnit, search_phase_bin_fol
 from kaparoo.filesystem import contains, select, stringify_path
 from kaparoo.utils import quantify
 
-from iivs_cardio.common.pipeline import SHORT_INPUT_POLICIES, ensure_policy
+from iivs_cardio.common.pipeline import ensure_policy
 from iivs_cardio.data.phase import PhaseFilteredSequence
-from scripts._common.dataset import resolve_subpath
+from scripts._common.dataset import SHORT_SEQUENCE_POLICIES, resolve_subpath
 
 if TYPE_CHECKING:
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
@@ -116,7 +116,9 @@ def _search_sources(
 
     count = frames.count
     if count is not None:
-        policy = ensure_policy(frames.if_fewer, SHORT_INPUT_POLICIES, "frames.if_fewer")
+        policy = ensure_policy(
+            frames.if_short, SHORT_SEQUENCE_POLICIES, "frames.if_short"
+        )
 
         for source in sources:
             name = folder_subpath(source)

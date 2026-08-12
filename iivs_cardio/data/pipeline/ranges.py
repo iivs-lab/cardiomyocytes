@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 __all__ = (
-    "DOCUMENT_EXT",
     "CompositeRange",
     "Coverage",
     "DatasetRange",
@@ -18,7 +17,7 @@ import json
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from math import isfinite
-from typing import TYPE_CHECKING, Any, Final, Protocol, Self, override
+from typing import TYPE_CHECKING, Any, Protocol, Self, override
 
 from kaparoo.filesystem import (
     StagedFile,
@@ -33,10 +32,7 @@ from kaparoo.filters import And, EndsWith, StartsWith
 from kaparoo.utils import quantify
 from kaparoo.utils.optional import unwrap_or_default
 
-from iivs_cardio.common.pipeline.branch import (
-    as_read_back,
-    find_unsourced,
-)
+from iivs_cardio.common.pipeline.branch import JSON_EXT, as_read_back, find_unsourced
 from iivs_cardio.common.range import finite_range
 
 if TYPE_CHECKING:
@@ -48,13 +44,7 @@ if TYPE_CHECKING:
     from torch import Tensor
 
     from iivs_cardio.common.pipeline import Step
-    from iivs_cardio.common.pipeline.branch import (
-        ExistingOutputPolicy,
-        UnsourcedOutputPolicy,
-    )
-
-
-DOCUMENT_EXT: Final = ".json"
+    from iivs_cardio.common.pipeline.branch import PresentPolicy, UnsourcedPolicy
 
 
 def _entry[T](
@@ -349,7 +339,7 @@ class SequenceRangeMeter:
         overwrite: bool = False,
     ) -> None:
         root = ensure_dir_exists(root, make=True)
-        file = f"{source}{DOCUMENT_EXT}"
+        file = f"{source}{JSON_EXT}"
 
         self._path = root / file
         self._source = source
@@ -554,7 +544,7 @@ def save_range_document(
         FileExistsError: If the document is already there and `overwrite` is
             not set.
     """
-    path = ensure_file_extension(path, DOCUMENT_EXT, add=True)
+    path = ensure_file_extension(path, JSON_EXT, add=True)
 
     document: dict[str, object] = {}
     if settings is not None:
@@ -610,10 +600,10 @@ class RangeDocument:
             to `None`, which records nothing and so can never be reused.
         selected: The sequences of the contents this run was given to cover.
             Repeats count once. Defaults to `None`, which takes all of them.
-        if_ranges_exist: The policy for a sequence that already has a part here.
+        if_present: The policy for a sequence that already has a part here.
             Defaults to `"error"`.
-        if_sources_gone: The policy for a part whose sequence the source has
-            lost. Defaults to `"keep"`.
+        if_unsourced: The policy for a part whose sequence the source has lost.
+            Defaults to `"keep"`.
 
     Raises:
         ValueError: If `contents` is empty, since coverage would then have nothing
@@ -631,21 +621,21 @@ class RangeDocument:
         settings: Mapping[str, object] | None = None,
         *,
         selected: Sequence[str] | None = None,
-        if_ranges_exist: ExistingOutputPolicy = "error",
-        if_sources_gone: UnsourcedOutputPolicy = "keep",
+        if_present: PresentPolicy = "error",
+        if_unsourced: UnsourcedPolicy = "keep",
     ) -> None:
         if not contents:
             msg = "no sequence to cover: `contents` must hold at least one"
             raise ValueError(msg)
 
-        self.path = ensure_file_extension(path, DOCUMENT_EXT, add=True)
+        self.path = ensure_file_extension(path, JSON_EXT, add=True)
         self.parts_root = self.path.with_suffix(self.PARTS_SUFFIX)
 
         self.source = source
         self.contents = {name: tuple(frames) for name, frames in contents.items()}
         self.settings = settings
-        self.if_ranges_exist = if_ranges_exist
-        self.if_sources_gone = if_sources_gone
+        self.if_present = if_present
+        self.if_unsourced = if_unsourced
 
         names = unwrap_or_default(selected, tuple(self.contents))
         self.selected = tuple(dict.fromkeys(names))
@@ -668,7 +658,7 @@ class RangeDocument:
     @property
     def _replacing(self) -> bool:
         """Whether a document or part already there may be written over."""
-        return self.if_ranges_exist != "error"
+        return self.if_present != "error"
 
     def get_hook(self, source: Named) -> SequenceRangeMeter | None:
         """Return the meter that will measure `source`, or `None` to reuse.
@@ -693,7 +683,7 @@ class RangeDocument:
         """Return every part on disk, ordered by the sequence it belongs to."""
         parts = search_files(
             self.parts_root,
-            name_filter=EndsWith(DOCUMENT_EXT),
+            name_filter=EndsWith(JSON_EXT),
             ordered=False,
         )
 
@@ -952,7 +942,7 @@ class RangeDocument:
             emptied.add(stale.parent)
             stale.unlink()
 
-        if self.if_ranges_exist == "reuse":
+        if self.if_present == "reuse":
             kept = (part for part, _ in self._read_valid(strict=False))
             self._reused = frozenset(map(self._source_of, kept))
         else:
@@ -988,7 +978,7 @@ class RangeDocument:
         dropped = []
 
         for name in self.list_unsourced():
-            part = self.parts_root / f"{name}{DOCUMENT_EXT}"
+            part = self.parts_root / f"{name}{JSON_EXT}"
             part.unlink()
             prune_upward(part.parent, self.parts_root)
             dropped.append(name)
@@ -1019,5 +1009,5 @@ class RangeDocument:
         """
         self.save()
 
-        if self.if_sources_gone == "delete":
+        if self.if_unsourced == "delete":
             self.drop_unsourced()

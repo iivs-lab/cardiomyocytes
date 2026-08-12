@@ -390,7 +390,7 @@ def test_entering_drops_what_an_earlier_run_left(tmp_path):
     with RangeDocument(
         tmp_path / "range",
         contents=_contents("a"),
-        if_ranges_exist="overwrite",
+        if_present="overwrite",
         source="plate_A",
     ):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
@@ -495,7 +495,7 @@ def test_entering_drops_the_folders_that_layout_left_too(tmp_path):
     with RangeDocument(
         tmp_path / "range",
         contents=_contents("a"),
-        if_ranges_exist="overwrite",
+        if_present="overwrite",
         source="plate_A",
     ):
         _scan(_meter(tmp_path, "plate_B/TL_00"), (0.0, 1.0))
@@ -592,7 +592,7 @@ def test_a_document_that_could_not_be_written_reports_nothing(tmp_path):
         tmp_path / "range",
         contents=_contents("a"),
         source="plate_A",
-        if_ranges_exist="error",
+        if_present="error",
     )
     _scan(_meter(tmp_path, "a"), (0.0, 1.0))
     (tmp_path / "range.json").write_text("{}", encoding="utf-8")
@@ -759,7 +759,7 @@ def test_a_partial_document_reads_differently_from_a_whole_one(tmp_path):
     partial = RangeDocument(
         tmp_path / "range",
         contents=_contents("a", "b", "c"),
-        if_ranges_exist="overwrite",
+        if_present="overwrite",
         source="plate_A",
     )
     with partial:
@@ -791,7 +791,7 @@ def test_the_line_says_how_much_of_it_cost_nothing(tmp_path):
         contents=_contents("a", "b"),
         source="plate_A",
         settings=settings,
-        if_ranges_exist="reuse",
+        if_present="reuse",
     )
     with again:
         pass
@@ -1072,7 +1072,7 @@ def _reusing(tmp_path, *names: str, settings=SETTINGS) -> RangeDocument:
         contents=_contents(*names),
         settings=settings,
         source="plate_A",
-        if_ranges_exist="reuse",
+        if_present="reuse",
     )
 
 
@@ -1119,7 +1119,7 @@ def test_a_sequence_whose_frames_changed_is_measured_again(tmp_path):
         contents=_contents("a", frames=2),
         settings=SETTINGS,
         source="plate_A",
-        if_ranges_exist="reuse",
+        if_present="reuse",
     )
     with grown as second:
         assert _measured(second, tmp_path, "a", (0.0, 1.0), (2.0, 3.0))
@@ -1152,8 +1152,8 @@ def test_a_part_the_source_has_lost_goes_when_the_policy_says_so(tmp_path):
         contents=_contents("a"),
         settings=SETTINGS,
         source="plate_A",
-        if_ranges_exist="reuse",
-        if_sources_gone="delete",
+        if_present="reuse",
+        if_unsourced="delete",
     )
     with dropping:
         pass
@@ -1176,7 +1176,7 @@ def test_a_narrowed_run_leaves_the_parts_it_was_not_given(tmp_path):
         settings=SETTINGS,
         source="plate_A",
         selected=["b"],
-        if_ranges_exist="reuse",
+        if_present="reuse",
     )
     with retry:
         assert not _measured(retry, tmp_path, "b", (0.0, 0.0))
@@ -1205,7 +1205,7 @@ def test_the_other_policies_still_clear_the_folder(tmp_path, policy):
         contents=_contents("a", "b"),
         settings=SETTINGS,
         source="plate_A",
-        if_ranges_exist=policy,
+        if_present=policy,
     )
     if policy == "error":
         (tmp_path / "range.json").unlink()
@@ -1288,7 +1288,7 @@ def test_a_stale_part_nobody_re_measured_stays_out_of_the_fold(tmp_path):
         settings=changed,
         source="plate_A",
         selected=["a"],
-        if_ranges_exist="reuse",
+        if_present="reuse",
     )
     with narrowed:
         assert _measured(narrowed, tmp_path, "a", (2.0, 3.0))
@@ -1308,7 +1308,7 @@ def test_settings_are_compared_as_a_part_on_disk_holds_them(tmp_path):
         contents=_contents("a"),
         settings=tupled,
         source="plate_A",
-        if_ranges_exist="reuse",
+        if_present="reuse",
     )
     with document:
         assert _measured(document, tmp_path, "a", (0.0, 1.0))
@@ -1327,7 +1327,7 @@ def test_a_stale_part_is_left_out_of_the_fold_as_well_as_of_the_reuse(tmp_path):
         contents=_contents("a", "b"),
         settings=settings,
         source="plate_A",
-        if_ranges_exist="reuse",
+        if_present="reuse",
     ) as first:
         _measured(first, tmp_path, "a", (0.0, 1.0))
         _measured(first, tmp_path, "b", (8.0, 9.0))
@@ -1339,7 +1339,7 @@ def test_a_stale_part_is_left_out_of_the_fold_as_well_as_of_the_reuse(tmp_path):
         settings=settings,
         source="plate_A",
         selected=["a"],
-        if_ranges_exist="reuse",
+        if_present="reuse",
     )
     with grown:
         pass
@@ -1364,8 +1364,8 @@ def test_a_document_is_written_even_when_the_unsourced_cannot_be_dropped(
         contents=_contents("a"),
         settings=SETTINGS,
         source="plate_A",
-        if_ranges_exist="reuse",
-        if_sources_gone="delete",
+        if_present="reuse",
+        if_unsourced="delete",
     )
 
     def refuse(self) -> list[str]:
@@ -1386,8 +1386,8 @@ def test_dropping_a_nested_unsourced_part_takes_what_it_empties(tmp_path):
         contents=_contents("plate/2026.03.11/kept"),
         settings=SETTINGS,
         source="plate_A",
-        if_ranges_exist="reuse",
-        if_sources_gone="delete",
+        if_present="reuse",
+        if_unsourced="delete",
     )
     part = document.parts_root / "plate" / "2026.03.12" / "gone.json"
     part.parent.mkdir(parents=True)

@@ -343,6 +343,41 @@ def test_a_record_says_which_source_frame_each_written_one_came_from(tmp_path):
     assert RECORD_FILE in _names(dest)
 
 
+def test_a_record_is_filed_under_the_name_the_writer_was_given(tmp_path):
+    # The name travels with the tree that will read it back, so a run may keep
+    # its account under one the source folders do not already use.
+    dest = tmp_path / "cache"
+    writer = KoalaFrameWriter(
+        dest,
+        _save_text,
+        stem="frame",
+        ext="txt",
+        record={"source": "plate/TL_00"},
+        record_file="origin",
+    )
+
+    _drive(writer, _sourced("00000_phase.bin"))
+
+    assert "origin.json" in _names(dest)
+    assert RECORD_FILE not in _names(dest)
+
+    written = json.loads((dest / "origin.json").read_text(encoding="utf-8"))
+    assert written == {"source": "plate/TL_00", "frames": ["00000_phase.bin"]}
+
+
+def test_a_record_name_that_could_reach_out_of_the_folder_is_refused(tmp_path):
+    # It is joined onto the staged folder, so a directory part would file the
+    # account somewhere the commit never moves and a reader never looks.
+    with pytest.raises(ValueError, match=r"invalid file name '\.\./origin\.json'"):
+        KoalaFrameWriter(
+            tmp_path / "cache",
+            _save_text,
+            stem="frame",
+            ext="txt",
+            record_file="../origin.json",
+        )
+
+
 def test_a_writer_told_nothing_files_nothing_and_asks_nothing_of_a_step(tmp_path):
     # Flow and metric writers have no record to file yet, and their steps may
     # carry nothing about a source, so the collecting must not happen at all.

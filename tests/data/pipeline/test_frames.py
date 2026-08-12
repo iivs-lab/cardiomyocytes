@@ -18,7 +18,7 @@ def _tree(tmp_path: Path, *names: str, **policy) -> FrameTree:
 
 
 def test_a_tree_has_to_be_told_what_the_source_holds(tmp_path):
-    # Without it every folder here is unsourced, and `if_sources_gone` would take
+    # Without it every folder here is unsourced, and `if_unsourced` would take
     # the whole tree: hours of filtering, over a source that is simply absent
     # from an argument nobody passed.
     with pytest.raises(TypeError, match="contents"):
@@ -45,8 +45,8 @@ def test_a_tree_names_the_sequences_it_holds_rather_than_the_folders(tmp_path):
 def test_a_tree_refuses_a_policy_nobody_offers(tmp_path):
     # Config arrives as text whatever the field says, so a typo has to be
     # caught where the setting's own name can still be named.
-    with pytest.raises(ValueError, match=r"unsupported if_frames_exist 'sync'"):
-        _tree(tmp_path, if_frames_exist="sync")
+    with pytest.raises(ValueError, match=r"unsupported if_present 'sync'"):
+        _tree(tmp_path, if_present="sync")
 
 
 def test_a_selection_naming_what_the_source_lacks_is_refused(tmp_path):
@@ -92,7 +92,7 @@ def test_a_record_that_cannot_be_believed_is_written_again(tmp_path, written, wh
         tmp_path,
         PHASE_FLOAT_BIN,
         {"TL_00": ("00000_phase.bin",)},
-        if_frames_exist="reuse",
+        if_present="reuse",
     )
 
     with tree:
@@ -110,15 +110,11 @@ def test_a_folder_holding_fewer_frames_than_its_record_is_written_again(tmp_path
     record = {"settings": None, "frames": list(contents["TL_00"])}
     (folder / RECORD_FILE).write_text(json.dumps(record), encoding="utf-8")
 
-    with FrameTree(
-        tmp_path, PHASE_FLOAT_BIN, contents, if_frames_exist="reuse"
-    ) as kept:
+    with FrameTree(tmp_path, PHASE_FLOAT_BIN, contents, if_present="reuse") as kept:
         pass
 
     (folder / "00001_phase.bin").unlink()
-    with FrameTree(
-        tmp_path, PHASE_FLOAT_BIN, contents, if_frames_exist="reuse"
-    ) as short:
+    with FrameTree(tmp_path, PHASE_FLOAT_BIN, contents, if_present="reuse") as short:
         pass
 
     assert kept.report() == "kept 1 sequence already written"
@@ -138,11 +134,57 @@ def test_something_that_is_not_a_frame_cannot_stand_in_for_one(tmp_path):
     (folder / "00001_phase.bin").unlink()
     (folder / "leftover").mkdir()
 
-    tree = FrameTree(tmp_path, PHASE_FLOAT_BIN, contents, if_frames_exist="reuse")
+    tree = FrameTree(tmp_path, PHASE_FLOAT_BIN, contents, if_present="reuse")
     with tree:
         pass
 
     assert tree.report() is None
+
+
+def test_a_tree_reads_its_record_back_under_the_name_it_was_given(tmp_path):
+    # The name reaches the writer and the reader from one setting, so a tree
+    # told one thing must not go looking under the default.
+    folder = _sequence(tmp_path, "TL_00")
+    contents = {"TL_00": ("00000_phase.bin",)}
+    record = {"settings": None, "frames": list(contents["TL_00"])}
+    (folder / "origin.json").write_text(json.dumps(record), encoding="utf-8")
+
+    tree = FrameTree(
+        tmp_path, PHASE_FLOAT_BIN, contents, record_file="origin", if_present="reuse"
+    )
+    with tree:
+        pass
+
+    assert tree.report() == "kept 1 sequence already written"
+
+
+def test_a_record_left_under_another_name_counts_as_a_frame(tmp_path):
+    # The count is what catches a half removed folder, and only this tree's own
+    # record is set aside: a folder written under a different name is a folder
+    # this tree cannot vouch for, so it must not read as a whole one.
+    folder = _sequence(tmp_path, "TL_00")
+    contents = {"TL_00": ("00000_phase.bin",)}
+    record = {"settings": None, "frames": list(contents["TL_00"])}
+    (folder / "origin.json").write_text(json.dumps(record), encoding="utf-8")
+    (folder / RECORD_FILE).write_text(json.dumps(record), encoding="utf-8")
+
+    tree = FrameTree(
+        tmp_path, PHASE_FLOAT_BIN, contents, record_file="origin", if_present="reuse"
+    )
+    with tree:
+        pass
+
+    assert tree.report() is None
+
+
+@pytest.mark.parametrize("named", ("../up", "sub/down", "source.bin"))
+def test_a_tree_refuses_a_record_name_it_could_not_write_beside_the_frames(
+    tmp_path, named
+):
+    # Caught here rather than at the writer, since the tree reads by the name
+    # too and a run refused part way through has already spent the frames.
+    with pytest.raises(ValueError, match=r"invalid file name|unsupported extension"):
+        _tree(tmp_path, record_file=named)
 
 
 def test_a_sequence_the_run_was_not_given_is_not_in_its_way(tmp_path):
@@ -194,7 +236,7 @@ def test_a_folder_the_source_has_lost_stays_unless_the_policy_says_otherwise(tmp
     _sequence(tmp_path, "kept")
     _sequence(tmp_path, "gone")
 
-    with _tree(tmp_path, "kept", if_frames_exist="overwrite"):
+    with _tree(tmp_path, "kept", if_present="overwrite"):
         pass
 
     assert (tmp_path / "gone" / PHASE_FLOAT_BIN).is_dir()
@@ -204,7 +246,7 @@ def test_a_folder_the_source_has_lost_goes_when_the_policy_says_so(tmp_path):
     _sequence(tmp_path, "kept")
     _sequence(tmp_path, "gone")
 
-    with _tree(tmp_path, "kept", if_frames_exist="overwrite", if_sources_gone="delete"):
+    with _tree(tmp_path, "kept", if_present="overwrite", if_unsourced="delete"):
         pass
 
     assert not (tmp_path / "gone").exists()
@@ -217,9 +259,7 @@ def test_a_removal_is_said_to_have_happened_and_not_only_to_have_been_due(tmp_pa
     # anything was acted on. Destructive, and only its failure was ever loud.
     _sequence(tmp_path, "kept")
     _sequence(tmp_path, "gone")
-    tree = _tree(
-        tmp_path, "kept", if_frames_exist="overwrite", if_sources_gone="delete"
-    )
+    tree = _tree(tmp_path, "kept", if_present="overwrite", if_unsourced="delete")
 
     assert tree.report() is None
 
@@ -231,9 +271,7 @@ def test_a_removal_is_said_to_have_happened_and_not_only_to_have_been_due(tmp_pa
 
 def test_a_tree_that_took_nothing_away_reports_nothing(tmp_path):
     _sequence(tmp_path, "kept")
-    tree = _tree(
-        tmp_path, "kept", if_frames_exist="overwrite", if_sources_gone="delete"
-    )
+    tree = _tree(tmp_path, "kept", if_present="overwrite", if_unsourced="delete")
 
     with tree:
         pass
@@ -250,7 +288,7 @@ def test_the_job_s_own_directory_survives_the_clearing(tmp_path):
     (tmp_path / "left_by_hand").mkdir()
     _sequence(tmp_path, "kept")
 
-    with _tree(tmp_path, "kept", if_frames_exist="overwrite"):
+    with _tree(tmp_path, "kept", if_present="overwrite"):
         pass
 
     assert (tmp_path / ".hydra" / "config.yaml").exists()
@@ -267,8 +305,8 @@ def test_dropping_a_nested_unsourced_folder_takes_what_it_empties(tmp_path):
     with _tree(
         tmp_path,
         "plate/2026.03.11/kept",
-        if_frames_exist="overwrite",
-        if_sources_gone="delete",
+        if_present="overwrite",
+        if_unsourced="delete",
     ):
         pass
 
@@ -285,7 +323,7 @@ def test_what_a_killed_worker_staged_is_collected_by_the_next_run(tmp_path):
     staged.mkdir(parents=True)
     (staged / "00000_phase.bin").write_bytes(b"")
 
-    with _tree(tmp_path, "kept", "died", if_frames_exist="overwrite"):
+    with _tree(tmp_path, "kept", "died", if_present="overwrite"):
         pass
 
     assert not (tmp_path / "died").exists()
@@ -297,9 +335,9 @@ def test_what_a_killed_worker_staged_is_collected_by_the_next_run(tmp_path):
 )
 def test_the_policy_reaches_the_writer_that_acts_on_it(tmp_path, policy, replacing):
     _sequence(tmp_path, "TL_00")
-    tree = _tree(tmp_path, "TL_00", if_frames_exist=policy)
+    tree = _tree(tmp_path, "TL_00", if_present=policy)
 
     if replacing:
-        assert tree.if_frames_exist == "overwrite"
+        assert tree.if_present == "overwrite"
     else:
-        assert tree.if_frames_exist == "error"
+        assert tree.if_present == "error"

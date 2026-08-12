@@ -3,20 +3,24 @@ from __future__ import annotations
 __all__ = ("FrameTree",)
 
 import json
-import os
 import shutil
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
-from kaparoo.filesystem import contains, prune_upward, search_dirs
+from kaparoo.filesystem import contains, prune_upward, search_dirs, search_files
+from kaparoo.filesystem.types import StrPath
 from kaparoo.utils import quantify
 from kaparoo.utils.optional import unwrap_or_default
 
 from iivs_cardio.common.pipeline.branch import (
-    EXISTING_OUTPUT_POLICIES,
+    PRESENT_POLICIES,
     STAGING,
+    PresentPolicy,
+    UnsourcedPolicy,
     as_read_back,
+    ensure_json_name,
     ensure_policy,
     find_unsourced,
 )
@@ -24,16 +28,10 @@ from iivs_cardio.data.phase import phase_frame_writer
 from iivs_cardio.data.writer import RECORD_FILE
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
     from types import TracebackType
 
-    from kaparoo.filesystem.types import StrPath
     from torch import Tensor
 
-    from iivs_cardio.common.pipeline.branch import (
-        ExistingOutputPolicy,
-        UnsourcedOutputPolicy,
-    )
     from iivs_cardio.data.phase import PhaseFilteredSequence
     from iivs_cardio.data.writer import KoalaFrameWriter
 
@@ -59,7 +57,7 @@ class FrameTree:
         contents: Every sequence the source holds, which is what tells a folder
             with no sequence behind it from one this run simply did not take.
             Given rather than defaulted, since an empty one leaves every folder
-            here unsourced and `if_sources_gone` would then take the whole tree.
+            here unsourced and `if_unsourced` would then take the whole tree.
         settings: The settings that shaped the frames, filed inside each
             sequence's folder beside the source names its writer collected. A
             phase header carries no time and no source name, so without this a
@@ -67,15 +65,20 @@ class FrameTree:
             from. Defaults to `None`, which files nothing.
         selected: The sequences of the contents this run was given to write.
             Repeats count once. Defaults to `None`, which takes all of them.
-        if_frames_exist: The policy for a sequence that already has a folder
-            here. `"reuse"` keeps one whose record still describes this run and
-            writes the rest. Defaults to `"error"`.
-        if_sources_gone: The policy for a folder whose sequence the source has
-            lost. Defaults to `"keep"`.
+        record_file: The name each written folder keeps its own account under,
+            given `.json` if it has no extension. A folder is read back by this
+            name too, so a tree given one name cannot reuse what a tree given
+            another wrote. Defaults to `RECORD_FILE`.
+        if_present: The policy for a sequence that already has a folder here.
+            `"reuse"` keeps one whose record still describes this run and writes
+            the rest. Defaults to `"error"`.
+        if_unsourced: The policy for a folder whose sequence the source has lost.
+            Defaults to `"keep"`.
 
     Raises:
-        ValueError: If `if_frames_exist` is not a policy a tree offers, or if
-            `selected` names something the contents does not hold.
+        ValueError: If `if_present` is not a policy a tree offers, if
+            `record_file` carries a directory part, or if `selected` names
+            something the contents does not hold.
     """
 
     root: StrPath
@@ -83,15 +86,17 @@ class FrameTree:
     contents: Mapping[str, Sequence[str]]
     settings: Mapping[str, object] | None = None
     selected: Sequence[str] | None = field(default=None, kw_only=True)
-    if_frames_exist: ExistingOutputPolicy = field(default="error", kw_only=True)
-    if_sources_gone: UnsourcedOutputPolicy = field(default="keep", kw_only=True)
+    record_file: str = field(default=RECORD_FILE, kw_only=True)
+    if_present: PresentPolicy = field(default="error", kw_only=True)
+    if_unsourced: UnsourcedPolicy = field(default="keep", kw_only=True)
     _taken: frozenset[str] = field(init=False, repr=False)
     _recorded: object = field(init=False, repr=False)
     _reused: set[str] = field(default_factory=set, init=False, repr=False)
     _dropped: list[str] = field(default_factory=list, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        ensure_policy(self.if_frames_exist, EXISTING_OUTPUT_POLICIES, "if_frames_exist")
+        ensure_policy(self.if_present, PRESENT_POLICIES, "if_present")
+        object.__setattr__(self, "record_file", ensure_json_name(self.record_file))
 
         names = unwrap_or_default(self.selected, tuple(self.contents))
         if unknown := [name for name in names if name not in self.contents]:
@@ -109,7 +114,7 @@ class FrameTree:
         keeps by never making a writer for it, so a writer that was made has
         already been told the folder does not describe this run.
         """
-        return self.if_frames_exist != "error"
+        return self.if_present != "error"
 
     def get_hook(
         self, source: PhaseFilteredSequence
@@ -147,6 +152,7 @@ class FrameTree:
             unit=unwrap_or_default(origin.target_unit, header.unit),
             overwrite=self._replacing,
             record=record,
+            record_file=self.record_file,
         )
 
     def list_sequences(self) -> list[str]:
@@ -185,7 +191,7 @@ class FrameTree:
         folder = Path(self.root, name, self.subpath)
 
         try:
-            read = (folder / RECORD_FILE).read_text(encoding="utf-8")
+            read = (folder / self.record_file).read_text(encoding="utf-8")
             record = json.loads(read)
         except (OSError, ValueError):
             return False
@@ -202,25 +208,25 @@ class FrameTree:
 
         return self._count_frames(folder) == len(frames)
 
-    @staticmethod
-    def _count_frames(folder: Path) -> int:
+    def _count_frames(self, folder: Path) -> int:
         """Count the files the folder holds beside the record it carries.
 
-        Files only. Anything else in there is not a frame, and counting one
-        would let it stand in for a frame that has gone: a folder holding one
-        frame and one directory counts as two, which is exactly the number a
-        two-frame record expects.
+        Files only, and only the folder's own. Anything else in there is not a
+        frame, and counting one would let it stand in for a frame that has
+        gone: a folder holding one frame and one directory counts as two, which
+        is exactly the number a two-frame record expects.
+
+        Only this tree's own record is set aside. One left under another name
+        counts as a frame, which is what stops a folder written by a differently
+        named run from reading as a whole one here.
         """
-        with os.scandir(folder) as entries:
-            return sum(
-                1 for entry in entries if entry.is_file() and entry.name != RECORD_FILE
-            )
+        return len(search_files(folder, max_depth=1, exclude=self.record_file))
 
     def list_unsourced(self) -> list[str]:
         """Return the sequences this tree holds that the source has lost, sorted.
 
         A source that looks smaller than it is reads the same from here, so
-        acting on the list is `if_sources_gone`'s to decide and naming it is not.
+        acting on the list is `if_unsourced`'s to decide and naming it is not.
         """
         return find_unsourced(self.list_sequences(), self.contents)
 
@@ -297,15 +303,15 @@ class FrameTree:
         first. What the writer refuses is the same thing, a moment too late.
 
         Raises:
-            FileExistsError: If `if_frames_exist` is `"error"` and a sequence
-                this run would write already has a folder here.
+            FileExistsError: If `if_present` is `"error"` and a sequence this
+                run would write already has a folder here.
         """
-        if self.if_frames_exist == "reuse":
+        if self.if_present == "reuse":
             here = self._written()
             self._reused.update(name for name in here if self._still_describes(name))
-        elif self.if_frames_exist == "error" and (written := self._written()):
+        elif self.if_present == "error" and (written := self._written()):
             sequences = quantify(len(written), "sequence")
-            fix = "set `if_frames_exist` to 'overwrite' or 'reuse'"
+            fix = "set `if_present` to 'overwrite' or 'reuse'"
             msg = f"{sequences} already written, from {written[0]!r}: {fix}"
             raise FileExistsError(msg)
 
@@ -329,5 +335,5 @@ class FrameTree:
         """
         self.clear_staging()
 
-        if self.if_sources_gone == "delete":
+        if self.if_unsourced == "delete":
             self.drop_unsourced()

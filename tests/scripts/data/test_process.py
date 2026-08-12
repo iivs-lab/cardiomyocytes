@@ -969,7 +969,7 @@ def test_a_run_says_it_removed_them_and_not_only_that_they_were_due(
     _, contents = build_sequences(
         *source_configs(root=str(phase_tree)), parse_filter_config(None)
     )
-    tree = FrameTree(out, PHASE_FLOAT_BIN, contents, if_sources_gone="delete")
+    tree = FrameTree(out, PHASE_FLOAT_BIN, contents, if_unsourced="delete")
 
     with caplog.at_level(logging.INFO):
         _run_nothing(_factory(phase_tree, tree))

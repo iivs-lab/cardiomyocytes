@@ -12,7 +12,7 @@ source:
     start: 0 # the first source frame to take
     step: 1 # take every step'th from there
     count: null # at most this many after the stride; null takes them all
-    if_fewer: take # take | error (only where count is set)
+    if_short: take # take | error (only where count is set)
 
 select:
   include: null # a file of subpaths, or the subpaths as a list; null takes all
@@ -20,17 +20,21 @@ select:
 
 target:
   root: ??? # where the job directory goes; a sweep puts each job under it by number
-  subpath: null # a written sequence's frame folder; null follows source.subpath
-  save_frames: false # the filtered frames as a .bin tree, laid out like the source
-  save_ranges: true # one JSON of the dataset, sequence, and frame ranges
-  range_file: value_range # `.json` is added if absent
-  if_frames_exist: error # error | overwrite | reuse
-  if_ranges_exist: error # error | overwrite | reuse
-  if_sources_gone: keep # keep | delete (outputs the source no longer has)
+  frames: # the filtered frames as a .bin tree, laid out like the source
+    save: false
+    subpath: null # a written sequence's frame folder; null follows source.subpath
+    record_file: source # what each folder says about itself; `.json` added if absent
+    if_present: error # error | overwrite | reuse
+    if_unsourced: keep # keep | delete (outputs the source no longer has)
+  ranges: # one JSON of the dataset, sequence, and frame ranges
+    save: true
+    file: value_range # `.json` is added if absent
+    if_present: error # error | overwrite | reuse
+    if_unsourced: keep # keep | delete (outputs the source no longer has)
 
 hydra:
   run:
-    dir: ${target.root} # pinned, not timestamped: a re-run needs an `if_*_exist`
+    dir: ${target.root} # pinned, not timestamped: a re-run needs an `if_present`
   sweep:
     dir: ${target.root}
     subdir: ${hydra.job.num} # a group override's `/` would nest the job directories

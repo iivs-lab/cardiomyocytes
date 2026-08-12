@@ -1,42 +1,62 @@
 from __future__ import annotations
 
 __all__ = (
-    "EXISTING_OUTPUT_POLICIES",
-    "SHORT_INPUT_POLICIES",
+    "JSON_EXT",
+    "PRESENT_POLICIES",
     "STAGING",
-    "UNSOURCED_OUTPUT_POLICIES",
-    "ExistingOutputPolicy",
-    "ShortInputPolicy",
-    "UnsourcedOutputPolicy",
+    "UNSOURCED_POLICIES",
+    "PresentPolicy",
+    "UnsourcedPolicy",
     "as_read_back",
+    "ensure_json_name",
     "ensure_policy",
     "find_unsourced",
 )
 
 import json
+from pathlib import PurePath
 from typing import TYPE_CHECKING, Final, Literal
 
+from kaparoo.filesystem import ensure_file_extension
 from kaparoo.filters import And, EndsWith, StartsWith
 from kaparoo.utils import ensure_one_of, literal_values
 
 if TYPE_CHECKING:
     from collections.abc import Container, Iterable, Mapping, Sequence
 
-type ExistingOutputPolicy = Literal["error", "overwrite", "reuse"]
-type UnsourcedOutputPolicy = Literal["keep", "delete"]
-type ShortInputPolicy = Literal["take", "error"]
+type PresentPolicy = Literal["error", "overwrite", "reuse"]
+type UnsourcedPolicy = Literal["keep", "delete"]
 
-EXISTING_OUTPUT_POLICIES: Final[tuple[ExistingOutputPolicy, ...]] = literal_values(
-    ExistingOutputPolicy
-)
-UNSOURCED_OUTPUT_POLICIES: Final[tuple[UnsourcedOutputPolicy, ...]] = literal_values(
-    UnsourcedOutputPolicy
-)
-SHORT_INPUT_POLICIES: Final[tuple[ShortInputPolicy, ...]] = literal_values(
-    ShortInputPolicy
-)
+PRESENT_POLICIES: Final[tuple[PresentPolicy, ...]] = literal_values(PresentPolicy)
+UNSOURCED_POLICIES: Final[tuple[UnsourcedPolicy, ...]] = literal_values(UnsourcedPolicy)
 
 STAGING: Final = And((StartsWith("."), EndsWith(".tmp")))
+
+JSON_EXT: Final = ".json"
+
+
+def ensure_json_name(name: str) -> str:
+    """Return `name` as a JSON file, given `.json` if it carries no extension.
+
+    A branch takes the name of what it files from configuration, so the name it
+    is given has to be one it can write beside the output rather than anywhere
+    a path could reach.
+
+    Args:
+        name: The name the setting holds.
+
+    Returns:
+        The file name, which the folder holding it always contains.
+
+    Raises:
+        ValueError: If `name` carries a directory part.
+        UnsupportedExtensionError: If it carries an extension of another kind.
+    """
+    if PurePath(name).name != name:
+        msg = f"invalid file name {name!r}: expected a name, no directory part"
+        raise ValueError(msg)
+
+    return ensure_file_extension(name, JSON_EXT, add=True).name
 
 
 def as_read_back(settings: Mapping[str, object] | None) -> object:

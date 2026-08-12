@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 __all__ = (
+    "SHORT_SEQUENCE_POLICIES",
     "FrameSelectConfig",
     "SequenceSelectConfig",
+    "ShortSequencePolicy",
     "SourceConfig",
     "log_source_config",
     "resolve_subpath",
@@ -10,10 +12,10 @@ __all__ = (
 
 from dataclasses import dataclass, field
 from pathlib import PurePath
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Literal
 
 from kaparoo.filesystem import is_spec_file
-from kaparoo.utils import quantify, unwrap_or_default
+from kaparoo.utils import literal_values, quantify, unwrap_or_default
 from omegaconf import MISSING
 
 from iivs_cardio.common.logging import log_indented
@@ -26,6 +28,13 @@ if TYPE_CHECKING:
 # ========================== #
 #          Configs           #
 # ========================== #
+
+
+type ShortSequencePolicy = Literal["take", "error"]
+
+SHORT_SEQUENCE_POLICIES: Final[tuple[ShortSequencePolicy, ...]] = literal_values(
+    ShortSequencePolicy
+)
 
 
 def resolve_subpath(
@@ -76,7 +85,7 @@ class FrameSelectConfig:
             `start` is taken. Defaults to 1.
         count: How many frames to take once the stride has been applied.
             Defaults to `None`, which takes them all.
-        if_fewer: The policy for a sequence that cannot supply `count`, which
+        if_short: The policy for a sequence that cannot supply `count`, which
             says nothing when there is no count to fall short of. `"take"`
             takes what there is and names the sequence in the log. Defaults to
             `"take"`.
@@ -85,7 +94,7 @@ class FrameSelectConfig:
     start: int = 0
     step: int = 1
     count: int | None = None
-    if_fewer: str = "take"
+    if_short: ShortSequencePolicy = "take"
 
     def indices(self, total: int) -> range:
         """Return which of `total` source frames this run takes, in order."""
@@ -157,8 +166,8 @@ def _log_frame_selection(frame_config: FrameSelectConfig, logger: Logger) -> Non
 
     log_indented(logger, "reading frames %s", listed)
 
-    if counted and frame_config.if_fewer == "error":
-        log_indented(logger, "a sequence with fewer stops the run", depth=2)
+    if counted and frame_config.if_short == "error":
+        log_indented(logger, "a short sequence stops the run", depth=2)
 
 
 def _log_sequence_selection(label: str, value: list[str] | str, logger: Logger) -> None:

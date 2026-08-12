@@ -10,6 +10,8 @@ from iivs.dhm.data.koala import koala_frame_name
 from kaparoo.filesystem import StagedDirectory
 from kaparoo.utils import quantify
 
+from iivs_cardio.common.pipeline import ensure_json_name
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
     from types import TracebackType
@@ -18,8 +20,9 @@ if TYPE_CHECKING:
 
     from iivs_cardio.common.pipeline import Step
 
-# What a written folder says about itself, filed inside it. The readers select
-# frames by extension, so a name of another kind sits there unnoticed.
+# What a written folder says about itself, filed inside it, unless the caller
+# asks for another name. The readers select frames by extension, so a name of
+# another kind sits there unnoticed.
 RECORD_FILE: Final = "source.json"
 
 
@@ -57,9 +60,12 @@ class KoalaFrameWriter[T]:
         record: The block the folder should carry about itself, beside the
             source names the writer collects. Defaults to `None`, which files
             nothing and asks nothing of the steps.
+        record_file: The name that block is filed under, given `.json` if it
+            has no extension. Defaults to `RECORD_FILE`.
 
     Raises:
         FileExistsError: If the destination is there and `overwrite` is not set.
+        ValueError: If `record_file` carries a directory part.
     """
 
     def __init__(
@@ -71,7 +77,9 @@ class KoalaFrameWriter[T]:
         ext: str,
         overwrite: bool = False,
         record: Mapping[str, object] | None = None,
+        record_file: str = RECORD_FILE,
     ) -> None:
+        self._record_file = ensure_json_name(record_file)
         self._made = [path for path in Path(root).parents if not path.is_dir()]
         self._root = StagedDirectory(root, overwrite=overwrite, make_parents=True)
         self._save = save
@@ -148,7 +156,7 @@ class KoalaFrameWriter[T]:
 
         document = {**self._record, "frames": self._taken}
         written = json.dumps(document, allow_nan=False)
-        (self._root.workdir / RECORD_FILE).write_text(written, encoding="utf-8")
+        (self._root.workdir / self._record_file).write_text(written, encoding="utf-8")
 
     def _abort(self) -> None:
         """Drop the staged folder, and the ones opening it brought into being.

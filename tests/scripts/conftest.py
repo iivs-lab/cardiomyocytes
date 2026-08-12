@@ -35,7 +35,7 @@ _FRAME_KEYWORDS = {
     "frame_start": "start",
     "frame_step": "step",
     "frame_count": "count",
-    "if_frames_short": "if_fewer",
+    "if_frames_short": "if_short",
 }
 
 

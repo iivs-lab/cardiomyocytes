@@ -14,7 +14,7 @@ from iivs.dhm.data.phase import (
 from kaparoo.filesystem import stringify_path
 
 from iivs_cardio.data.transforms.filtering import FilteredSequence
-from iivs_cardio.data.writer import KoalaFrameWriter
+from iivs_cardio.data.writer import RECORD_FILE, KoalaFrameWriter
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -72,6 +72,7 @@ def phase_frame_writer(
     unit: PhaseUnit = PhaseUnit.RADIANS,
     overwrite: bool = False,
     record: Mapping[str, object] | None = None,
+    record_file: str = RECORD_FILE,
 ) -> KoalaFrameWriter[Tensor]:
     """Build a writer that saves frames as a phase folder under `dest`.
 
@@ -93,6 +94,8 @@ def phase_frame_writer(
             `False`.
         record: The block the folder should carry about itself. Defaults to
             `None`, which files nothing.
+        record_file: The name that block is filed under. Defaults to
+            `RECORD_FILE`.
 
     Returns:
         A writer ready to be registered as a hook.
@@ -115,4 +118,5 @@ def phase_frame_writer(
         ext=PhaseBinFolder.FILE_EXT,
         overwrite=overwrite,
         record=record,
+        record_file=record_file,
     )
