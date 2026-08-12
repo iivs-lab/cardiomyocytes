@@ -28,7 +28,7 @@ def _hydra_node(output_dir: str, *overrides: str) -> DictConfig:
     with initialize_config_dir(config_dir=CONFIG_PATH, version_base=None):
         composed = compose(
             config_name=CONFIG_NAME,
-            overrides=["source.root=/dataset", "target.root=/out", *overrides],
+            overrides=["source.root=/dataset", "run_root=/out", *overrides],
             return_hydra_config=True,
         )
 
@@ -86,7 +86,7 @@ def test_a_field_the_node_leaves_out_keeps_its_default():
 
 
 def test_the_output_directory_is_the_one_hydra_made_for_this_job(job):
-    # Everything a run writes goes here, and `target.root` only places it, so
+    # Everything a run writes goes here, and `run_root` only places it, so
     # this is the value the outputs actually follow.
     assert output_directory() == job.hydra.runtime.output_dir
 

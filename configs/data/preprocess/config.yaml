@@ -5,6 +5,8 @@ defaults:
   - /compute@compute: cpu
   - /filter@filter: median_ellipsoid_2x2x2
 
+run_root: ??? # where the job directory goes; a sweep puts each job under it by number
+
 source:
   root: ??? # the folder to search for phase .bin sequences
   subpath: null # a sequence's path in its time-lapse; null takes Koala's Phase/Float/Bin
@@ -19,7 +21,6 @@ select:
   exclude: null # same, for sequences to skip
 
 target:
-  root: ??? # where the job directory goes; a sweep puts each job under it by number
   frames: # the filtered frames as a .bin tree, laid out like the source
     save: false
     subpath: null # a written sequence's frame folder; null follows source.subpath
@@ -34,9 +35,9 @@ target:
 
 hydra:
   run:
-    dir: ${target.root} # pinned, not timestamped: a re-run needs an `if_present`
+    dir: ${run_root} # pinned, not timestamped: a re-run needs an `if_present`
   sweep:
-    dir: ${target.root}
+    dir: ${run_root}
     subdir: ${hydra.job.num} # a group override's `/` would nest the job directories
   job_logging:
     formatters:

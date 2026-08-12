@@ -100,12 +100,12 @@ def test_a_job_writes_where_hydra_put_it_rather_than_where_target_names(
 ):
     # `main` was never run by the suite, only the config it composes, and it is
     # what wires the whole of stage (1) together: the three schemas, the sweep
-    # guard, the log folder, and the run. Nothing reads `target.root` to write
+    # guard, the log folder, and the run. Nothing reads `run_root` to write
     # with, so a job pointed elsewhere still lands in hydra's own directory.
     named = tmp_path / "named_but_unused"
     landing = tmp_path / "job"
 
-    with _job(landing, f"source.root={phase_tree}", f"target.root={named}") as composed:
+    with _job(landing, f"source.root={phase_tree}", f"run_root={named}") as composed:
         main.__wrapped__(composed)
 
     assert (landing / "value_range.json").exists()
@@ -120,7 +120,7 @@ def test_a_sweep_is_refused_before_it_writes_the_one_tree(phase_tree, tmp_path):
         _job(
             tmp_path,
             f"source.root={phase_tree}",
-            f"target.root={tmp_path}",
+            f"run_root={tmp_path}",
             "target.frames.save=true",
             "hydra.mode=MULTIRUN",
         ) as composed,

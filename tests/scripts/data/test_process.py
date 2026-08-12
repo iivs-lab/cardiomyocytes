@@ -63,7 +63,7 @@ _BRANCH_KEYWORDS = {
 }
 
 
-def _target(root, **settings) -> TargetConfig:
+def _target(**settings) -> TargetConfig:
     """Return a target whose branch settings are written flat.
 
     The two blocks are nested on the way in, which keeps a test saying what it
@@ -84,7 +84,6 @@ def _target(root, **settings) -> TargetConfig:
         raise TypeError(msg)
 
     return TargetConfig(
-        str(root),
         FrameBranchConfig(**branches["frames"]),
         RangeBranchConfig(**branches["ranges"]),
     )
@@ -104,7 +103,6 @@ def _scan(
     compute = ComputeConfig(device="cpu", workers=workers, show_progress=False)
     policy = "overwrite" if overwrite else "error"
     config = _target(
-        dest,
         subpath=subpath,
         save_frames=save_frames,
         save_ranges=save_ranges,
@@ -345,7 +343,7 @@ def test_a_narrowed_run_says_how_much_of_the_dataset_it_took(phase_tree, tmp_pat
     # that count is what the document was missing.
     dest = tmp_path / "out"
     source = source_configs(root=str(phase_tree), include=["TL_01"])
-    target = _target(dest)
+    target = _target()
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
     stages = build_preprocess_stages(*source, target, name=STAGE, output_root=dest)
@@ -372,7 +370,7 @@ def test_a_stride_leaves_the_two_outputs_naming_frames_differently(
     # says so out loud rather than leaving it to whoever reads the pair.
     dest = tmp_path / "out"
     source = source_configs(root=str(phase_tree), frame_step=2)
-    target = _target(dest, save_frames=True)
+    target = _target(save_frames=True)
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
     with caplog.at_level(logging.INFO):
@@ -418,7 +416,7 @@ def test_a_target_asking_for_nothing_is_refused(phase_tree, tmp_path):
     # Both branches off is a config that configures nothing, which is a mistake
     # rather than a way to say "just read": that is `target_config=None`.
     source = source_configs(root=str(phase_tree))
-    target = _target(tmp_path, save_ranges=False)
+    target = _target(save_ranges=False)
 
     with pytest.raises(ValueError, match=r"nothing to do"):
         build_preprocess_stages(*source, target, name=STAGE, output_root=tmp_path)
@@ -430,7 +428,7 @@ def test_a_target_asking_for_nothing_is_refused_before_the_source_is_read(tmp_pa
     # Nothing about this verdict needs the frames, so a root that cannot be read
     # at all still has to come back with the configuration's own complaint.
     source = source_configs(root=str(tmp_path / "not-here"))
-    target = _target(tmp_path, save_ranges=False)
+    target = _target(save_ranges=False)
 
     with pytest.raises(ValueError, match=r"nothing to do"):
         build_preprocess_stages(*source, target, name=STAGE, output_root=tmp_path)
@@ -604,7 +602,7 @@ def test_a_written_sequence_says_which_frames_it_was_made_from(phase_tree, tmp_p
     # from the beat period, which it reads out of the source's `timestamps.txt`.
     dest = tmp_path / "out"
     source = source_configs(root=str(phase_tree), frame_step=2)
-    target = _target(dest, subpath=FILTERED, save_frames=True, save_ranges=False)
+    target = _target(subpath=FILTERED, save_frames=True, save_ranges=False)
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
     stages = build_preprocess_stages(*source, target, name=STAGE, output_root=dest)
@@ -627,9 +625,7 @@ def test_a_written_sequence_says_which_frames_it_was_made_from(phase_tree, tmp_p
 def _cache(phase_tree: Path, dest: Path, **target: object) -> None:
     """Run a frames-only pass, so a second one has something to reuse."""
     source = source_configs(root=str(phase_tree))
-    config = _target(
-        dest, subpath=FILTERED, save_frames=True, save_ranges=False, **target
-    )
+    config = _target(subpath=FILTERED, save_frames=True, save_ranges=False, **target)
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
     stages = build_preprocess_stages(*source, config, name=STAGE, output_root=dest)
@@ -672,7 +668,6 @@ def test_a_sequence_whose_filter_changed_is_written_again(phase_tree, tmp_path):
 
     source = source_configs(root=str(phase_tree))
     config = _target(
-        dest,
         subpath=FILTERED,
         save_frames=True,
         save_ranges=False,
@@ -760,7 +755,7 @@ def test_the_job_names_the_stage_every_line_is_filed_under(
     # driver's own summary, the per-sequence block, and the side branches.
     stage = "reconstruct"
     source = source_configs(root=str(phase_tree))
-    target = _target(tmp_path, save_frames=True)
+    target = _target(save_frames=True)
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
     with caplog.at_level(logging.INFO):
@@ -787,7 +782,7 @@ def test_a_sequence_leads_its_own_block(phase_tree, tmp_path, caplog):
     # left margin sees one entry per sequence rather than one flat list. Pinned
     # because the nesting is a default a call site can lose without failing.
     source = source_configs(root=str(phase_tree))
-    target = _target(tmp_path)
+    target = _target()
     compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
     with caplog.at_level(logging.INFO):
@@ -1114,7 +1109,7 @@ def _branches(
     **target,
 ):
     source, _ = source_configs(root="/dataset", subpath=subpath, frame_step=step)
-    config = _target(tmp_path, **target)
+    config = _target(**target)
     contents = dict.fromkeys(sequence_names, ("00000_phase.bin",))
 
     return build_branches(
@@ -1166,7 +1161,7 @@ def test_the_selection_stays_out_of_the_settings(tmp_path):
     # sequence's numbers mean, and `coverage` already reports that. Recording
     # them here would refuse reuse to a run that narrowed its selection.
     source, _ = source_configs(root="/dataset", include=["TL_00"], exclude=["TL_09"])
-    config = _target(tmp_path)
+    config = _target()
 
     (document,) = build_branches(
         source,
@@ -1206,7 +1201,7 @@ def test_branches_are_refused_before_any_of_them_is_built(tmp_path):
 def _frame_tree(tmp_path, **target):
     return build_branches(
         source_configs(root="/dataset")[0],
-        _target(tmp_path, save_frames=True, save_ranges=False, **target),
+        _target(save_frames=True, save_ranges=False, **target),
         parse_filter_config(None),
         output_root=tmp_path,
         contents={"TL_00": ()},
@@ -1231,7 +1226,7 @@ def test_the_settings_record_the_subpath_that_was_read(tmp_path):
     # A later run compares against where the frames came from, so writing them
     # somewhere else must not change what the document says it describes.
     source, _ = source_configs(root="/dataset")
-    config = _target(tmp_path, subpath=FILTERED)
+    config = _target(subpath=FILTERED)
 
     (document,) = build_branches(
         source,
@@ -1250,7 +1245,7 @@ def test_branches_are_refused_where_the_frames_would_land_on_the_source(tmp_path
     with pytest.raises(ValueError, match=r"frames would land on the source"):
         build_branches(
             source_configs(root=str(tmp_path))[0],
-            _target(tmp_path, save_frames=True),
+            _target(save_frames=True),
             parse_filter_config(None),
             output_root=tmp_path,
             contents={"TL_00": ()},
@@ -1274,14 +1269,14 @@ def _logged(caplog, source, target=None, kernel=None, output_root="/out"):
 
 
 def test_the_target_line_says_where_the_run_writes_not_what_placed_it(caplog):
-    # `target.root` places the job's directory and nothing reads it to write
+    # `run_root` places the job's directory and nothing reads it to write
     # with: a sweep gives each job one of its own beneath it, so both jobs
     # logged the same `target:` while writing to `<root>/0` and `<root>/1`. The
     # line follows the branches, which is the path a reader goes looking in.
     logged = _logged(
         caplog,
         source_configs(root="/dataset"),
-        _target("/out"),
+        _target(),
         output_root="/out/0",
     )
 
@@ -1293,7 +1288,7 @@ def test_each_block_is_tagged_by_what_it_configures(caplog):
     # A tag apiece rather than a verb, so a reader looking for one of the three
     # finds it by name, and the run's own lines below are never mistaken for
     # configuration.
-    logged = _logged(caplog, source_configs(root="/dataset"), _target("/out"))
+    logged = _logged(caplog, source_configs(root="/dataset"), _target())
     heads = [line for line in logged if not line.startswith("  ")]
 
     assert heads == [
@@ -1424,7 +1419,7 @@ def test_a_target_says_what_it_writes_and_where(caplog, target, written):
     # A line apiece, since one naming both would read as though the frames went
     # into the document too. The extension belongs to the document, so the log
     # names the file that will be there rather than the stem a run configured.
-    logged = _logged(caplog, source_configs(root="/d"), _target("/out", **target))
+    logged = _logged(caplog, source_configs(root="/d"), _target(**target))
 
     assert [line for line in logged if line.startswith("  writing")] == written
 
@@ -1435,7 +1430,7 @@ def test_a_range_file_carrying_another_extension_names_the_setting(caplog, name)
     # that holds one, and there are two `.json` names in this configuration --
     # so the reader was left with an extension and no key to go and change.
     with pytest.raises(ValueError, match=r"`target.ranges.file`"):
-        _logged(caplog, source_configs(root="/d"), _target("/o", range_file=name))
+        _logged(caplog, source_configs(root="/d"), _target(range_file=name))
 
 
 def test_the_written_frames_take_the_shape_the_source_was_read_in(caplog):
@@ -1445,7 +1440,7 @@ def test_the_written_frames_take_the_shape_the_source_was_read_in(caplog):
     logged = _logged(
         caplog,
         source_configs(root="/dataset", subpath="Phase/Other"),
-        _target("/out", save_frames=True),
+        _target(save_frames=True),
     )
 
     assert "  reading <sequence>/Phase/Other" in logged
@@ -1458,7 +1453,7 @@ def test_a_target_naming_a_subpath_says_that_one(caplog):
     logged = _logged(
         caplog,
         source_configs(root="/dataset"),
-        _target("/out", subpath=FILTERED, save_frames=True),
+        _target(subpath=FILTERED, save_frames=True),
     )
 
     assert f"  reading <sequence>/{PHASE_FLOAT_BIN}" in logged
@@ -1476,12 +1471,12 @@ def test_a_run_says_what_it_does_with_an_output_it_finds(caplog, policy, said):
     # Refusing is the default and says nothing; each of the other two is named,
     # since silence can separate two states but not three. Matched on the verbs
     # the two policies own, since the line above says `the value ranges` too.
-    target = _target("/o", if_present=policy)
+    target = _target(if_present=policy)
 
     assert said in _logged(caplog, source_configs(root="/d"), target)
 
     caplog.clear()
-    refused = _logged(caplog, source_configs(root="/d"), _target("/o"))
+    refused = _logged(caplog, source_configs(root="/d"), _target())
     verbs = ("overwriting", "reusing")
 
     assert not [line for line in refused if line.lstrip().startswith(verbs)]
@@ -1491,7 +1486,7 @@ def test_a_run_that_will_delete_says_so_before_it_reads_anything(caplog):
     # The one setting whose default is the safe one and whose other value is
     # not undoable, so it is named up front rather than only in what it removed.
     # Said per branch, since each holds the policy for the output it writes.
-    target = _target("/o", save_frames=True, if_unsourced="delete")
+    target = _target(save_frames=True, if_unsourced="delete")
 
     logged = _logged(caplog, source_configs(root="/d"), target)
     dropping = [line for line in logged if "dropping" in line]
@@ -1502,7 +1497,7 @@ def test_a_run_that_will_delete_says_so_before_it_reads_anything(caplog):
     ]
 
     caplog.clear()
-    kept = _logged(caplog, source_configs(root="/d"), _target("/o"))
+    kept = _logged(caplog, source_configs(root="/d"), _target())
     assert not [line for line in kept if "dropping" in line]
 
 

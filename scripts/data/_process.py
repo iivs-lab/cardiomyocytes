@@ -15,7 +15,6 @@ from pathlib import Path, PurePath
 from typing import TYPE_CHECKING
 
 from kaparoo.utils import quantify, unwrap_or_factory
-from omegaconf import MISSING
 
 from iivs_cardio.common.logging import log_indented
 from iivs_cardio.common.pipeline.branch import (
@@ -114,18 +113,16 @@ class RangeBranchConfig(BranchConfig):
 
 @dataclass
 class TargetConfig:
-    """Where a run's outputs land, and which of them it writes.
+    """What a run writes, one block per branch.
 
-    Not a tree of its own: the frames go out as one and the ranges as a single
-    file, so what the two share is the root they sit under and nothing else.
+    Where they land is not here: `run_root` places the job's directory, and the
+    folder a branch actually writes under is the one hydra made for the job.
 
     Attributes:
-        root: The folder the run's outputs land under.
         frames: The branch writing the filtered frames.
         ranges: The branch writing the value ranges.
     """
 
-    root: str = MISSING
     frames: FrameBranchConfig = field(default_factory=FrameBranchConfig)
     ranges: RangeBranchConfig = field(default_factory=RangeBranchConfig)
 
@@ -167,7 +164,7 @@ def _validate_output(
 
     if subpath.is_relative_to(written) or written.is_relative_to(subpath):
         where = f"{output_root.as_posix()}/*/{written.as_posix()}"
-        fix = "`target.frames.subpath` beside it, or `target.root` outside the source"
+        fix = "`target.frames.subpath` beside it, or `run_root` outside the source"
         msg = f"frames would land on the source at {where}: set {fix}"
         raise ValueError(msg)
 
@@ -221,9 +218,9 @@ def log_target_config(
     Args:
         target_config: The settings saying what the run was told to write.
         logger: The logger the lines go to.
-        output_root: The folder the branches actually write under, which is not
-            `target.root`: that setting places the job's directory, and a sweep
-            gives each of its jobs one of its own beneath it.
+        output_root: The folder the branches write under, which hydra made for
+            this job. A sweep gives each of its jobs one of its own beneath
+            `run_root`, so the two are the same path only in a lone run.
         subpath: The layout a written sequence is given, when frames are
             written. Defaults to `None`, which leaves the layout unnamed.
     """
