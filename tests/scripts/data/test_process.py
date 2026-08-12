@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -23,7 +24,7 @@ from iivs_cardio.data.pipeline import FrameTree, RangeDocument, SequenceStageFac
 from iivs_cardio.data.transforms.filtering.kernel import MedianConfig
 from iivs_cardio.data.writer import RECORD_FILE
 from scripts._common.compute import ComputeConfig, IncompleteRunError, run_all
-from scripts._common.dataset import _LISTING_LIMIT, SequenceSelectConfig
+from scripts._common.dataset import LISTING_LIMIT, SequenceSelectConfig
 from scripts._common.phase import build_sequences, search_sources
 from scripts.data._filtering import parse_filter_config
 from scripts.data._process import (
@@ -373,6 +374,27 @@ def test_a_selection_that_lands_on_no_frame_is_refused_before_the_run(
         )
 
     assert not dest.exists()
+
+
+def test_the_sequences_that_came_up_short_are_counted_once_too_many_to_name(
+    phase_tree, caplog
+):
+    # One line per run, not one name per sequence: a dataset where most of them
+    # fall short would otherwise put every name into a single warning.
+    for extra in range(SEQUENCES, LISTING_LIMIT + 2):
+        shutil.copytree(phase_tree / "TL_00", phase_tree / f"TL_{extra:02d}")
+    for index in range(LISTING_LIMIT + 2):
+        _short(phase_tree, f"TL_{index:02d}", FRAMES - 1)
+
+    source = source_configs(root=str(phase_tree), frame_count=FRAMES)
+
+    with caplog.at_level(logging.INFO):
+        build_preprocess_stages(*source, name=STAGE, output_root="/out")
+
+    (said,) = [line for line in caplog.messages if "gave fewer" in line]
+
+    assert said.count("TL_") == LISTING_LIMIT
+    assert said.endswith("and 2 more")
 
 
 def test_a_count_nobody_falls_short_of_says_nothing(phase_tree, caplog):
@@ -1435,7 +1457,7 @@ def test_a_long_selection_points_at_the_config_instead(caplog):
     # usual way, since both selections default to null. The path stays relative
     # because the log file naming it already sits in that directory, which is
     # what keeps a sweep's jobs pointing at their own copies.
-    names = [f"TL_{index:02d}" for index in range(_LISTING_LIMIT + 1)]
+    names = [f"TL_{index:02d}" for index in range(LISTING_LIMIT + 1)]
     record = ".hydra/{config,overrides}.yaml"
 
     logged = _logged(caplog, source_configs(root="/d", exclude=names))

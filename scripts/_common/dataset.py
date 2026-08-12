@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 __all__ = (
+    "LISTING_LIMIT",
     "SHORT_SEQUENCE_POLICIES",
     "FrameSelectConfig",
     "SequenceLayout",
@@ -165,8 +166,8 @@ class SequenceSelectConfig:
 # How many of the positions a run takes are shown before the line trails off.
 _PREVIEW_LIMIT: Final = 3
 
-# How many sequences are named before the line points at the config instead.
-_LISTING_LIMIT: Final = 5
+# How many sequences a line names before it gives their number instead.
+LISTING_LIMIT: Final = 5
 
 
 def _log_frame_selection(frame_config: FrameSelectConfig, logger: Logger) -> None:
@@ -202,7 +203,7 @@ def _log_sequence_selection(label: str, value: list[str] | str, logger: Logger) 
     count = len(value)
     sequences = quantify(count, "sequence")
 
-    if count > _LISTING_LIMIT:
+    if count > LISTING_LIMIT:
         record = ".hydra/{config,overrides}.yaml"
         log_indented(logger, "%s %s, listed in %s", label, sequences, record)
         return

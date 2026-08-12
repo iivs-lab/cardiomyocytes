@@ -25,7 +25,12 @@ from iivs_cardio.common.pipeline.branch import (
 )
 from iivs_cardio.data.pipeline import FrameTree, RangeDocument, SequenceStageFactory
 from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig
-from scripts._common.dataset import SequenceLayout, SourceConfig, log_source_config
+from scripts._common.dataset import (
+    LISTING_LIMIT,
+    SequenceLayout,
+    SourceConfig,
+    log_source_config,
+)
 from scripts._common.phase import build_sequences
 from scripts.data._filtering import describe_filter_kernel, log_filter_config
 
@@ -323,7 +328,10 @@ def _log_short_sequences(
 
     logger = logging.getLogger(name)
 
-    listed = ", ".join(short)
+    listed = ", ".join(short[:LISTING_LIMIT])
+    if (rest := len(short) - LISTING_LIMIT) > 0:
+        listed = f"{listed}, and {rest} more"
+
     counted = quantify(len(short), "sequence")
 
     logger.warning("%s gave fewer than %d: %s", counted, count, listed)
