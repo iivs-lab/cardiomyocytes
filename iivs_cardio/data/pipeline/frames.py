@@ -312,10 +312,18 @@ class FrameTree:
         500 sequences whose 300th is already written pays for 299 of them
         first. What the writer refuses is the same thing, a moment too late.
 
+        Staging is cleared at both ends, since only the end that runs collects
+        it: a run killed outright never reaches the other one, and what it
+        staged would otherwise sit here for as long as the tree does. Two runs
+        opening one root would take each other's, which nothing here or
+        anywhere else in this tree is written to survive.
+
         Raises:
             FileExistsError: If `if_present` is `"error"` and a sequence this
                 run would write already has a folder here.
         """
+        self.clear_staging()
+
         if self.if_present == "reuse":
             here = self._written()
             self._reused.update(name for name in here if self._still_describes(name))
