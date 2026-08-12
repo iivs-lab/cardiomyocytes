@@ -121,7 +121,7 @@ def test_a_sweep_is_refused_before_it_writes_the_one_tree(phase_tree, tmp_path):
             tmp_path,
             f"source.root={phase_tree}",
             f"target.root={tmp_path}",
-            "target.save_frames=true",
+            "target.frames.save=true",
             "hydra.mode=MULTIRUN",
         ) as composed,
         pytest.raises(ValueError, match=r"cannot write frames in a sweep"),
