@@ -316,7 +316,14 @@ avoid-escape = true
 exempt-modules = ["typing", "typing_extensions"]
 # jaxtyped/beartype resolve annotations at runtime, so their annotation imports
 # (torch.Tensor, jaxtyping.Float/UInt8) must stay out of `if TYPE_CHECKING`.
-runtime-evaluated-decorators = ["jaxtyping.jaxtyped", "beartype.beartype"]
+# `dataclasses.dataclass` joins them for the hydra schemas: `OmegaConf.structured`
+# reads a config's annotations to build and check the node, so a policy's
+# `Literal` has to be a name the module holds at runtime.
+runtime-evaluated-decorators = [
+    "jaxtyping.jaxtyped",
+    "beartype.beartype",
+    "dataclasses.dataclass",
+]
 
 [tool.ruff.lint.flake8-unused-arguments]
 ignore-variadic-names = true

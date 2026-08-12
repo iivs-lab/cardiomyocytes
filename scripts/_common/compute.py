@@ -30,6 +30,7 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 
 from iivs_cardio.common.device import Device
 from iivs_cardio.common.logging import log_indented
+from iivs_cardio.common.pipeline import StageFactory
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -38,8 +39,6 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from kaparoo.filesystem.types import StrPath
-
-    from iivs_cardio.common.pipeline import StageFactory
 
 
 # ========================== #
