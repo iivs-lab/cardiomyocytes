@@ -187,6 +187,17 @@ def test_a_selection_listing_a_file_that_is_not_there_names_the_setting(
         search_sources(source, SequenceSelectConfig(exclude=missing))
 
 
+@pytest.mark.parametrize("key", ("include", "exclude"))
+def test_a_selection_that_came_out_empty_is_not_read_as_no_selection(phase_tree, key):
+    # The one mistake that runs the wrong way round quietly: an empty list is
+    # no filter at all to the reader, so a selection built and left empty takes
+    # the whole dataset instead of none of it.
+    source, _ = source_configs(root=str(phase_tree))
+
+    with pytest.raises(ValueError, match=rf"empty select.{key}: leave it null"):
+        search_sources(source, SequenceSelectConfig(**{key: []}))
+
+
 def test_a_selection_can_be_a_file_of_the_names_to_take(phase_tree, tmp_path):
     # The shape a run over a whole plate is given: too many names for a command
     # line, so they arrive as a file the search reads.

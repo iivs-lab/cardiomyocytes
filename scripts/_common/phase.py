@@ -54,12 +54,14 @@ def _source_key(
     return tuple(frozen(value) for value in values)
 
 
-def _ensure_listing(value: list[str] | str | None, key: str) -> None:
-    """Raise unless a selection given as a file names one that is there.
+def _ensure_selection(value: list[str] | str | None, key: str) -> None:
+    """Raise unless a selection names something to select by.
 
-    The reader opens it only once the walk is done, so a mistyped path spent
-    the whole search before saying so, and said it in the library's words
-    rather than naming the setting that carried the path.
+    An empty one reads as no selection at all, so a list that came out empty
+    takes the whole dataset rather than none of it, and says nothing about
+    either. A file is opened only once the walk is done, so a mistyped path
+    spent the whole search before failing, and failed in the library's words
+    rather than naming the setting that carried it.
 
     Args:
         value: What the setting holds: names, a path to a file of them, or
@@ -67,12 +69,16 @@ def _ensure_listing(value: list[str] | str | None, key: str) -> None:
         key: The setting's own name, so a refusal says where to go and fix it.
 
     Raises:
-        ValueError: If `value` is a path to a file that is not there.
+        ValueError: If `value` is empty, or a path to a file that is not there.
     """
-    if not isinstance(value, str) or not is_spec_file(value):
+    if value is None:
         return
 
-    if not Path(value).is_file():
+    if not value:
+        msg = f"empty {key}: leave it null to take every sequence"
+        raise ValueError(msg)
+
+    if isinstance(value, str) and is_spec_file(value) and not Path(value).is_file():
         msg = f"no such {key} listing: {value}"
         raise ValueError(msg)
 
@@ -82,8 +88,8 @@ def _search_sources(
     select_config: SequenceSelectConfig,
 ) -> SearchResult:
     """Walk the root, open every sequence it holds, and keep the ones taken."""
-    _ensure_listing(select_config.include, "select.include")
-    _ensure_listing(select_config.exclude, "select.exclude")
+    _ensure_selection(select_config.include, "select.include")
+    _ensure_selection(select_config.exclude, "select.exclude")
 
     root = source_config.root
     subpath = source_config.resolve_subpath()
