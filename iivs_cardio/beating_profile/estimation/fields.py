@@ -145,5 +145,4 @@ class KineticEnergy(Field):
         object.__setattr__(self, "_scale", _YOCTO_PER_UNIT / 2)
 
     def compute(self, drymass: Tensor, velocity: Tensor, /) -> Tensor | None:
-        speed = velocity.square().sum(dim=0)
         return drymass * velocity.square().sum(dim=0)
