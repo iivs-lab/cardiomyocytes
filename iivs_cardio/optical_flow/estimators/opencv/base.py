@@ -46,6 +46,9 @@ class OpenCVAlgorithm:
     rather than taken on trust, so an algorithm cannot be presented as another
     device's.
 
+    Which of the two backends runs it follows from the same pairing, so
+    `backend` is here rather than beside them.
+
     Attributes:
         algorithm: The cv2 algorithm, CPU or CUDA.
         device: The device it was created on.
@@ -70,6 +73,23 @@ class OpenCVAlgorithm:
             name = type(self.algorithm).__name__
             msg = f"{name} was made for {made}, not for {self.device}"
             raise ValueError(msg)
+
+    def backend(self) -> Backend:
+        """Return the backend that runs this algorithm where it was made.
+
+        The pair is what decides, holding both halves of the question, and the
+        test is the one `__post_init__` already made, so the two cannot come to
+        different answers. Written out rather than read off a flag, since it is
+        what narrows the algorithm to the concrete type its backend calls.
+
+        Returns:
+            A backend of its own, so two estimators built from one pairing do
+            not share the buffers or the retained frame.
+        """
+        if isinstance(self.algorithm, cv2.cuda.DenseOpticalFlow):
+            return CUDABackend(self.algorithm, self.device)
+
+        return CPUBackend(self.algorithm)
 
 
 class OpenCVConfig(EstimatorConfig, ABC):
@@ -209,10 +229,10 @@ class CPUBackend:
 class CUDABackend:
     """The CUDA calls, over `GpuMat`s the backend owns and reuses.
 
-    Streaming keeps a pair it alternates between, so the frame retained from one
-    call is the one the next reads back. One-shot calls take a pair of their own
-    rather than borrowing that one, which is what leaves the stream undisturbed
-    by a `calc` between two pushes.
+    `push` alternates between a pair, so the frame one call retains is the one
+    the next reads back. `calc` takes a pair of its own rather than borrowing
+    that one, which is what leaves a stream undisturbed by a one-shot between
+    two pushes.
 
     Attributes:
         algorithm: The cv2 algorithm to call.
@@ -222,54 +242,40 @@ class CUDABackend:
     def __init__(self, algorithm: cv2.cuda.DenseOpticalFlow, device: Device) -> None:
         self.algorithm = algorithm
         self.device = device
-        self._flow = GpuMat()
-        self._streamed = (GpuMat(), GpuMat())
-        self._one_shot = (GpuMat(), GpuMat())
-        self._slot = 0
+        self._flow_buffer = GpuMat()
+        self._push_buffers = (GpuMat(), GpuMat())
+        self._calc_buffers = (GpuMat(), GpuMat())
+        self._push_slot = 0
 
     def push(self, frame: Tensor) -> Tensor | None:
         self.device.activate()  # the GpuMat/CuPy calls below read the global device
-        prev = self._streamed[self._slot]
-        curr = self._streamed[self._slot ^ 1]
+        prev = self._push_buffers[self._push_slot]
+        curr = self._push_buffers[self._push_slot ^ 1]
         tensor_to_gpumat(frame, out=curr)
-        self._slot ^= 1
+        self._push_slot ^= 1
         if prev.empty():
             return None
         return self._flow_between(prev, curr)
 
     def calc(self, prev: Tensor, curr: Tensor) -> Tensor:
         self.device.activate()
-        first, second = self._one_shot
+        first, second = self._calc_buffers
         return self._flow_between(
             tensor_to_gpumat(prev, out=first),
             tensor_to_gpumat(curr, out=second),
         )
 
     def reset(self) -> None:
-        self._streamed = (GpuMat(), GpuMat())
-        self._slot = 0
+        self._push_buffers = (GpuMat(), GpuMat())
+        self._push_slot = 0
 
     def _flow_between(self, prev: GpuMat, curr: GpuMat) -> Tensor:
-        if self._flow.size() != prev.size():
-            self._flow = GpuMat(prev.size(), cv2.CV_32FC2)
+        if self._flow_buffer.size() != prev.size():
+            self._flow_buffer = GpuMat(prev.size(), cv2.CV_32FC2)
         # Taken back rather than assumed written in place: cv2 returns the flow,
         # and a call that resized would leave the buffer here holding the last.
-        self._flow = self.algorithm.calc(prev, curr, self._flow)
-        return _as_flow(torch.as_tensor(gpumat_to_cupy(self._flow)))
-
-
-def _backend_for(paired: OpenCVAlgorithm) -> Backend:
-    """Return the backend that runs `paired` where it was made.
-
-    The test is the one `OpenCVAlgorithm` already made, so the two cannot come
-    to different answers, and it narrows the algorithm to the concrete type its
-    backend calls rather than the union either could have been.
-    """
-    algorithm = paired.algorithm
-    if isinstance(algorithm, cv2.cuda.DenseOpticalFlow):
-        return CUDABackend(algorithm, paired.device)
-
-    return CPUBackend(algorithm)
+        self._flow_buffer = self.algorithm.calc(prev, curr, self._flow_buffer)
+        return _as_flow(torch.as_tensor(gpumat_to_cupy(self._flow_buffer)))
 
 
 # ========================== #
@@ -310,7 +316,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
 
     def __init__(self, algorithm: OpenCVAlgorithm) -> None:
         super().__init__(algorithm.device)
-        self._backend = _backend_for(algorithm)
+        self._backend = algorithm.backend()
 
     @property
     def algorithm(self) -> DenseAlgorithm:
