@@ -260,30 +260,19 @@ class CUDABackend(Backend):
     def calc(self, prev: Tensor, curr: Tensor, out: Tensor | None = None) -> Tensor:
         self.device.activate()
         buffer_prev, buffer_curr = self._calc_buffers
-        return self._flow_between(
-            tensor_to_gpumat(prev, out=buffer_prev),
-            tensor_to_gpumat(curr, out=buffer_curr),
-            out,
-        )
+        tensor_to_gpumat(prev, out=buffer_prev)
+        tensor_to_gpumat(curr, out=buffer_curr)
+        return self._flow_between(buffer_prev, buffer_curr, out)
 
     @override
     def reset(self) -> None:
-        # The buffers stay, being scratch the next sequence writes over: what a
-        # push reads to know whether to answer is the flag, not a filled buffer.
         self._retained = False
 
-    def _flow_between(
-        self, buffer_prev: GpuMat, buffer_curr: GpuMat, out: Tensor | None
-    ) -> Tensor:
-        if self._flow_buffer.size() != buffer_prev.size():
-            self._flow_buffer = GpuMat(buffer_prev.size(), cv2.CV_32FC2)
-        # Taken back rather than assumed written in place: cv2 returns the flow,
-        # and a call that resized would leave the buffer here holding the last.
-        self._flow_buffer = self.algorithm.calc(
-            buffer_prev, buffer_curr, self._flow_buffer
-        )
+    def _flow_between(self, prev: GpuMat, curr: GpuMat, out: Tensor | None) -> Tensor:
+        if self._flow_buffer.size() != prev.size():
+            self._flow_buffer = GpuMat(prev.size(), cv2.CV_32FC2)
+        self._flow_buffer = self.algorithm.calc(prev, curr, self._flow_buffer)
         flow = torch.as_tensor(gpumat_to_cupy(self._flow_buffer))
-
         return self._as_flow(flow, out)
 
 
