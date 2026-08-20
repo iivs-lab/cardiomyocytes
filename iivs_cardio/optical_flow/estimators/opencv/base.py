@@ -215,6 +215,9 @@ class CUDABackend(Backend):
     that one, which is what leaves a stream undisturbed by a one-shot between
     two pushes.
 
+    Throughout, `prev` and `curr` are the frames a caller passed and
+    `buffer_prev` and `buffer_curr` the `GpuMat`s they were copied into.
+
     Attributes:
         algorithm: The cv2 algorithm to call.
         device: The device it and the buffers live on.
@@ -233,21 +236,21 @@ class CUDABackend(Backend):
     @override
     def push(self, frame: Tensor) -> Tensor | None:
         self.device.activate()  # the GpuMat/CuPy calls below read the global device
-        prev = self._push_buffers[self._push_slot]
-        curr = self._push_buffers[self._push_slot ^ 1]
-        tensor_to_gpumat(frame, out=curr)
+        buffer_prev = self._push_buffers[self._push_slot]
+        buffer_curr = self._push_buffers[self._push_slot ^ 1]
+        tensor_to_gpumat(frame, out=buffer_curr)
         self._push_slot ^= 1
-        if prev.empty():
+        if buffer_prev.empty():
             return None
-        return self._flow_between(prev, curr)
+        return self._flow_between(buffer_prev, buffer_curr)
 
     @override
     def calc(self, prev: Tensor, curr: Tensor) -> Tensor:
         self.device.activate()
-        buffer_prev, curr_buffer = self._calc_buffers
+        buffer_prev, buffer_curr = self._calc_buffers
         return self._flow_between(
             tensor_to_gpumat(prev, out=buffer_prev),
-            tensor_to_gpumat(curr, out=curr_buffer),
+            tensor_to_gpumat(curr, out=buffer_curr),
         )
 
     @override
@@ -255,12 +258,14 @@ class CUDABackend(Backend):
         self._push_buffers = (GpuMat(), GpuMat())
         self._push_slot = 0
 
-    def _flow_between(self, prev: GpuMat, curr: GpuMat) -> Tensor:
-        if self._flow_buffer.size() != prev.size():
-            self._flow_buffer = GpuMat(prev.size(), cv2.CV_32FC2)
+    def _flow_between(self, buffer_prev: GpuMat, buffer_curr: GpuMat) -> Tensor:
+        if self._flow_buffer.size() != buffer_prev.size():
+            self._flow_buffer = GpuMat(buffer_prev.size(), cv2.CV_32FC2)
         # Taken back rather than assumed written in place: cv2 returns the flow,
         # and a call that resized would leave the buffer here holding the last.
-        self._flow_buffer = self.algorithm.calc(prev, curr, self._flow_buffer)
+        self._flow_buffer = self.algorithm.calc(
+            buffer_prev, buffer_curr, self._flow_buffer
+        )
         return _as_flow(torch.as_tensor(gpumat_to_cupy(self._flow_buffer)))
 
 
