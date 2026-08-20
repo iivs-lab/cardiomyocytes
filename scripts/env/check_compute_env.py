@@ -247,6 +247,72 @@ def check_opencv() -> Section:
     return Section("OpenCV", headline, tuple(checks))
 
 
+def _cupy_torch_interop() -> list[Check]:
+    # `common/cuda_utils.py` wraps a torch tensor as a CuPy array and back
+    # without copying, which holds only while both read one
+    # `__cuda_array_interface__`. A pointer that differs means a silent copy.
+    import cupy as cp
+
+    try:
+        import torch
+    except (ImportError, OSError):
+        return []
+
+    if not torch.cuda.is_available():
+        return []
+
+    tensor = torch.arange(6, dtype=torch.float32, device="cuda")
+    view = cp.asarray(tensor)
+    wrapped = view.data.ptr == tensor.data_ptr()
+
+    back = torch.as_tensor(view)
+    returned = back.data_ptr() == view.data.ptr and bool(torch.equal(back, tensor))
+
+    return [
+        Check("torch tensor wraps as a CuPy view", passed=wrapped),
+        Check("CuPy array wraps back as a torch tensor", passed=returned),
+    ]
+
+
+def check_cupy() -> Section:
+    try:
+        import cupy as cp
+    except (ImportError, OSError) as exc:
+        return _import_failed("CuPy", exc)
+
+    try:
+        device_count = cp.cuda.runtime.getDeviceCount()
+    except cp.cuda.runtime.CUDARuntimeError as exc:
+        return _unreachable("CuPy", f"[!] CuPy reached no CUDA runtime: {exc}")
+
+    if device_count < 1:
+        missing = "[!] CuPy sees no CUDA device, and has no CPU build to fall back on."
+        return _unreachable("CuPy", missing)
+
+    version = cp.cuda.runtime.runtimeGetVersion()
+    runtime = f"{version // 1000}.{version % 1000 // 10}"
+    linkage = f"CUDA {runtime}, devices visible: {device_count}"
+    headline = f"CuPy {cp.__version__} - {linkage}"
+
+    # CuPy is CUDA-only, so there is no CPU side to hold these against: each is
+    # checked against a value worked out by hand, as the CPU baselines above are.
+
+    # 0 + 1 + 4 + 9 + 16 + 25 == 55, over kernels CuPy compiles on first use.
+    squares = cp.arange(6, dtype=cp.float32) ** 2
+    sum_ok = float(squares.sum()) == 55.0
+    checks = [Check("CUDA elementwise sum matches expected", passed=sum_ok)]
+
+    # The same matmul as above, through cuBLAS, read back so the copy out goes too.
+    mat = cp.arange(6, dtype=cp.float32).reshape(2, 3)
+    expected = np.array([[5.0, 14.0], [14.0, 50.0]], dtype=np.float32)
+    matmul_ok = bool(np.allclose(cp.asnumpy(mat @ mat.T), expected))
+    checks.append(Check("CUDA matmul matches expected", passed=matmul_ok))
+
+    checks.extend(_cupy_torch_interop())
+
+    return Section("CuPy", headline, tuple(checks))
+
+
 def main() -> None:
     print(_RULE)
     print("CUDA compute environment check")
@@ -255,7 +321,7 @@ def main() -> None:
     print_gpu_hardware()
 
     sections = []
-    for check in (check_pytorch, check_torchvision, check_opencv):
+    for check in (check_pytorch, check_torchvision, check_opencv, check_cupy):
         section = check()
         _render(section)
         sections.append(section)
