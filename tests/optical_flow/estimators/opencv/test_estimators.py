@@ -159,6 +159,14 @@ def test_deepflow_rejects_cuda():
         DeepFlowConfig().build("cuda")
 
 
+def test_deepflow_refuses_cuda_below_the_policy_too():
+    # `build` never reaches the guard, `SUPPORTED_DEVICES` refusing first, so
+    # nothing else covers it. What it answers is a caller reaching past `build`,
+    # who would otherwise hold a CPU algorithm paired with a CUDA device.
+    with pytest.raises(ValueError, match="DeepFlow"):
+        DeepFlowConfig()._create(Device("cuda"))  # noqa: SLF001
+
+
 def test_supported_devices():
     # Declared by the algorithm's config, not by the estimator: OpenCV shipping
     # no CUDA DeepFlow is a fact about DeepFlow.

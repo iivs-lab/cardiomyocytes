@@ -41,10 +41,9 @@ class OpenCVAlgorithm:
     """A cv2 flow algorithm, and the device it was created on.
 
     A CUDA algorithm is allocated on whichever device was current when cv2 was
-    asked for it, and nothing on the object says which that was. Carrying it
-    beside the algorithm is what lets an estimator hold the pair rather than
-    trust a caller to have activated the right one first: the two are set
-    together, by the one place that activates and creates in that order.
+    asked for it, and nothing on the object says which that was. Pairing the two
+    is what lets whoever holds one know where it runs, so an algorithm made for
+    one device cannot be presented as another's.
 
     Attributes:
         algorithm: The cv2 algorithm, CPU or CUDA.
@@ -58,37 +57,40 @@ class OpenCVAlgorithm:
 class OpenCVConfig(EstimatorConfig, ABC):
     """The settings of one cv2 flow algorithm, and how to make it on a device.
 
-    Every OpenCV estimator is built through this one `build`. A subclass adds
-    the parameters, the factory that takes them, and `SUPPORTED_DEVICES` where
-    the algorithm has no CUDA implementation. There is deliberately no class
-    per algorithm below `OpenCVEstimator`: what differs between them is the
-    parameters and which factory reads them, not the machinery that streams
-    frames through, so the algorithm itself fills the seat `FilterKernel` fills
-    on the filtering side.
+    Every OpenCV estimator is built through this one `build`, so an algorithm is
+    added here rather than beside `OpenCVEstimator`: a subclass carries the
+    parameters, makes the algorithm that reads them, and narrows
+    `SUPPORTED_DEVICES` where cv2 has no implementation for a device.
+
+    Attributes:
+        SUPPORTED_DEVICES: As `EstimatorConfig`, narrowed by a subclass whose
+            algorithm does not run everywhere.
     """
 
     @abstractmethod
-    def create(self, device: Device) -> DenseAlgorithm:
-        """Create the cv2 algorithm these settings describe, for `device`.
+    def _create(self, device: Device) -> DenseAlgorithm:
+        """Make the cv2 algorithm these settings describe, for `device`.
 
-        Called with `device` already current, so an implementation chooses the
-        CUDA factory rather than binding anything itself.
+        Called with `device` already current, so an implementation asks cv2 for
+        the factory it wants rather than binding anything itself.
 
         Args:
-            device: The device to create for, resolved and activated.
+            device: The device to make it for, resolved and activated.
 
         Returns:
-            The algorithm, which `build` pairs with the device it was made on.
+            The algorithm, which `build` pairs with `device`.
         """
 
     @override
     def build(self, device: DeviceLike = "cpu") -> OpenCVEstimator:
         """Build the estimator these settings describe, on `device`.
 
-        The order is what this exists to hold: the device is checked against
-        what the algorithm has an implementation for, made current, and only
-        then asked for one. A caller assembling the pair itself would carry
-        that order in its head, and nothing would say so when it did not.
+        Args:
+            device: The device to build for, in any form a caller may write.
+
+        Returns:
+            The estimator, holding an algorithm made for `device` and carrying
+            it, so the two cannot be paired wrongly by whoever receives them.
 
         Raises:
             ValueError: If `device` is not one of `SUPPORTED_DEVICES`.
@@ -96,7 +98,7 @@ class OpenCVConfig(EstimatorConfig, ABC):
         resolved = Device.resolve(device, self.SUPPORTED_DEVICES)
         resolved.activate()
 
-        return OpenCVEstimator(OpenCVAlgorithm(self.create(resolved), resolved))
+        return OpenCVEstimator(OpenCVAlgorithm(self._create(resolved), resolved))
 
 
 def _stack_flows(flows: list[Tensor], frames: Tensor) -> Tensor:
@@ -107,7 +109,7 @@ def _stack_flows(flows: list[Tensor], frames: Tensor) -> Tensor:
 
 
 class OpenCVEstimator(OpticalFlowEstimator):
-    """Optical-flow estimators backed by OpenCV's `cv2` / `cv2.cuda` algorithms.
+    """Optical-flow estimation backed by one OpenCV `cv2` / `cv2.cuda` algorithm.
 
     Takes `(H, W)` uint8 frames and returns `(2, H, W)` float32 flow (channel 0 =
     dx, channel 1 = dy) as `torch.Tensor`s on `self.device`. cv2 computes flow in
@@ -116,10 +118,10 @@ class OpenCVEstimator(OpticalFlowEstimator):
     keeps the whole computation on the device, so its output chains into the next
     GPU stage without a host transfer.
 
-    One class serves every algorithm: which one it streams is a value it is
-    given rather than a subclass of it, the way `FilteredSequence` takes the
-    kernel it reduces with. `OpenCVConfig.build` is what makes the pair, so an
-    algorithm and the device it was created on cannot arrive apart.
+    One class serves every algorithm, since which one runs changes the settings
+    and nothing about streaming frames through it. Build one through
+    `OpenCVConfig.build`, which is what pairs an algorithm with the device it
+    was made on.
 
     Separate from `OpticalFlowEstimator` so a future PyTorch (`nn.Module`)
     backend can extend the neutral base directly.
@@ -129,11 +131,10 @@ class OpenCVEstimator(OpticalFlowEstimator):
             created on.
 
     Attributes:
-        algorithm: The cv2 algorithm itself, public the way `FilteredSequence`
-            leaves its kernel public: what is plugged in is worth reading, and
-            it is the one place a caller can ask cv2 what it was configured
-            with.
-        device: The device it runs on, as `OpticalFlowEstimator` holds it.
+        algorithm: The cv2 algorithm itself, which is where the settings it was
+            made with can be read back from.
+        device: As `OpticalFlowEstimator`, taken from `algorithm`.
+        is_cuda: As `OpticalFlowEstimator`.
     """
 
     def __init__(self, algorithm: OpenCVAlgorithm) -> None:
@@ -150,9 +151,10 @@ class OpenCVEstimator(OpticalFlowEstimator):
     def validate_device(self, frame: Tensor) -> None:
         """Raise if `frame` is not on this estimator's device.
 
-        The algorithm names itself in the refusal rather than the estimator,
-        which is one class for all of them and would say the same thing however
-        the run was configured.
+        Raises:
+            ValueError: If `frame` sits on another device. The algorithm names
+                itself in the refusal, the estimator being one class for all of
+                them.
         """
         if frame.device != self.device.as_torch:
             name = type(self.algorithm).__name__

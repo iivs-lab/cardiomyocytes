@@ -15,13 +15,13 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class DualTVL1Config(OpenCVConfig):
-    """TV-L1's settings, whose two factories disagree on more than their name.
+    """TV-L1's settings, the last four of which only one device each reads.
 
-    The last four fields are read by one device each. cv2 offers no way to ask
-    an algorithm what it ignored, so a sweep over one of them on the other
-    device runs to the end and reports no difference.
+    cv2 offers no way to ask an algorithm what it ignored, so a sweep over one
+    of those four on the other device runs to the end and reports no difference.
 
     Attributes:
+        SUPPORTED_DEVICES: As `EstimatorConfig`: cv2 implements TV-L1 for both.
         tau: The time step of the dual ascent.
         lambda_: The weight the data term carries against smoothness.
         theta: The tightness coupling the two variables.
@@ -50,12 +50,7 @@ class DualTVL1Config(OpenCVConfig):
     iterations: int = 300
 
     @override
-    def create(self, device: Device) -> DenseAlgorithm:
-        """Create the TV-L1 algorithm, from the factory `device` names.
-
-        The two take different iteration settings and the CUDA one takes no
-        median filter, so this branches where Farneback only picks a factory.
-        """
+    def _create(self, device: Device) -> DenseAlgorithm:
         if device.is_cuda:
             return cv2.cuda.OpticalFlowDual_TVL1.create(
                 tau=self.tau,

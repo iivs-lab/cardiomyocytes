@@ -23,13 +23,17 @@ class OpticalFlowEstimator(ABC):
 
     Each `push` returns the flow from the previously pushed frame to the current
     one, so the first call returns `None` (N frames yield N-1 flows). The
-    estimator retains only the previous frame, so its memory is O(1) regardless
-    of sequence length — the caller consumes or offloads each returned flow
-    rather than accumulating them. `reset` starts a new sequence and `calc` is a
+    estimator retains only the previous frame, so its memory is O(1) whatever the
+    sequence length: the caller consumes or offloads each returned flow rather
+    than accumulating them. `reset` starts a new sequence and `calc` is a
     stateless one-shot for a single pair.
 
-    Subclasses pin the concrete dtype/shape of frames and flow (e.g. the OpenCV
-    backend takes `(H, W)` uint8 frames and returns `(2, H, W)` float32 flow).
+    A subclass pins the concrete dtype and shape of a frame and of a flow, which
+    is the one thing this contract leaves open.
+
+    Attributes:
+        device: The device this estimator runs on.
+        is_cuda: Whether that device is a CUDA one.
     """
 
     def __init__(self, device: DeviceLike = "cpu") -> None:
@@ -73,15 +77,15 @@ class EstimatorConfig(ABC):
     """An estimator's constructor arguments as one value, buildable into it.
 
     Separate from `OpticalFlowEstimator` so a config, a CLI, or a process-pool
-    recipe carries the settings without a live estimator -- which cannot cross a
-    process boundary, holding a `cv2` object that does not pickle. `build`
-    reconstructs one on the target device inside the worker. Mirrors
+    recipe carries the settings without a live estimator, which cannot cross a
+    process boundary while it holds a library object that does not pickle.
+    `build` reconstructs one on the target device inside the worker. Mirrors
     `filtering.kernel.KernelConfig`; `device` is the one addition, since an
     estimator is device-bound where a kernel is not.
 
     Which devices an algorithm runs on is declared here rather than on the
-    estimator: OpenCV shipping no CUDA DeepFlow is a fact about DeepFlow, not
-    about the machinery that streams frames through it.
+    estimator: an algorithm with no implementation for one is a fact about the
+    algorithm, not about the machinery that streams frames through it.
 
     Attributes:
         SUPPORTED_DEVICES: The device kinds this algorithm has an

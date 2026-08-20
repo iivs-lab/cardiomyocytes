@@ -40,7 +40,7 @@ def _metrics(
     frame1: Tensor, frame2: Tensor, data_range: float | None, *, reduce: bool
 ) -> dict[str, Tensor]:
     # Always score per sample, then optionally average, so that `reduce=True` is
-    # exactly the mean of `reduce=False` for every metric -- including PSNR, whose
+    # exactly the mean of `reduce=False` for every metric, PSNR included, whose
     # pooled form (one log over the batch's total error) is a different quantity.
     data_range = _resolve_data_range(frame1, data_range)
     *dim, height, width = frame1.shape
@@ -92,18 +92,19 @@ def warp_consistency(
     **Direction.** `flow` is the forward flow `frame1 -> frame2`, so it is
     defined on `frame1`'s grid: the material point at `x` in `frame1` sits at
     `x + flow(x)` in `frame2`. Sampling `frame2` there reconstructs `frame1`
-    **exactly** -- the output grid *is* the grid the flow is defined on, so no
+    **exactly**: the output grid *is* the grid the flow is defined on, so no
     inverse is needed. Going the other way, reconstructing `frame2` from
     `frame1`, requires inverting the map, and `x - flow(x)` only approximates it,
     with an error growing as `|flow| * |grad flow|`.
 
-    Under a *uniform* flow the two coincide -- `x - flow(x)` inverts a constant
-    map exactly -- so no amount of testing on a rigid translation can tell them
+    Under a *uniform* flow the two coincide, `x - flow(x)` inverting a constant
+    map exactly, so no amount of testing on a rigid translation can tell them
     apart. Pin this choice with a non-uniform flow instead. (A flipped *sign* is
     a different error, and a uniform translation does catch that one.)
 
     Gradients reach `flow` for float frames, so this doubles as a photometric
-    training loss -- also the form the unsupervised-flow literature uses. Integer
+    training loss, which is also the form the unsupervised-flow literature
+    uses. Integer
     frames break the graph (the warp rounds and clamps them back to their dtype),
     so training must use float frames.
 
@@ -140,6 +141,11 @@ class WarpConsistency(nn.Module):
         padding_mode: `grid_sample` out-of-bounds policy for the warp.
         reduce: average over the batch to a 0-d scalar per metric. `False` keeps
             one score per pair, shaped `(*dim)`.
+
+    Attributes:
+        data_range: The value range PSNR and SSIM are scored against, or `None`
+            to take it from the frame dtype.
+        reduce: Whether each call averages over the batch.
     """
 
     def __init__(

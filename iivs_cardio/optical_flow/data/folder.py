@@ -58,10 +58,8 @@ def _validate_flow_shape(shape: tuple[int, ...], path: Path) -> tuple[int, int, 
 def read_flow_npy_header(path: StrPath) -> tuple[tuple[int, int, int], np.dtype[Any]]:
     """Read a flow `.npy`'s shape and dtype without decoding its pixels.
 
-    Reads the `.npy` header block alone, so the cost does not scale with the frame:
-    about 5x cheaper than `np.load(mmap_mode="r")` and 30x cheaper than a full decode
-    at this project's frame size. Pickle is never reached, since only the header is
-    parsed.
+    Reads the `.npy` header block alone, so the cost does not scale with the
+    frame. Pickle is never reached, since only the header is parsed.
 
     Args:
         path: The `.npy` file to inspect.

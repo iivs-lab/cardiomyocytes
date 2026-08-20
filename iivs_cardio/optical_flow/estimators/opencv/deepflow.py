@@ -13,22 +13,28 @@ from iivs_cardio.optical_flow.estimators.opencv.base import DenseAlgorithm, Open
 
 @dataclass(frozen=True, slots=True)
 class DeepFlowConfig(OpenCVConfig):
-    """DeepFlow's (empty) recipe: it exposes no tunable parameters.
+    """DeepFlow's settings, of which it exposes none.
 
-    Held anyway so every algorithm has a buildable config, letting a worker
-    construct any of them through the one `build`.
+    Held anyway so every algorithm is built the same way, from a value that
+    crosses a process boundary where a live algorithm cannot.
 
     Attributes:
-        SUPPORTED_DEVICES: CPU alone, since OpenCV ships no CUDA DeepFlow.
+        SUPPORTED_DEVICES: CPU alone, cv2 shipping no CUDA DeepFlow.
     """
 
     SUPPORTED_DEVICES: ClassVar[frozenset[DeviceKind]] = frozenset({"cpu"})
 
     @override
-    def create(self, device: Device) -> DenseAlgorithm:
-        """Create the DeepFlow algorithm, which takes neither settings nor a device.
+    def _create(self, device: Device) -> DenseAlgorithm:
+        """Make the DeepFlow algorithm, which takes no settings.
 
-        `device` is the contract's, not this algorithm's: `SUPPORTED_DEVICES`
-        has already refused everything but the one it runs on.
+        Raises:
+            ValueError: If `device` is a CUDA one. `build` refuses that first,
+                so this answers whoever reached past it, who would otherwise
+                hold a CPU algorithm labelled CUDA.
         """
+        if device.is_cuda:
+            msg = "DeepFlow is not available on CUDA devices"
+            raise ValueError(msg)
+
         return cv2.optflow.createOptFlow_DeepFlow()

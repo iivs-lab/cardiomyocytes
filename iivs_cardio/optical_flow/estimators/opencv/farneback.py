@@ -15,9 +15,11 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class FarnebackConfig(OpenCVConfig):
-    """Farneback's settings, which cv2's two factories read alike.
+    """Farneback's settings, every one of which either device reads.
 
     Attributes:
+        SUPPORTED_DEVICES: As `EstimatorConfig`: cv2 implements Farneback for
+            both.
         num_levels: The pyramid levels to build.
         pyr_scale: The scale between one level and the next.
         fast_pyramids: Whether to build the pyramid the cheaper way.
@@ -38,17 +40,10 @@ class FarnebackConfig(OpenCVConfig):
     flags: int = 0
 
     @override
-    def create(self, device: Device) -> DenseAlgorithm:
-        """Create the Farneback algorithm, from whichever factory `device` names.
-
-        The two take the same eight arguments, so the device chooses the
-        factory and nothing else.
-        """
-        factory = (
-            cv2.cuda.FarnebackOpticalFlow
-            if device.is_cuda
-            else cv2.FarnebackOpticalFlow
-        )
+    def _create(self, device: Device) -> DenseAlgorithm:
+        factory = cv2.FarnebackOpticalFlow
+        if device.is_cuda:
+            factory = cv2.cuda.FarnebackOpticalFlow
 
         return factory.create(
             numLevels=self.num_levels,
