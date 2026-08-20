@@ -13,9 +13,9 @@ from iivs_cardio.optical_flow.estimators import (
     DualTVL1Config,
     EstimatorConfig,
     FarnebackConfig,
-    OpenCVAlgorithm,
     OpenCVEstimator,
 )
+from iivs_cardio.optical_flow.estimators.opencv.base import _backend_for
 
 # All three OpenCV methods run on CPU, so the streaming contract is tested
 # GPU-free; the CUDA path is gated on an actual device below. Each is named by
@@ -191,28 +191,44 @@ def test_push_rejects_wrong_shape():
 
 
 @pytest.mark.parametrize(
-    ("algorithm", "device", "made"),
+    "algorithm",
     (
-        pytest.param(
-            cv2.FarnebackOpticalFlow.create(), "cuda", "cpu", id="cpu-as-cuda"
-        ),
-        pytest.param(
-            cv2.optflow.createOptFlow_DeepFlow(), "cuda", "cpu", id="deepflow"
-        ),
+        pytest.param(cv2.FarnebackOpticalFlow.create(), id="farneback"),
+        pytest.param(cv2.optflow.createOptFlow_DeepFlow(), id="deepflow"),
     ),
 )
-def test_an_algorithm_cannot_be_paired_with_another_device(algorithm, device, made):
-    # `build` sets the two together and nothing else should be trusted to: a
-    # CPU algorithm labelled CUDA would be handed CUDA tensors and read them as
-    # host memory, which is the one mistake the label exists to prevent.
-    with pytest.raises(ValueError, match=f"made for {made}"):
-        OpenCVAlgorithm(algorithm, Device(device))
+def test_an_algorithm_is_refused_a_device_it_was_not_made_for(algorithm):
+    # What is left to catch once `SUPPORTED_DEVICES` has run and the backends
+    # take the concrete cv2 types: a `_create` that read its device wrongly. A
+    # CPU algorithm run as CUDA would be handed device tensors and read as host
+    # memory.
+    with pytest.raises(ValueError, match="made for cpu"):
+        _backend_for(algorithm, Device("cuda"))
 
 
 @requires_cuda
-def test_a_cuda_algorithm_cannot_be_paired_with_the_cpu():
+def test_a_cuda_algorithm_is_refused_the_cpu():
     with pytest.raises(ValueError, match="made for cuda"):
-        OpenCVAlgorithm(cv2.cuda.FarnebackOpticalFlow.create(), Device("cpu"))
+        _backend_for(cv2.cuda.FarnebackOpticalFlow.create(), Device("cpu"))
+
+
+@pytest.mark.parametrize("flow_cls", CPU_METHODS)
+def test_an_estimator_says_which_device_it_runs_on(flow_cls):
+    # Nothing inside branches on this any more, the backend being chosen once,
+    # so it is the caller's question alone and only a test keeps it answered.
+    of = flow_cls().build("cpu")
+
+    assert of.device == Device("cpu")
+    assert of.is_cuda is False
+
+
+@requires_cuda
+@pytest.mark.parametrize("flow_cls", CUDA_METHODS)
+def test_a_cuda_estimator_says_so(flow_cls):
+    of = flow_cls().build("cuda")
+
+    assert of.device == Device("cuda", 0)
+    assert of.is_cuda is True
 
 
 def test_deepflow_rejects_cuda():

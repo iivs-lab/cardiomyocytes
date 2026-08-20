@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-__all__ = ("DenseAlgorithm", "OpenCVAlgorithm", "OpenCVConfig", "OpenCVEstimator")
+__all__ = ("DenseAlgorithm", "OpenCVConfig", "OpenCVEstimator")
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, override
 
 import cv2
@@ -34,67 +33,6 @@ FlowType = Float32[Tensor, "2 H W"]
 BatchFrameType = UInt8[Tensor, "N H W"]
 BatchFlowType = Float32[Tensor, "N 2 H W"]
 ChunkFlowType = Float32[Tensor, "M 2 H W"]
-
-
-@dataclass(frozen=True, slots=True)
-class OpenCVAlgorithm:
-    """A cv2 flow algorithm, and the device it was created on.
-
-    A CUDA algorithm is allocated on whichever device was current when cv2 was
-    asked for it, and nothing on the object says which that was. Pairing the two
-    is what lets whoever holds one know where it runs, and the pair is checked
-    rather than taken on trust, so an algorithm cannot be presented as another
-    device's.
-
-    Which of the two backends runs it follows from the same pairing, so
-    `backend` is here rather than beside them.
-
-    Attributes:
-        algorithm: The cv2 algorithm, CPU or CUDA.
-        device: The device it was created on.
-
-    Raises:
-        ValueError: If the algorithm's backend is not `device`'s.
-    """
-
-    algorithm: DenseAlgorithm
-    device: Device
-
-    def __post_init__(self) -> None:
-        """Refuse a pairing cv2 could not have produced.
-
-        Which backend an algorithm came from is the one thing it does say,
-        through its type, where the device it was made on is not recoverable
-        from it at all.
-
-        What is left to catch here is a `_create` that read the device it was
-        handed wrongly. Passing a backend the other kind directly is a type
-        error rather than a value one, each taking the concrete cv2 type rather
-        than either of them.
-        """
-        on_cuda = isinstance(self.algorithm, cv2.cuda.DenseOpticalFlow)
-        if on_cuda != self.device.is_cuda:
-            made = "cuda" if on_cuda else "cpu"
-            name = type(self.algorithm).__name__
-            msg = f"{name} was made for {made}, not for {self.device}"
-            raise ValueError(msg)
-
-    def backend(self) -> Backend:
-        """Return the backend that runs this algorithm where it was made.
-
-        The pair is what decides, holding both halves of the question. The test
-        here is not the refusal, which `__post_init__` has already made: it is
-        what narrows the algorithm to the concrete cv2 type its backend takes,
-        which no flag read off that refusal would do.
-
-        Returns:
-            A backend of its own, so two estimators built from one pairing do
-            not share the buffers or the retained frame.
-        """
-        if isinstance(self.algorithm, cv2.cuda.DenseOpticalFlow):
-            return CUDABackend(self.algorithm, self.device)
-
-        return CPUBackend(self.algorithm)
 
 
 class OpenCVConfig(EstimatorConfig, ABC):
@@ -141,7 +79,7 @@ class OpenCVConfig(EstimatorConfig, ABC):
         resolved = Device.resolve(device, self.SUPPORTED_DEVICES)
         resolved.activate()
 
-        return OpenCVEstimator(OpenCVAlgorithm(self._create(resolved), resolved))
+        return OpenCVEstimator(_backend_for(self._create(resolved), resolved))
 
 
 def _stack_flows(flows: list[Tensor], frames: Tensor) -> Tensor:
@@ -175,11 +113,18 @@ class Backend(Protocol):
     Attributes:
         algorithm: The cv2 algorithm this calls, which is the one an estimator
             reads its settings back from.
+        device: Where it runs. Carried here because an algorithm does not say
+            which device cv2 made it on, and whoever runs it has to know.
     """
 
     @property
     def algorithm(self) -> DenseAlgorithm:
         """The cv2 algorithm this backend calls."""
+        ...
+
+    @property
+    def device(self) -> Device:
+        """The device this backend runs on."""
         ...
 
     def push(self, frame: Tensor) -> Tensor | None:
@@ -206,7 +151,11 @@ class CPUBackend:
 
     Attributes:
         algorithm: The cv2 algorithm to call.
+        device: The CPU, which is not asked for: there is one of it, where a
+            host with several GPUs has a CUDA device to choose between.
     """
+
+    device = Device("cpu")
 
     def __init__(self, algorithm: cv2.DenseOpticalFlow) -> None:
         self.algorithm = algorithm
@@ -283,6 +232,38 @@ class CUDABackend:
         return _as_flow(torch.as_tensor(gpumat_to_cupy(self._flow_buffer)))
 
 
+def _backend_for(algorithm: DenseAlgorithm, device: Device) -> Backend:
+    """Return the backend that runs `algorithm` on `device`.
+
+    The one place a union of cv2's two backends meets a device, and so the one
+    place they can disagree. What that catches is a `_create` that read the
+    device it was handed wrongly: `SUPPORTED_DEVICES` has already refused a
+    device the algorithm has no implementation for, and handing a backend the
+    other kind directly is a type error rather than a value one, each taking
+    the concrete cv2 type rather than either of them.
+
+    The second test is not the first repeated. It is what narrows the algorithm
+    to the type its backend takes, which no flag read off the refusal would do.
+
+    Returns:
+        A backend of its own, so two estimators built from one algorithm do not
+        share the buffers or the retained frame.
+
+    Raises:
+        ValueError: If `algorithm` was not made for `device`'s backend.
+    """
+    on_cuda = isinstance(algorithm, cv2.cuda.DenseOpticalFlow)
+    if on_cuda != device.is_cuda:
+        made = "cuda" if on_cuda else "cpu"
+        msg = f"{type(algorithm).__name__} was made for {made}, not for {device}"
+        raise ValueError(msg)
+
+    if isinstance(algorithm, cv2.cuda.DenseOpticalFlow):
+        return CUDABackend(algorithm, device)
+
+    return CPUBackend(algorithm)
+
+
 # ========================== #
 #         Estimator          #
 # ========================== #
@@ -308,8 +289,8 @@ class OpenCVEstimator(OpticalFlowEstimator):
     backend can extend the neutral base directly.
 
     Args:
-        algorithm: The cv2 algorithm to stream through, with the device it was
-            created on.
+        backend: What runs the flow calls, holding the cv2 algorithm and the
+            device it was made on. `OpenCVConfig.build` is what makes one.
 
     Attributes:
         algorithm: The cv2 algorithm itself, which is where the settings it was
@@ -319,9 +300,9 @@ class OpenCVEstimator(OpticalFlowEstimator):
         is_cuda: As `OpticalFlowEstimator`.
     """
 
-    def __init__(self, algorithm: OpenCVAlgorithm) -> None:
-        super().__init__(algorithm.device)
-        self._backend = algorithm.backend()
+    def __init__(self, backend: Backend) -> None:
+        super().__init__(backend.device)
+        self._backend = backend
 
     @property
     def algorithm(self) -> DenseAlgorithm:
