@@ -66,6 +66,11 @@ class OpenCVAlgorithm:
         Which backend an algorithm came from is the one thing it does say,
         through its type, where the device it was made on is not recoverable
         from it at all.
+
+        What is left to catch here is a `_create` that read the device it was
+        handed wrongly. Passing a backend the other kind directly is a type
+        error rather than a value one, each taking the concrete cv2 type rather
+        than either of them.
         """
         on_cuda = isinstance(self.algorithm, cv2.cuda.DenseOpticalFlow)
         if on_cuda != self.device.is_cuda:
@@ -77,10 +82,10 @@ class OpenCVAlgorithm:
     def backend(self) -> Backend:
         """Return the backend that runs this algorithm where it was made.
 
-        The pair is what decides, holding both halves of the question, and the
-        test is the one `__post_init__` already made, so the two cannot come to
-        different answers. Written out rather than read off a flag, since it is
-        what narrows the algorithm to the concrete type its backend calls.
+        The pair is what decides, holding both halves of the question. The test
+        here is not the refusal, which `__post_init__` has already made: it is
+        what narrows the algorithm to the concrete cv2 type its backend takes,
+        which no flag read off that refusal would do.
 
         Returns:
             A backend of its own, so two estimators built from one pairing do
