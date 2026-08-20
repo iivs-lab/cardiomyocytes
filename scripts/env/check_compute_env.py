@@ -1,3 +1,4 @@
+import sys
 import textwrap
 from dataclasses import dataclass
 
@@ -11,12 +12,28 @@ _CONV_LABEL = "CUDA conv2d (cuDNN) matches CPU"
 
 _SETUP_SCRIPT = "scripts/env/setup-opencv-cuda.ps1"
 
-_CUDNN_FAULT = f"""\
+# One soname is loaded once per process, so a foreign cuDNN reaches torch the
+# same way on either platform. Where it comes from, and what takes it back, is
+# what differs.
+if sys.platform == "win32":
+    _CUDNN_FAULT = f"""\
 Works with cuDNN disabled, so cuDNN itself is the cause. Usually a
 foreign cuDNN shadowing the one torch bundles in torch/lib. On
 Windows the OpenCV setup is the usual source -- preview and repair:
   {_SETUP_SCRIPT} -DryRun
   {_SETUP_SCRIPT}     (as Administrator)"""
+
+    _OPENCV_FIX = f"    On Windows, run {_SETUP_SCRIPT} as Administrator first."
+else:
+    _CUDNN_FAULT = """\
+Works with cuDNN disabled, so cuDNN itself is the cause. Usually a
+foreign libcudnn reaching the process before the one torch carries in
+torch/lib, where the first to arrive is the one every consumer gets.
+Look for a system copy, and for one LD_LIBRARY_PATH puts ahead of it:
+  ldconfig -p | grep libcudnn
+  echo $LD_LIBRARY_PATH"""
+
+    _OPENCV_FIX = "    Check the loader reaches CUDA: ldconfig -p | grep libcudart"
 
 _DRIVER_FAULT = """\
 Fails with cuDNN disabled too, so cuDNN is not the cause --
@@ -212,8 +229,7 @@ def check_opencv() -> Section:
     try:
         import cv2
     except (ImportError, OSError) as exc:
-        fix = f"    On Windows, run {_SETUP_SCRIPT} as Administrator first."
-        return _import_failed("OpenCV", exc, fix)
+        return _import_failed("OpenCV", exc, _OPENCV_FIX)
 
     # A CPU-only OpenCV can expose an empty `cv2.cuda`, so read the build itself.
     cuda_lines = [
