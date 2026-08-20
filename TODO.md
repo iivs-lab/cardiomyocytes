@@ -562,6 +562,18 @@ source.root="$DATA" source.include="$chunk"
 `optical_flow/estimators/`에 OpenCV 기반 Farneback·DualTVL1·DeepFlow, `common/warp.py`,
 `optical_flow/evaluation.py`, `optical_flow/data/folder.py`(flow `.npy` 폴더).
 
+**추정기는 세 층이다.** `EstimatorConfig`(파라미터를 든 값) → `Backend`(cv2 알고리즘과
+`Device`를 들고 실제 호출을 하는 것) → `OpticalFlowEstimator`(시퀀스 인터페이스). 알고리즘마다
+estimator 자식을 두던 상속은 사라졌고 `OpenCVEstimator` 하나가 전부를 맡는다. `Backend`는
+`CPUBackend`·`CUDABackend`로 갈라 장치 분기를 그 층에 가뒀다 — estimator에는 `is_cuda` 분기가
+하나도 없고 `cast`도 없다. `SUPPORTED_DEVICES`는 알고리즘의 성질이므로 config에 있다. hydra
+설정의 `_target_: ...FarnebackConfig`는 한 글자도 바뀌지 않았다.
+
+`push_chunk`·`calc_batch`는 배치를 한 번 잡고 flow를 행에 써 넣는다. 모아서 `torch.stack`하면
+리스트와 결과가 동시에 살아 청크를 두 번 드는데, 900×900 120프레임에서 피크 1471 MiB가
+736 MiB가 됐다(시간은 685 ms → 637 ms). `Backend.push`·`calc`의 `out` 인자와 `Backend.retained`가
+그 대가다.
+
 `data/transforms/normalization.py`는 세 모드를 쌍 모양 API로 제공하고 uint8을 낸다.
 **`pairwise`는 단일 정규화 프레임 목록을 만들 수 없다** — 한 프레임이 속한 쌍의 결합 범위로
 스케일되므로 두 번 등장하며 인코딩이 둘이다. API가 쌍(또는 창) 기반이어야 그 모드가 존재할
@@ -669,141 +681,6 @@ median 필터는 이 오염에 대한 정확한 대응이고, 창 안 절반 미
 측정 실행에서 `save_frames=true`로 캐시를 남기면 소비 실행은 **필터링을 다시 하지 않으므로**
 1.71배가 사라진다. 대신 470 GB의 캐시 I/O가 드는데, 그 저울은 §「필터 캐시를 둘지는
 조건부다」와 같다.
-
-## 결정 — 알고리즘은 상속이 아니라 값으로 끼운다
-
-`FilteredSequence` · `FilterKernel` · `KernelConfig`가 이미 세워둔 관계를 추정기에도 쓴다.
-**알고리즘마다 estimator 자식 클래스를 두지 않는다.**
-
-### 지금 자식 클래스가 지고 있는 비용 셋
-
-**생성자가 가상 메서드를 부른다.** `OpenCVEstimator.__init__`이 추상 `_create_algorithm()`을
-부르는데 그 구현이 `self.config`를 읽으므로, 자식은 `super().__init__()` **앞에서** 설정을
-심어야 한다.
-
-```python
-class Farneback(OpenCVEstimator):
-    def __init__(self, config=None, *, device="cpu") -> None:
-        self.config = unwrap_or_factory(config, FarnebackConfig)
-        super().__init__(device)          # 이 순서가 아니면 깨진다
-```
-
-`Farneback.__init__`과 `DualTVL1.__init__`은 **오직 이 순서를 맞추려고 존재한다.**
-
-**클래스 하나가 팩토리 메서드 하나를 담고 있다.** `Farneback` 70줄, `DualTVL1` 82줄,
-`DeepFlow` 35줄 중 클래스로서 갖는 것은 `_create_algorithm`과 위의 `__init__`뿐이다.
-상속을 매개변수 대신 쓰고 있다.
-
-**`build`가 세 번 쓰여 있다.** 세 `EstimatorConfig.build`가 각자 자기 자식을 만들 뿐이다.
-
-### 자리를 맞추면 이렇게 된다
-
-| filtering | optical flow |
-| --- | --- |
-| `KernelConfig` — 데이터, `build() -> FilterKernel` | `OpenCVConfig` — 데이터, `create(device) -> OpenCVAlgorithm` |
-| `FilterKernel` — 살아있는 것, `apply(window, target)` | **cv2 알고리즘** — 살아있는 것, `calc(prev, curr, flow)` |
-| `FilteredSequence(source, kernel)` — 기계 | `OpenCVEstimator(algorithm, device)` — 기계 |
-
-**`FilterKernel` 자리를 cv2 알고리즘이 채운다.** 우리가 쓴 것이 아닐 뿐 역할이 같다 —
-파라미터를 품고 실제 계산을 한다. 그 위에 `Engine` 같은 층을 얹지 않는다.
-
-```
-EstimatorConfig (ABC)                  build(device) -> OpticalFlowEstimator
-  └── OpenCVConfig (ABC)               build(device) -> OpenCVEstimator   ← 한 번만
-        create(device) -> OpenCVAlgorithm    (추상)
-        SUPPORTED_DEVICES                    (알고리즘의 성질이다)
-        ├── FarnebackConfig
-        ├── DualTVL1Config
-        └── DeepFlowConfig
-
-OpticalFlowEstimator (ABC)
-  └── OpenCVEstimator                  구체 클래스
-```
-
-`SUPPORTED_DEVICES`가 제자리를 찾는다. **지금은 estimator에 붙어 있는데(`DeepFlow`가 CPU
-전용) 그건 백엔드가 아니라 알고리즘의 성질이다.**
-
-hydra 설정은 한 글자도 바뀌지 않는다 — `_target_: ...FarnebackConfig`가 그대로 유효하다.
-
-### 장치가 유일한 비대칭이다
-
-`FilterKernel`은 장치를 모르므로 한 번 만들어 나눠 쓴다. cv2의 CUDA 알고리즘은 **현재 장치에
-할당되고 pickle도 되지 않는다.** `EstimatorConfig`의 docstring이 이미 그렇게 적어두었다.
-
-> `device` is the one addition, since an estimator is device-bound where a kernel is not.
-
-그래서 `build()`가 아니라 `build(device)`이고, **만들어진 알고리즘을 밖에서 주입하면 「먼저
-`activate()`하고 만들라」는 계약이 호출자에게 넘어간다.** 타입이 표현하지 못하고 어겨도
-조용하다.
-
-### 래퍼가 그 계약을 도로 가져온다
-
-```python
-@dataclass(frozen=True, slots=True)
-class OpenCVAlgorithm:
-    """A cv2 flow algorithm, and the device it was created on."""
-
-    algorithm: cv2.DenseOpticalFlow | cv2.cuda.DenseOpticalFlow
-    device: Device
-```
-
-래퍼가 **자기가 만들어진 장치를 들고 다니므로** estimator가 믿는 대신 검사한다.
-`FilteredSequence(source, kernel)`의 거울 모양을 지키면서, 틀린 조합을 거절할 수 있다.
-`_validate_output`이나 `FrameTree.__post_init__`이 하는 것과 같은 자리다.
-
-```python
-class OpenCVConfig(EstimatorConfig, ABC):
-    @override
-    def build(self, device: DeviceLike = "cpu") -> OpenCVEstimator:
-        resolved = Device.resolve(device, self.SUPPORTED_DEVICES)
-        resolved.activate()                       # 순서가 여기 갇힌다
-        return OpenCVEstimator(self.create(resolved), resolved)
-```
-
-### 줄지 않는 것
-
-**CPU/CUDA 분기는 남는다.** `cv2.FarnebackOpticalFlow.create`와
-`cv2.cuda.FarnebackOpticalFlow.create`는 다른 팩토리이고, `DualTVL1`은 파라미터 집합까지
-다르다. 분기가 estimator 자식에서 config로 **이사할 뿐** 사라지지 않는다.
-
-줄 수도 크게 줄지 않는다 — 187줄이 150줄 언저리다. **이득은 줄 수가 아니라 모양이다.**
-
-| | 전 | 후 |
-| --- | --- | --- |
-| estimator 클래스 | 3 (+ 추상 기반 1) | 1 |
-| `build` 구현 | 3 | 1 |
-| 생성자에서의 가상 호출 | 있음 | 없음 |
-| 순서 맞추기용 `__init__` | 2 | 0 |
-
-### 미루는 것 — 래퍼를 장치별로 나누는 것
-
-지금 `_calc_cpu`와 `_calc_cuda_core`에 `cast`가 하나씩 있다.
-
-```python
-algorithm = cast("cv2.DenseOpticalFlow", self._algorithm)
-algorithm = cast("cv2.cuda.DenseOpticalFlow", self._algorithm)
-```
-
-래퍼를 `_CpuAlgorithm` · `_CudaAlgorithm`으로 나누면 이 둘이 사라진다. 다만 그러면 estimator의
-CPU/CUDA 분기를 어디까지 래퍼로 옮길지가 새 질문이 된다(버퍼, `GpuMat` 변환, transpose까지).
-**래퍼는 장치를 들고 다니는 단순한 형태로 시작하고, 타입을 나누는 것은 따로 판단한다.**
-
-### 함께 드러난 것 — 장치가 안 읽는 필드가 조용하다
-
-```python
-class DualTVL1Config(EstimatorConfig):
-    # CPU-only (ignored on CUDA):
-    inner_iterations: int = 20
-    outer_iterations: int = 5
-    median_filtering: int = 5
-    # CUDA-only (ignored on CPU):
-    iterations: int = 300
-```
-
-**설정 하나가 장치에 따라 조용히 무시되는 필드를 넷 든다.** `iterations=1000`으로 스윕을
-돌렸는데 CPU였다면 아무 일도 안 일어나고 로그도 말하지 않는다. 이번 재구성과 독립인 문제지만
-`create(device)`를 새로 쓰는 김에 **읽지 않는 필드를 명시적으로 지정하면 거절하거나 로그로
-말하게** 할 수 있다. (1)의 `if_frames_short`가 「짧으면 말한다」로 처리한 것과 같은 자리다.
 
 ## 결정 — 곁가지 둘은 (1)의 것을 물려받는다. 이음매는 각각 하나다
 
@@ -1029,6 +906,13 @@ source.root=$OUT/filtered       filter=identity                (1)이 남긴 캐
 
 ## 열린 것
 
+- **`DualTVL1Config`가 장치에 따라 조용히 무시되는 필드를 넷 든다.**
+  `inner_iterations`·`outer_iterations`·`median_filtering`은 CUDA에서, `iterations`는 CPU에서
+  읽히지 않는다. `iterations=1000`으로 스윕을 돌렸는데 CPU였다면 아무 일도 일어나지 않고
+  로그도 말하지 않는다. 파라미터 탐색을 시작하기 전에 닫을 것 — **읽지 않는 필드를 명시적으로
+  지정하면 거절하거나 로그로 말하게** 할 수 있고, (1)의 `if_frames_short`가 「짧으면 말한다」로
+  처리한 것과 같은 자리다. (`_create(device)` 재작성 때 함께 하기로 했다가 놓친 항목이다.)
+
 - **캐시 폴더는 자기가 어디서부터 시작하는지 말하지 않는다.** `KoalaFrameWriter`는 도착한
   첫 프레임부터 0으로 번호를 매기므로, 시간 방향으로 줄어드는 단마다 원본과의 어긋남이 하나씩
   쌓인다. 6프레임 시퀀스를 실제로 세 단에 통과시킨 결과:
@@ -1124,9 +1008,12 @@ source.root=$OUT/filtered       filter=identity                (1)이 남긴 캐
   1000프레임당 ~4초에 재생성된다. 필터 캐시와 같은 조건부 규칙이다.
 
 - **`evaluation.py`에 identity baseline과 forward-backward error를 올릴 것.** 둘 다
-  `benchmark_opencv.py`에 프로토타입만 있고, 그 파일은 아래 재작성으로 은퇴한다 — 사라지기
-  전에 옮길 것. 서브픽셀 운동에서는 **zero flow가 이미 SSIM ~0.94**를 받으므로 SSIM 이득만
-  보면 잡음을 맞추는 flow에 상을 준다. 어느 쪽도 혼자서는 안전하지 않다 — zero flow는
+  `benchmark_opencv.py`에 프로토타입만 있었는데 **그 파일은 이미 지워졌다**(`278bb80`,
+  「Drop the two optical flow scripts CI was failing on」). 옮기기 전에 사라졌으므로
+  `git show 278bb80^:scripts/optical_flow/benchmark_opencv.py`에서 되살릴 것.
+
+  서브픽셀 운동에서는 **zero flow가 이미 SSIM ~0.94**를 받으므로 SSIM 이득만 보면 잡음을
+  맞추는 flow에 상을 준다. 어느 쪽도 혼자서는 안전하지 않다 — zero flow는
   이득이 없지만 자기 일관성은 완벽하다 — 그러니 API가 **둘을 함께 보고하는 것을 쉬운 길**로
   만들어야 한다. FB error는 역방향 flow가 필요하므로 `warp_consistency`의 단일 flow
   시그니처를 재사용할 수 없다.
@@ -1147,9 +1034,10 @@ source.root=$OUT/filtered       filter=identity                (1)이 남긴 캐
   같은 구성이 학습된 flow 모델의 **지도학습 데이터 생성기**로도 쓰인다 — 실제 영상 통계에
   정확한 레이블. 고전적 pseudo-label로 학습하면 모델이 교사를 넘지 못한다.
 
-- **`benchmark_opencv.py`를 `run_estimator.py`로 재작성할 것.** 지금 것은 샘플 하나를
-  CPU-대-CUDA 판정으로 채점한다. 대체본은 루트 아래 모든 시퀀스를 훑고 시퀀스별로 집계하는데,
-  그것이 파라미터 탐색이 필요로 하는 모양이다.
+- **`run_estimator.py`를 쓸 것.** 자리가 비어 있다: `scripts/optical_flow/`는 통째로
+  지워졌고 `scripts/`에 남은 것은 `_common`·`data`·`env`뿐이다. 옛 `benchmark_opencv.py`는
+  샘플 하나를 CPU-대-CUDA 판정으로 채점했고, 필요한 것은 루트 아래 모든 시퀀스를 훑어
+  시퀀스별로 집계하는 모양이다 — 그것이 파라미터 탐색이 요구하는 것이다.
 
   워커 API를 규정하는 제약들(전부 확인됨):
 
@@ -1170,19 +1058,18 @@ source.root=$OUT/filtered       filter=identity                (1)이 남긴 캐
     넘겨야 한다.
 
   시간이 실제로 어디 가는가(프레임 쌍당): **flow가 전부를 지배한다.** CPU Dual TV-L1이
-  median 필터의 ~150배, CPU Farneback의 ~15배. CUDA에서는 직관과 반대로 순서가 뒤집혀
-  `warp_consistency`가 Farneback `calc`의 ~10배다. **전처리 최적화는 처리량이 있는 곳이
-  아니다.**
+  median 필터의 ~150배, CPU Farneback의 ~15배. CUDA에서도 순서는 뒤집히지 않는다 —
+  `warp_consistency`가 Farneback `calc`의 **0.5배**(2.96 ms 대 6.21 ms)다. **전처리 최적화는
+  처리량이 있는 곳이 아니다.**
 
-  남은 최적화: 추정기의 입력 변환·`calc`·출력을 `cv2.cuda.Stream`으로 파이프라인화(지금은
-  전부 기본 스트림 하나). 그리고 이제 자기가 채점하는 flow보다 무거워진 평가.
+  > 이전 판은 여기서 `warp_consistency`가 `calc`의 **~10배**라 적고 "자기가 채점하는 flow보다
+  > 무거워진 평가"라는 결론을 달았다. 재측정에서 20배 틀렸고 결론도 뒤집힌다. 평가는 채점
+  > 대상보다 가볍다.
 
-- **`run_estimator.py`에 실제 결함 넷이 남아 있다.** `ty`가 `scripts/`를 검사하기 시작하며
-  드러났다: `:39`의 반환 타입 불일치, `:52`의 `FrameNormalizer.apply` 인자 둘 다 잘못
-  (`iivs_cardio/data/transforms/normalization.py:142` 기준), `:76`의 `process_sequence` 인자
-  잘못. `ruff`는 미사용 루프 변수 하나와 계산하고 버린 flow 둘을 더한다. **이것이 오늘
-  `ruff check`·`ty check`가 보고하는 전부**이므로, 이 파일이 대체될 때까지 두 명령은 비교로만
-  깨끗하다.
+  **기각된 최적화 — `cv2.cuda.Stream` 파이프라이닝.** 입력 변환·`calc`·출력을 겹치는 것은
+  실측 ~1%다. `calc` 하나가 프레임당 5.10 ms 중 4.75 ms를 쓰고 interop 전체(`tensor_to_gpumat`
+  0.030, `gpumat_to_cupy` 0.008, transpose 0.017, `activate` 0.001)가 1%라 겹칠 것이 없다.
+  프레임당 device sync를 배칭하는 안도 같은 이유로 1%였다.
 
 ---
 

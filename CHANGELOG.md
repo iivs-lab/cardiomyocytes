@@ -159,6 +159,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   tests it.
 ### Changed
 
+- The OpenCV estimators are three layers where they were an inheritance chain: a
+  config holding the parameters as a value, a `Backend` holding the cv2 algorithm
+  and the `Device` it was made on and making the calls, and `OpenCVEstimator`, the
+  one streaming interface over any of them. `Farneback`, `DualTVL1` and `DeepFlow`
+  were estimator subclasses whose whole content was a factory method and an
+  `__init__` that had to set `self.config` before `super().__init__`, the base
+  constructor calling the abstract factory; they are `FarnebackConfig`,
+  `DualTVL1Config` and `DeepFlowConfig` now, and `build` is written once rather
+  than three times. `SUPPORTED_DEVICES` moved to the config, DeepFlow having no
+  CUDA implementation being a fact about the algorithm rather than about the
+  machinery that streams frames through it. hydra configs are untouched:
+  `_target_: ...FarnebackConfig` already named the config.
+- `Backend` is `CPUBackend` and `CUDABackend`, which leaves every device branch in
+  one layer. The estimator held six `is_cuda` branches, five attributes only one
+  device ever set, and two `cast`s over the union of cv2's two algorithm types;
+  it now has none of them, each backend taking the concrete cv2 type it calls.
+
 - Every layer stores a `Device` where it stored a `torch.device`; torch calls
   take `.as_torch`. A malformed spec now raises `ValueError` like every other
   rejection there, where `torch.device` let a `RuntimeError` through, and
@@ -557,6 +574,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stage reads its own trees by.
 ### Fixed
 
+- A CPU `push` copies the frame it retains, as the CUDA path always did. It kept
+  the caller's tensor, so a caller streaming into one reusable buffer -- the
+  ordinary shape of frame IO -- had the retained frame overwritten by the next
+  read: `prev` and `curr` became one picture and the motion went silently to
+  zero. A frame taken from a chunk was also a view pinning the whole batch, where
+  the contract is one frame however long the chunk.
+- A config whose `_create` answers for a device other than the one it was handed
+  is refused where it is built, rather than reaching cv2 as a crash or a wrong
+  answer several frames later. A CUDA algorithm is allocated on whichever device
+  was current when cv2 was asked for it and nothing on the object says which, so
+  the pairing is checked at the one place that knows both halves.
+
 - A frame folder half removed no longer reads as complete. `_count_frames`
   counted directories as well as files, so a folder holding one frame and one
   directory answered two, which is exactly the number a two-frame record
@@ -632,6 +661,18 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   had. It joined every name into one line, so a dataset most of whose sequences
   fall short of the count would have put all of them in a single warning.
 ### Performance
+
+- `push_chunk` and `calc_batch` fill one batch as the flows come, where they
+  collected a chunk's flows in a list and `torch.stack`ed it. The list is still
+  alive when `stack` allocates the result, so a chunk was held twice over: 120
+  frames of 900x900 peaked at 1471 MiB for a 735 MiB result, and `push_chunk` is
+  the call whose contract tells a caller to bound the chunk to bound the memory.
+  Peak is 736 MiB, and 685 ms is 637, the intermediate `contiguous` being spared
+  as well. `Backend.push` and `Backend.calc` take an `out` for it, and
+  `Backend.retained` says whether a chunk's first frame is spent retaining, which
+  is what sizes the batch exactly. Allocating for the frames and returning a
+  slice would keep the whole storage alive, and `torch.save` writes out the
+  storage, not the view.
 
 - A sweep searches the dataset once rather than once per filter. Every job of a
   `--multirun` runs in one process and differs only in the filter, yet each
