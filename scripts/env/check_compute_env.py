@@ -1,8 +1,11 @@
 import sys
 import textwrap
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
+
+_PROC_MAPS = Path("/proc/self/maps")
 
 _RULE = "=" * 60
 _STEP = "   "
@@ -329,6 +332,52 @@ def check_cupy() -> Section:
     return Section("CuPy", headline, tuple(checks))
 
 
+def _mapped_files(fragment: str) -> set[Path]:
+    # A maps line is `address perms offset dev inode pathname`, and the pathname
+    # is absent on an anonymous mapping and bracketed on [heap] and its kind.
+    found: set[Path] = set()
+
+    for line in _PROC_MAPS.read_text(encoding="utf-8").splitlines():
+        fields = line.split(maxsplit=5)
+        if len(fields) < 6 or not fields[5].startswith("/"):
+            continue
+
+        path = Path(fields[5])
+        if fragment in path.name:
+            found.add(path)
+
+    return found
+
+
+def check_loader() -> Section:
+    # What the loader settled on, readable only once the sections above have
+    # imported their libraries, so this one runs last. A soname is loaded once
+    # per process, and cuDNN taken from two trees is the mismatch torch dies on.
+    try:
+        mapped = _mapped_files("libcudnn")
+    except OSError as exc:
+        return _unreachable("Loader", f"[!] cannot read {_PROC_MAPS}: {exc}")
+
+    if not mapped:
+        return Section("Loader", "Loader - no cuDNN mapped into this process")
+
+    homes = sorted({path.parent for path in mapped})
+    one_tree = len(homes) == 1
+    count = f"{len(mapped)} cuDNN object(s)"
+
+    if one_tree:
+        headline = f"Loader - {count} from {homes[0]}"
+        detail = ""
+    else:
+        headline = f"Loader - {count} from {len(homes)} trees"
+        listed = [f"{sum(p.parent == h for p in mapped)} from {h}" for h in homes]
+        detail = "\n".join(["torch takes whichever arrived first:", *listed])
+
+    checks = (Check("cuDNN comes from one tree", passed=one_tree, detail=detail),)
+
+    return Section("Loader", headline, checks)
+
+
 def main() -> None:
     print(_RULE)
     print("CUDA compute environment check")
@@ -336,8 +385,12 @@ def main() -> None:
 
     print_gpu_hardware()
 
+    runs = [check_pytorch, check_torchvision, check_opencv, check_cupy]
+    if sys.platform != "win32":
+        runs.append(check_loader)  # `/proc/self/maps` is Linux's alone
+
     sections = []
-    for check in (check_pytorch, check_torchvision, check_opencv, check_cupy):
+    for check in runs:
         section = check()
         _render(section)
         sections.append(section)
