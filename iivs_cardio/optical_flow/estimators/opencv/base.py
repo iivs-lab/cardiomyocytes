@@ -96,21 +96,6 @@ class OpenCVConfig(EstimatorConfig, ABC):
         return OpenCVEstimator(backend)
 
 
-def _stack_flows(flows: list[Tensor], frames: Tensor) -> Tensor:
-    """Stack the flows, or an empty `(0, 2, H, W)` float32 when there are none."""
-    if not flows:
-        return frames.new_empty((0, 2, *frames.shape[1:]), dtype=torch.float32)
-    return torch.stack(flows)
-
-
-def _as_flow(channels_last: Tensor) -> Tensor:
-    """Return cv2's `(H, W, 2)` flow as the `(2, H, W)` torch ops consume.
-
-    The result is a copy, so it outlives the buffer cv2 wrote it into.
-    """
-    return channels_last.permute(2, 0, 1).contiguous()
-
-
 # ========================== #
 #          Backends          #
 # ========================== #
@@ -128,6 +113,7 @@ class Backend(ABC):
             reads its settings back from.
         device: Where it runs. Carried here because an algorithm does not say
             which device cv2 made it on, and whoever runs it has to know.
+        retained: Whether a frame is retained, so the next `push` yields a flow.
     """
 
     # Declared, not abstract: an attribute an `__init__` sets does not clear an
@@ -136,22 +122,56 @@ class Backend(ABC):
     algorithm: DenseAlgorithm
     device: Device
 
+    @property
     @abstractmethod
-    def push(self, frame: Tensor) -> Tensor | None:
+    def retained(self) -> bool:
+        """Whether a frame is retained, so the next `push` yields a flow."""
+
+    @abstractmethod
+    def push(self, frame: Tensor, out: Tensor | None = None) -> Tensor | None:
         """Return the flow from the retained frame, and retain `frame`.
 
+        Args:
+            frame: The frame to retain, copied, so a caller may write over its
+                own afterwards.
+            out: Where to put the flow, sparing the allocation a caller that
+                already has somewhere to put it would only copy out of.
+
         Returns:
-            The flow, or `None` where nothing was retained yet. `frame` is
-            copied, so a caller may write over its own afterwards.
+            The flow, or `None` where nothing was retained yet, in which case
+            `out` is left untouched.
         """
 
     @abstractmethod
-    def calc(self, prev: Tensor, curr: Tensor) -> Tensor:
-        """Return the flow `prev -> curr`, leaving the retained frame alone."""
+    def calc(self, prev: Tensor, curr: Tensor, out: Tensor | None = None) -> Tensor:
+        """Return the flow `prev -> curr`, leaving the retained frame alone.
+
+        Args:
+            prev: The frame to flow from.
+            curr: The frame to flow to.
+            out: Where to put the flow, as `push`.
+        """
 
     @abstractmethod
     def reset(self) -> None:
         """Forget the retained frame."""
+
+    def _as_flow(self, flow: Tensor, out: Tensor | None) -> Tensor:
+        """Return cv2's `(H, W, 2)` flow as the `(2, H, W)` torch ops consume.
+
+        Args:
+            flow: The flow as cv2 wrote it, which may be a view of a buffer the
+                next call writes over.
+            out: Where to put it, or `None` to allocate.
+
+        Returns:
+            A flow of the caller's own either way, so it outlives the buffer.
+        """
+        channels_first = flow.permute(2, 0, 1)
+        if out is None:
+            return channels_first.contiguous()
+
+        return out.copy_(channels_first)
 
 
 class CPUBackend(Backend):
@@ -161,6 +181,7 @@ class CPUBackend(Backend):
         algorithm: The cv2 algorithm to call.
         device: The CPU, which is not asked for: there is one of it, where a
             host with several GPUs has a CUDA device to choose between.
+        retained: As `Backend`.
     """
 
     algorithm: cv2.DenseOpticalFlow
@@ -170,22 +191,27 @@ class CPUBackend(Backend):
         self.algorithm = algorithm
         self._prev: Tensor | None = None
 
+    @property
     @override
-    def push(self, frame: Tensor) -> Tensor | None:
+    def retained(self) -> bool:
+        return self._prev is not None
+
+    @override
+    def push(self, frame: Tensor, out: Tensor | None = None) -> Tensor | None:
         # Copied, as the CUDA backend copies into a `GpuMat` of its own: a
         # caller refilling one buffer would otherwise overwrite the retained
         # frame, and a frame taken from a chunk is a view pinning the batch.
         prev, self._prev = self._prev, frame.clone()
         if prev is None:
             return None
-        return self.calc(prev, self._prev)
+        return self.calc(prev, self._prev, out)
 
     @override
-    def calc(self, prev: Tensor, curr: Tensor) -> Tensor:
+    def calc(self, prev: Tensor, curr: Tensor, out: Tensor | None = None) -> Tensor:
         prev_np: NDArray[np.uint8] = prev.contiguous().numpy()
         curr_np: NDArray[np.uint8] = curr.contiguous().numpy()
         flow: NDArray[np.float32] = self.algorithm.calc(prev_np, curr_np, None)  # ty: ignore[no-matching-overload]
-        return _as_flow(torch.from_numpy(flow))
+        return self._as_flow(torch.from_numpy(flow), out)
 
     @override
     def reset(self) -> None:
@@ -198,6 +224,8 @@ class CUDABackend(Backend):
     Attributes:
         algorithm: The cv2 algorithm to call.
         device: The device it and the buffers live on.
+        retained: As `Backend`. Held as a flag of its own rather than read off
+            an empty buffer, so `reset` keeps the buffers it has.
     """
 
     algorithm: cv2.cuda.DenseOpticalFlow
@@ -209,33 +237,44 @@ class CUDABackend(Backend):
         self._calc_buffers = (GpuMat(), GpuMat())
         self._push_buffers = (GpuMat(), GpuMat())
         self._push_slot = 0
+        self._retained = False
+
+    @property
+    @override
+    def retained(self) -> bool:
+        return self._retained
 
     @override
-    def push(self, frame: Tensor) -> Tensor | None:
+    def push(self, frame: Tensor, out: Tensor | None = None) -> Tensor | None:
         self.device.activate()  # the GpuMat/CuPy calls below read the global device
         buffer_prev = self._push_buffers[self._push_slot]
         buffer_curr = self._push_buffers[self._push_slot ^ 1]
         tensor_to_gpumat(frame, out=buffer_curr)
         self._push_slot ^= 1
-        if buffer_prev.empty():
+        retained, self._retained = self._retained, True
+        if not retained:
             return None
-        return self._flow_between(buffer_prev, buffer_curr)
+        return self._flow_between(buffer_prev, buffer_curr, out)
 
     @override
-    def calc(self, prev: Tensor, curr: Tensor) -> Tensor:
+    def calc(self, prev: Tensor, curr: Tensor, out: Tensor | None = None) -> Tensor:
         self.device.activate()
         buffer_prev, buffer_curr = self._calc_buffers
         return self._flow_between(
             tensor_to_gpumat(prev, out=buffer_prev),
             tensor_to_gpumat(curr, out=buffer_curr),
+            out,
         )
 
     @override
     def reset(self) -> None:
-        self._push_buffers = (GpuMat(), GpuMat())
-        self._push_slot = 0
+        # The buffers stay, being scratch the next sequence writes over: what a
+        # push reads to know whether to answer is the flag, not a filled buffer.
+        self._retained = False
 
-    def _flow_between(self, buffer_prev: GpuMat, buffer_curr: GpuMat) -> Tensor:
+    def _flow_between(
+        self, buffer_prev: GpuMat, buffer_curr: GpuMat, out: Tensor | None
+    ) -> Tensor:
         if self._flow_buffer.size() != buffer_prev.size():
             self._flow_buffer = GpuMat(buffer_prev.size(), cv2.CV_32FC2)
         # Taken back rather than assumed written in place: cv2 returns the flow,
@@ -243,7 +282,9 @@ class CUDABackend(Backend):
         self._flow_buffer = self.algorithm.calc(
             buffer_prev, buffer_curr, self._flow_buffer
         )
-        return _as_flow(torch.as_tensor(gpumat_to_cupy(self._flow_buffer)))
+        flow = torch.as_tensor(gpumat_to_cupy(self._flow_buffer))
+
+        return self._as_flow(flow, out)
 
 
 # ========================== #
@@ -317,16 +358,24 @@ class OpenCVEstimator(OpticalFlowEstimator):
     @jaxtyped(typechecker=beartype)
     @override
     def push_chunk(self, frames: BatchFrameType) -> ChunkFlowType:
-        """Stream a chunk of frames, returning stacked flows continuing the sequence."""
+        """Stream a chunk of frames, returning stacked flows continuing the sequence.
+
+        Each flow is written into the batch as it comes, rather than collected
+        and stacked afterwards, which would hold the whole chunk twice over.
+        """
         self.validate_device(frames)
 
-        flows: list[Tensor] = []
-        for frame in frames:
-            flow = self._backend.push(frame)
-            if flow is not None:
-                flows.append(flow)
+        count = len(frames) if self._backend.retained else max(len(frames) - 1, 0)
+        flows = self._flow_batch(count, frames)
 
-        return _stack_flows(flows, frames)
+        index = 0
+        for frame in frames:
+            # No row to write only on the frame a fresh sequence spends retaining.
+            out = flows[index] if index < count else None
+            if self._backend.push(frame, out=out) is not None:
+                index += 1
+
+        return flows
 
     @jaxtyped(typechecker=beartype)
     @override
@@ -344,6 +393,16 @@ class OpenCVEstimator(OpticalFlowEstimator):
         self.validate_device(prev)
         self.validate_device(curr)
 
-        flows = [self._backend.calc(p, c) for p, c in zip(prev, curr, strict=True)]
+        flows = self._flow_batch(len(prev), prev)
+        for index, (p, c) in enumerate(zip(prev, curr, strict=True)):
+            self._backend.calc(p, c, out=flows[index])
 
-        return _stack_flows(flows, prev)
+        return flows
+
+    def _flow_batch(self, count: int, frames: Tensor) -> Tensor:
+        """An uninitialized `(count, 2, H, W)` float32 batch beside `frames`.
+
+        Sized to the flows that will be written rather than to `frames`, so no
+        row of it is returned still holding whatever `new_empty` picked up.
+        """
+        return frames.new_empty((count, 2, *frames.shape[1:]), dtype=torch.float32)

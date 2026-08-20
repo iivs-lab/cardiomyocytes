@@ -413,6 +413,49 @@ def test_push_chunk_empty_returns_empty():
     assert out.shape == (0, 2, 64, 64)
 
 
+@pytest.mark.parametrize("flow_cls", CPU_METHODS)
+@pytest.mark.parametrize("chunks", ((4,), (1, 3)))
+def test_a_chunk_of_flows_holds_no_more_than_it_returns(flow_cls, chunks):
+    # A batch sized to the frames and sliced down to the flows would keep the
+    # whole allocation alive behind the view, which `torch.save` writes out in
+    # full. Both the first chunk (N - 1 flows) and a later one (N) are sized.
+    of = flow_cls().build("cpu")
+    frames = _sequence(sum(chunks))
+
+    start = 0
+    for length in chunks:
+        flows = of.push_chunk(frames[start : start + length])
+        held = flows.untyped_storage().size() // flows.element_size()
+        assert held == flows.numel()
+        start += length
+
+
+def test_a_backend_says_whether_a_frame_is_retained():
+    of = FarnebackConfig().build("cpu")
+    backend = of._backend  # noqa: SLF001
+    frames = _sequence(2)
+
+    assert not backend.retained
+    of.push(frames[0])
+    assert backend.retained
+    of.reset()
+    assert not backend.retained
+
+
+def test_push_writes_the_flow_into_a_given_destination():
+    of = FarnebackConfig().build("cpu")
+    backend = of._backend  # noqa: SLF001
+    frames = _sequence(2)
+    untouched = torch.full((2, 64, 64), -99.0)
+    destination = untouched.clone()
+
+    assert backend.push(frames[0], out=destination) is None
+    assert torch.equal(destination, untouched)  # nothing retained, nothing written
+
+    assert backend.push(frames[1], out=destination) is destination
+    _assert_recovers_shift(destination)
+
+
 @requires_cuda
 @pytest.mark.parametrize("flow_cls", CUDA_METHODS)
 def test_cuda_push_stays_on_device(flow_cls):
@@ -478,6 +521,23 @@ def test_cuda_push_chunk_streams():
     assert chunk.shape == (4, 2, 64, 64)  # 5 frames -> 4 flows
     assert chunk.device.type == "cuda"
     _assert_recovers_shift(chunk[0])  # each pair shifts by (3, 2)
+
+
+@requires_cuda
+def test_cuda_reset_does_not_let_the_last_sequence_through():
+    # `reset` keeps its buffers rather than dropping them, so the frame one
+    # sequence leaves behind must not reach the first flow of the next.
+    of = FarnebackConfig().build("cuda")
+    frames = _sequence(3, device="cuda")
+    of.push_chunk(frames)
+    of.reset()
+
+    assert of.push(frames[0]) is None
+    after_reset = of.push(frames[1])
+
+    fresh = FarnebackConfig().build("cuda")
+    fresh.push(frames[0])
+    assert torch.equal(after_reset, fresh.push(frames[1]))
 
 
 @requires_cuda
