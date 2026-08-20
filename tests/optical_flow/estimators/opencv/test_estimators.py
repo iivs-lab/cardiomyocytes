@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import weakref
+from typing import override
 
 import cv2
 import numpy as np
@@ -10,12 +11,13 @@ import torch
 from iivs_cardio.common import Device
 from iivs_cardio.optical_flow.estimators import (
     DeepFlowConfig,
+    DenseAlgorithm,
     DualTVL1Config,
     EstimatorConfig,
     FarnebackConfig,
+    OpenCVConfig,
     OpenCVEstimator,
 )
-from iivs_cardio.optical_flow.estimators.opencv.base import _backend_for
 
 # All three OpenCV methods run on CPU, so the streaming contract is tested
 # GPU-free; the CUDA path is gated on an actual device below. Each is named by
@@ -190,26 +192,34 @@ def test_push_rejects_wrong_shape():
         of.push(bad)
 
 
+class _MisreadingConfig(OpenCVConfig):
+    """A config whose `_create` answers for a device other than the one it took."""
+
+    def __init__(self, factory) -> None:
+        self._factory = factory
+
+    @override
+    def _create(self, device: Device) -> DenseAlgorithm:
+        return self._factory()
+
+
+@requires_cuda
 @pytest.mark.parametrize(
-    "algorithm",
+    ("factory", "device", "made"),
     (
-        pytest.param(cv2.FarnebackOpticalFlow.create(), id="farneback"),
-        pytest.param(cv2.optflow.createOptFlow_DeepFlow(), id="deepflow"),
+        pytest.param(cv2.FarnebackOpticalFlow.create, "cuda", "cpu", id="cpu-for-cuda"),
+        pytest.param(
+            cv2.cuda.FarnebackOpticalFlow.create, "cpu", "cuda", id="cuda-for-cpu"
+        ),
     ),
 )
-def test_an_algorithm_is_refused_a_device_it_was_not_made_for(algorithm):
+def test_a_config_creating_for_the_wrong_device_is_refused(factory, device, made):
     # What is left to catch once `SUPPORTED_DEVICES` has run and the backends
     # take the concrete cv2 types: a `_create` that read its device wrongly. A
     # CPU algorithm run as CUDA would be handed device tensors and read as host
     # memory.
-    with pytest.raises(ValueError, match="made for cpu"):
-        _backend_for(algorithm, Device("cuda"))
-
-
-@requires_cuda
-def test_a_cuda_algorithm_is_refused_the_cpu():
-    with pytest.raises(ValueError, match="made for cuda"):
-        _backend_for(cv2.cuda.FarnebackOpticalFlow.create(), Device("cpu"))
+    with pytest.raises(ValueError, match=f"made for {made}"):
+        _MisreadingConfig(factory).build(device)
 
 
 @pytest.mark.parametrize("flow_cls", CPU_METHODS)

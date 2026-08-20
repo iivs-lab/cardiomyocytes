@@ -3,7 +3,7 @@ from __future__ import annotations
 __all__ = ("DenseAlgorithm", "OpenCVConfig", "OpenCVEstimator")
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Protocol, override
+from typing import TYPE_CHECKING, override
 
 import cv2
 import torch
@@ -62,6 +62,32 @@ class OpenCVConfig(EstimatorConfig, ABC):
             The algorithm, which `build` pairs with `device`.
         """
 
+    def _backend(self, device: DeviceLike = "cpu") -> Backend:
+        """Return the backend that runs the algorithm these settings describe.
+
+        Args:
+            device: The device to make it for, in any form a caller may write.
+
+        Returns:
+            A backend of its own, so two estimators built from one algorithm do
+            not share the buffers or the retained frame.
+        """
+        device = Device.resolve(device, self.SUPPORTED_DEVICES)
+        device.activate()
+
+        algorithm = self._create(device)
+
+        on_cuda = isinstance(algorithm, cv2.cuda.DenseOpticalFlow)
+        if on_cuda != device.is_cuda:
+            made = "cuda" if on_cuda else "cpu"
+            msg = f"{type(algorithm).__name__} was made for {made}, not for {device}"
+            raise ValueError(msg)
+
+        if isinstance(algorithm, cv2.cuda.DenseOpticalFlow):
+            return CUDABackend(algorithm, device)
+
+        return CPUBackend(algorithm)
+
     @override
     def build(self, device: DeviceLike = "cpu") -> OpenCVEstimator:
         """Build the estimator these settings describe, on `device`.
@@ -76,10 +102,8 @@ class OpenCVConfig(EstimatorConfig, ABC):
         Raises:
             ValueError: If `device` is not one of `SUPPORTED_DEVICES`.
         """
-        resolved = Device.resolve(device, self.SUPPORTED_DEVICES)
-        resolved.activate()
-
-        return OpenCVEstimator(_backend_for(self._create(resolved), resolved))
+        backend = self._backend(device)  # raises if device is unsupported
+        return OpenCVEstimator(backend)
 
 
 def _stack_flows(flows: list[Tensor], frames: Tensor) -> Tensor:
@@ -103,12 +127,18 @@ def _as_flow(channels_last: Tensor) -> Tensor:
 # ========================== #
 
 
-class Backend(Protocol):
+class Backend(ABC):
     """The flow calls of one device, once a frame is in a form cv2 reads.
 
     The two implementations differ in where a frame is put, how cv2 is called on
     it, and how the answer comes back. Everything above them, the validation and
     the streaming and the batching, is one.
+
+    Both attributes are declared rather than made abstract: an attribute an
+    `__init__` sets does not clear an `abstractmethod`, which would leave every
+    subclass uninstantiable. A subclass declares `algorithm` again as the
+    concrete cv2 type it calls, which is what lets it call one without saying a
+    second time which of the two it holds.
 
     Attributes:
         algorithm: The cv2 algorithm this calls, which is the one an estimator
@@ -117,16 +147,10 @@ class Backend(Protocol):
             which device cv2 made it on, and whoever runs it has to know.
     """
 
-    @property
-    def algorithm(self) -> DenseAlgorithm:
-        """The cv2 algorithm this backend calls."""
-        ...
+    algorithm: DenseAlgorithm
+    device: Device
 
-    @property
-    def device(self) -> Device:
-        """The device this backend runs on."""
-        ...
-
+    @abstractmethod
     def push(self, frame: Tensor) -> Tensor | None:
         """Return the flow from the retained frame, and retain `frame`.
 
@@ -135,18 +159,17 @@ class Backend(Protocol):
             in a form of this backend's own, so a caller may write over its own
             afterwards.
         """
-        ...
 
+    @abstractmethod
     def calc(self, prev: Tensor, curr: Tensor) -> Tensor:
         """Return the flow `prev -> curr`, leaving the retained frame alone."""
-        ...
 
+    @abstractmethod
     def reset(self) -> None:
         """Forget the retained frame."""
-        ...
 
 
-class CPUBackend:
+class CPUBackend(Backend):
     """The CPU calls, over `numpy` views of frames the backend copied.
 
     Attributes:
@@ -155,12 +178,14 @@ class CPUBackend:
             host with several GPUs has a CUDA device to choose between.
     """
 
+    algorithm: cv2.DenseOpticalFlow
     device = Device("cpu")
 
     def __init__(self, algorithm: cv2.DenseOpticalFlow) -> None:
         self.algorithm = algorithm
         self._prev: Tensor | None = None
 
+    @override
     def push(self, frame: Tensor) -> Tensor | None:
         # Copied, as the CUDA backend copies into a `GpuMat` of its own: a
         # caller refilling one buffer would otherwise overwrite the retained
@@ -170,17 +195,19 @@ class CPUBackend:
             return None
         return self.calc(prev, self._prev)
 
+    @override
     def calc(self, prev: Tensor, curr: Tensor) -> Tensor:
         prev_np: NDArray[np.uint8] = prev.contiguous().numpy()
         curr_np: NDArray[np.uint8] = curr.contiguous().numpy()
         flow: NDArray[np.float32] = self.algorithm.calc(prev_np, curr_np, None)  # ty: ignore[no-matching-overload]
         return _as_flow(torch.from_numpy(flow))
 
+    @override
     def reset(self) -> None:
         self._prev = None
 
 
-class CUDABackend:
+class CUDABackend(Backend):
     """The CUDA calls, over `GpuMat`s the backend owns and reuses.
 
     `push` alternates between a pair, so the frame one call retains is the one
@@ -193,14 +220,17 @@ class CUDABackend:
         device: The device it and the buffers live on.
     """
 
+    algorithm: cv2.cuda.DenseOpticalFlow
+
     def __init__(self, algorithm: cv2.cuda.DenseOpticalFlow, device: Device) -> None:
         self.algorithm = algorithm
         self.device = device
         self._flow_buffer = GpuMat()
-        self._push_buffers = (GpuMat(), GpuMat())
         self._calc_buffers = (GpuMat(), GpuMat())
+        self._push_buffers = (GpuMat(), GpuMat())
         self._push_slot = 0
 
+    @override
     def push(self, frame: Tensor) -> Tensor | None:
         self.device.activate()  # the GpuMat/CuPy calls below read the global device
         prev = self._push_buffers[self._push_slot]
@@ -211,14 +241,16 @@ class CUDABackend:
             return None
         return self._flow_between(prev, curr)
 
+    @override
     def calc(self, prev: Tensor, curr: Tensor) -> Tensor:
         self.device.activate()
-        first, second = self._calc_buffers
+        buffer_prev, curr_buffer = self._calc_buffers
         return self._flow_between(
-            tensor_to_gpumat(prev, out=first),
-            tensor_to_gpumat(curr, out=second),
+            tensor_to_gpumat(prev, out=buffer_prev),
+            tensor_to_gpumat(curr, out=curr_buffer),
         )
 
+    @override
     def reset(self) -> None:
         self._push_buffers = (GpuMat(), GpuMat())
         self._push_slot = 0
@@ -230,38 +262,6 @@ class CUDABackend:
         # and a call that resized would leave the buffer here holding the last.
         self._flow_buffer = self.algorithm.calc(prev, curr, self._flow_buffer)
         return _as_flow(torch.as_tensor(gpumat_to_cupy(self._flow_buffer)))
-
-
-def _backend_for(algorithm: DenseAlgorithm, device: Device) -> Backend:
-    """Return the backend that runs `algorithm` on `device`.
-
-    The one place a union of cv2's two backends meets a device, and so the one
-    place they can disagree. What that catches is a `_create` that read the
-    device it was handed wrongly: `SUPPORTED_DEVICES` has already refused a
-    device the algorithm has no implementation for, and handing a backend the
-    other kind directly is a type error rather than a value one, each taking
-    the concrete cv2 type rather than either of them.
-
-    The second test is not the first repeated. It is what narrows the algorithm
-    to the type its backend takes, which no flag read off the refusal would do.
-
-    Returns:
-        A backend of its own, so two estimators built from one algorithm do not
-        share the buffers or the retained frame.
-
-    Raises:
-        ValueError: If `algorithm` was not made for `device`'s backend.
-    """
-    on_cuda = isinstance(algorithm, cv2.cuda.DenseOpticalFlow)
-    if on_cuda != device.is_cuda:
-        made = "cuda" if on_cuda else "cpu"
-        msg = f"{type(algorithm).__name__} was made for {made}, not for {device}"
-        raise ValueError(msg)
-
-    if isinstance(algorithm, cv2.cuda.DenseOpticalFlow):
-        return CUDABackend(algorithm, device)
-
-    return CPUBackend(algorithm)
 
 
 # ========================== #
