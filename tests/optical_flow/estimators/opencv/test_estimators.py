@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import weakref
+
 import cv2
 import numpy as np
 import pytest
@@ -127,13 +129,18 @@ def test_push_does_not_alias_the_callers_frame(flow_cls):
 
 
 def test_push_chunk_retains_one_frame_rather_than_the_chunk():
-    # `for frame in frames` yields views, so retaining the last one keeps the
-    # whole batch alive where the contract is one frame however long the chunk.
+    # `for frame in frames` yields views, so retaining the last one would keep
+    # the whole batch alive where the contract is one frame however long the
+    # chunk. Asked of the batch's storage rather than of what was retained,
+    # which is the estimator's own business.
     of = FarnebackConfig().build("cpu")
-    of.push_chunk(_sequence(8))
+    frames = _sequence(8)
+    batch = weakref.ref(frames.untyped_storage())
 
-    held = of._prev_frame  # noqa: SLF001
-    assert held.untyped_storage().nbytes() == held.numel() * held.element_size()
+    of.push_chunk(frames)
+    del frames
+
+    assert batch() is None
 
 
 @pytest.mark.parametrize("flow_cls", CPU_METHODS)
@@ -303,7 +310,7 @@ def test_calc_batch_calls_algorithm_once_per_pair(monkeypatch):
     # spy, not just by values — a redundant re-compute would still match results.
     of = FarnebackConfig().build("cpu")
     spy = _CountingAlgorithm()
-    monkeypatch.setattr(of, "algorithm", spy)
+    monkeypatch.setattr(of._backend, "algorithm", spy)  # noqa: SLF001
     prevs = torch.zeros((3, 64, 64), dtype=torch.uint8)
     of.calc_batch(prevs, prevs)
     assert spy.calls == 3
@@ -313,7 +320,7 @@ def test_push_chunk_calls_algorithm_once_per_consecutive_pair(monkeypatch):
     # 5 frames -> 4 flows -> exactly 4 core calls (the first frame is only retained).
     of = FarnebackConfig().build("cpu")
     spy = _CountingAlgorithm()
-    monkeypatch.setattr(of, "algorithm", spy)
+    monkeypatch.setattr(of._backend, "algorithm", spy)  # noqa: SLF001
     of.push_chunk(_sequence(5))
     assert spy.calls == 4
 

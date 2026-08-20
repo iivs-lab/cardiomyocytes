@@ -4,7 +4,7 @@ __all__ = ("DenseAlgorithm", "OpenCVAlgorithm", "OpenCVConfig", "OpenCVEstimator
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast, override
+from typing import TYPE_CHECKING, Protocol, override
 
 import cv2
 import torch
@@ -126,6 +126,157 @@ def _stack_flows(flows: list[Tensor], frames: Tensor) -> Tensor:
     return torch.stack(flows)
 
 
+def _as_flow(channels_last: Tensor) -> Tensor:
+    """Return cv2's `(H, W, 2)` flow as the `(2, H, W)` torch ops consume.
+
+    The copy `contiguous` makes after the permute is also what frees the result
+    from the buffer cv2 wrote it into, which the next call writes over.
+    """
+    return channels_last.permute(2, 0, 1).contiguous()
+
+
+# ========================== #
+#          Backends          #
+# ========================== #
+
+
+class Backend(Protocol):
+    """The flow calls of one device, once a frame is in a form cv2 reads.
+
+    The two implementations differ in where a frame is put, how cv2 is called on
+    it, and how the answer comes back. Everything above them, the validation and
+    the streaming and the batching, is one.
+
+    Attributes:
+        algorithm: The cv2 algorithm this calls, which is the one an estimator
+            reads its settings back from.
+    """
+
+    @property
+    def algorithm(self) -> DenseAlgorithm:
+        """The cv2 algorithm this backend calls."""
+        ...
+
+    def push(self, frame: Tensor) -> Tensor | None:
+        """Return the flow from the retained frame, and retain `frame`.
+
+        Returns:
+            The flow, or `None` where nothing was retained yet. `frame` is taken
+            in a form of this backend's own, so a caller may write over its own
+            afterwards.
+        """
+        ...
+
+    def calc(self, prev: Tensor, curr: Tensor) -> Tensor:
+        """Return the flow `prev -> curr`, leaving the retained frame alone."""
+        ...
+
+    def reset(self) -> None:
+        """Forget the retained frame."""
+        ...
+
+
+class CPUBackend:
+    """The CPU calls, over `numpy` views of frames the backend copied.
+
+    Attributes:
+        algorithm: The cv2 algorithm to call.
+    """
+
+    def __init__(self, algorithm: cv2.DenseOpticalFlow) -> None:
+        self.algorithm = algorithm
+        self._prev: Tensor | None = None
+
+    def push(self, frame: Tensor) -> Tensor | None:
+        # Copied, as the CUDA backend copies into a `GpuMat` of its own: a
+        # caller refilling one buffer would otherwise overwrite the retained
+        # frame, and a frame taken from a chunk is a view pinning the batch.
+        prev, self._prev = self._prev, frame.clone()
+        if prev is None:
+            return None
+        return self.calc(prev, self._prev)
+
+    def calc(self, prev: Tensor, curr: Tensor) -> Tensor:
+        prev_np: NDArray[np.uint8] = prev.contiguous().numpy()
+        curr_np: NDArray[np.uint8] = curr.contiguous().numpy()
+        flow: NDArray[np.float32] = self.algorithm.calc(prev_np, curr_np, None)  # ty: ignore[no-matching-overload]
+        return _as_flow(torch.from_numpy(flow))
+
+    def reset(self) -> None:
+        self._prev = None
+
+
+class CUDABackend:
+    """The CUDA calls, over `GpuMat`s the backend owns and reuses.
+
+    Streaming keeps a pair it alternates between, so the frame retained from one
+    call is the one the next reads back. One-shot calls take a pair of their own
+    rather than borrowing that one, which is what leaves the stream undisturbed
+    by a `calc` between two pushes.
+
+    Attributes:
+        algorithm: The cv2 algorithm to call.
+        device: The device it and the buffers live on.
+    """
+
+    def __init__(self, algorithm: cv2.cuda.DenseOpticalFlow, device: Device) -> None:
+        self.algorithm = algorithm
+        self.device = device
+        self._flow = GpuMat()
+        self._streamed = (GpuMat(), GpuMat())
+        self._one_shot = (GpuMat(), GpuMat())
+        self._slot = 0
+
+    def push(self, frame: Tensor) -> Tensor | None:
+        self.device.activate()  # the GpuMat/CuPy calls below read the global device
+        prev = self._streamed[self._slot]
+        curr = self._streamed[self._slot ^ 1]
+        tensor_to_gpumat(frame, out=curr)
+        self._slot ^= 1
+        if prev.empty():
+            return None
+        return self._flow_between(prev, curr)
+
+    def calc(self, prev: Tensor, curr: Tensor) -> Tensor:
+        self.device.activate()
+        first, second = self._one_shot
+        return self._flow_between(
+            tensor_to_gpumat(prev, out=first),
+            tensor_to_gpumat(curr, out=second),
+        )
+
+    def reset(self) -> None:
+        self._streamed = (GpuMat(), GpuMat())
+        self._slot = 0
+
+    def _flow_between(self, prev: GpuMat, curr: GpuMat) -> Tensor:
+        if self._flow.size() != prev.size():
+            self._flow = GpuMat(prev.size(), cv2.CV_32FC2)
+        # Taken back rather than assumed written in place: cv2 returns the flow,
+        # and a call that resized would leave the buffer here holding the last.
+        self._flow = self.algorithm.calc(prev, curr, self._flow)
+        return _as_flow(torch.as_tensor(gpumat_to_cupy(self._flow)))
+
+
+def _backend_for(paired: OpenCVAlgorithm) -> Backend:
+    """Return the backend that runs `paired` where it was made.
+
+    The test is the one `OpenCVAlgorithm` already made, so the two cannot come
+    to different answers, and it narrows the algorithm to the concrete type its
+    backend calls rather than the union either could have been.
+    """
+    algorithm = paired.algorithm
+    if isinstance(algorithm, cv2.cuda.DenseOpticalFlow):
+        return CUDABackend(algorithm, paired.device)
+
+    return CPUBackend(algorithm)
+
+
+# ========================== #
+#         Estimator          #
+# ========================== #
+
+
 class OpenCVEstimator(OpticalFlowEstimator):
     """Optical-flow estimation backed by one OpenCV `cv2` / `cv2.cuda` algorithm.
 
@@ -136,10 +287,11 @@ class OpenCVEstimator(OpticalFlowEstimator):
     keeps the whole computation on the device, so its output chains into the next
     GPU stage without a host transfer.
 
-    One class serves every algorithm, since which one runs changes the settings
-    and nothing about streaming frames through it. Build one through
-    `OpenCVConfig.build`, which is what pairs an algorithm with the device it
-    was made on.
+    One class serves every algorithm and every device: which algorithm runs
+    changes the settings, and which device runs it changes where a frame is put
+    and how the answer comes back, neither of which is the streaming this holds.
+    Build one through `OpenCVConfig.build`, which is what pairs an algorithm with
+    the device it was made on.
 
     Separate from `OpticalFlowEstimator` so a future PyTorch (`nn.Module`)
     backend can extend the neutral base directly.
@@ -150,22 +302,20 @@ class OpenCVEstimator(OpticalFlowEstimator):
 
     Attributes:
         algorithm: The cv2 algorithm itself, which is where the settings it was
-            made with can be read back from.
+            made with can be read back from. Held by the backend that calls it
+            rather than beside it, so a spy put on one is seen by both.
         device: As `OpticalFlowEstimator`, taken from `algorithm`.
         is_cuda: As `OpticalFlowEstimator`.
     """
 
     def __init__(self, algorithm: OpenCVAlgorithm) -> None:
         super().__init__(algorithm.device)
-        self.algorithm = algorithm.algorithm
+        self._backend = _backend_for(algorithm)
 
-        if self.is_cuda:
-            self._flow_buffer = GpuMat()
-            self._frame_buffers = (GpuMat(), GpuMat())
-            self._one_shot_buffers = (GpuMat(), GpuMat())
-            self._prev_slot = 0
-        else:
-            self._prev_frame: Tensor | None = None
+    @property
+    def algorithm(self) -> DenseAlgorithm:
+        """The cv2 algorithm this estimator streams through."""
+        return self._backend.algorithm
 
     def validate_device(self, frame: Tensor) -> None:
         """Raise if `frame` is not on this estimator's device.
@@ -186,31 +336,28 @@ class OpenCVEstimator(OpticalFlowEstimator):
 
         The output buffer stays, being scratch the next call sizes for itself.
         """
-        if self.is_cuda:
-            self._frame_buffers = (GpuMat(), GpuMat())
-            self._prev_slot = 0
-        else:
-            self._prev_frame = None
+        self._backend.reset()
 
     @jaxtyped(typechecker=beartype)
     @override
     def push(self, frame: FrameType) -> FlowType | None:
         """Return the flow from the retained frame, or `None` on the first frame."""
         self.validate_device(frame)
-        push = self._push_cuda if self.is_cuda else self._push_cpu
-        return push(frame)
+
+        return self._backend.push(frame)
 
     @jaxtyped(typechecker=beartype)
     @override
     def push_chunk(self, frames: BatchFrameType) -> ChunkFlowType:
         """Stream a chunk of frames, returning stacked flows continuing the sequence."""
         self.validate_device(frames)
-        push = self._push_cuda if self.is_cuda else self._push_cpu
+
         flows: list[Tensor] = []
         for frame in frames:
-            flow = push(frame)
+            flow = self._backend.push(frame)
             if flow is not None:
                 flows.append(flow)
+
         return _stack_flows(flows, frames)
 
     @jaxtyped(typechecker=beartype)
@@ -219,8 +366,8 @@ class OpenCVEstimator(OpticalFlowEstimator):
         """Compute the flow `prev -> curr` in one shot, leaving no retained state."""
         self.validate_device(prev)
         self.validate_device(curr)
-        calc = self._calc_cuda if self.is_cuda else self._calc_cpu
-        return calc(prev, curr)
+
+        return self._backend.calc(prev, curr)
 
     @jaxtyped(typechecker=beartype)
     @override
@@ -228,58 +375,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
         """Compute the flow for each independent pair `prev[i] -> curr[i]`, stacked."""
         self.validate_device(prev)
         self.validate_device(curr)
-        calc = self._calc_cuda if self.is_cuda else self._calc_cpu
-        flows = [calc(p, c) for p, c in zip(prev, curr, strict=True)]
+
+        flows = [self._backend.calc(p, c) for p, c in zip(prev, curr, strict=True)]
+
         return _stack_flows(flows, prev)
-
-    # ----------------------------- cpu (numpy) ----------------------------- #
-
-    def _push_cpu(self, frame: Tensor) -> Tensor | None:
-        # Copied, as the CUDA path copies into a `GpuMat` of its own: a caller
-        # refilling one buffer would otherwise overwrite the retained frame,
-        # and a frame taken from a chunk is a view that pins the whole batch.
-        prev, self._prev_frame = self._prev_frame, frame.clone()
-        if prev is None:
-            return None
-        return self._calc_cpu(prev, self._prev_frame)
-
-    def _calc_cpu(self, prev: Tensor, curr: Tensor) -> Tensor:
-        prev_np: NDArray[np.uint8] = prev.contiguous().numpy()
-        curr_np: NDArray[np.uint8] = curr.contiguous().numpy()
-        algorithm = cast("cv2.DenseOpticalFlow", self.algorithm)
-        flow: NDArray[np.float32] = algorithm.calc(prev_np, curr_np, None)  # ty: ignore[no-matching-overload]
-        return torch.from_numpy(flow).permute(2, 0, 1).contiguous()
-
-    # -------------------- cuda (GpuMat via cuda_utils) --------------------- #
-
-    def _push_cuda(self, frame: Tensor) -> Tensor | None:
-        self.device.activate()  # the GpuMat/CuPy calls below read the global device
-        prev = self._frame_buffers[self._prev_slot]
-        curr = self._frame_buffers[self._prev_slot ^ 1]
-        tensor_to_gpumat(frame, out=curr)
-        self._prev_slot ^= 1
-        if prev.empty():
-            return None
-        return self._calc_cuda_core(prev, curr)
-
-    def _calc_cuda(self, prev: Tensor, curr: Tensor) -> Tensor:
-        # Buffers of its own, so a batch pays for two rather than two a pair and
-        # a one-shot leaves the stream's retained frame where it was.
-        self.device.activate()
-        prev_slot, curr_slot = self._one_shot_buffers
-        return self._calc_cuda_core(
-            tensor_to_gpumat(prev, out=prev_slot),
-            tensor_to_gpumat(curr, out=curr_slot),
-        )
-
-    def _calc_cuda_core(self, prev: GpuMat, curr: GpuMat) -> Tensor:
-        if self._flow_buffer.size() != prev.size():
-            self._flow_buffer = GpuMat(prev.size(), cv2.CV_32FC2)
-        algorithm = cast("cv2.cuda.DenseOpticalFlow", self.algorithm)
-        # Taken back rather than assumed written in place: cv2 returns the flow,
-        # and a call that resized would leave the buffer here holding the last.
-        self._flow_buffer = algorithm.calc(prev, curr, self._flow_buffer)
-        flow = torch.as_tensor(gpumat_to_cupy(self._flow_buffer))
-        # `contiguous` after the permute is the copy that frees the caller from
-        # the buffer, which the next call writes over.
-        return flow.permute(2, 0, 1).contiguous()
