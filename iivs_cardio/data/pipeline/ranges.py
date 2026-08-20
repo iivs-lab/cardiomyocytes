@@ -36,7 +36,7 @@ from iivs_cardio.common.pipeline.branch import JSON_EXT, as_read_back, find_unso
 from iivs_cardio.common.range import finite_range
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping, Sequence
+    from collections.abc import Iterable, Iterator, Mapping, Sequence
     from pathlib import Path
     from types import TracebackType
 
@@ -701,6 +701,17 @@ class RangeDocument:
         temp_filter = And((StartsWith("."), EndsWith(".tmp")))
         return search_files(self.parts_root, name_filter=temp_filter)
 
+    def _drop(self, parts: Iterable[Path]) -> None:
+        """Remove `parts`, and the folders their removal leaves empty."""
+        emptied = set()
+
+        for part in parts:
+            emptied.add(part.parent)
+            part.unlink()
+
+        for folder in emptied:
+            prune_upward(folder, self.parts_root)
+
     def _still_describes(
         self, document: Mapping[str, Any], sequence: SequenceRange
     ) -> bool:
@@ -916,16 +927,25 @@ class RangeDocument:
         What an earlier run staged and never committed always goes, since
         nothing else is in a position to collect it. What it committed depends
         on the policy: `"reuse"` keeps every part still describing this run and
-        leaves the rest where they are, and the other two clear the folder, so
-        that everything folded at the end is this run's own.
+        leaves the rest where they are, `"overwrite"` clears the folder so that
+        everything folded at the end is this run's own, and `"error"` refuses.
+
+        `"error"` refuses here rather than leaving it to the meter that meets
+        the part, the way the frame tree does with a folder: a meter meets them
+        one at a time, so a run whose hundredth sequence is already measured
+        pays for ninety-nine of them first. Refusing is also what a run killed
+        outright leaves behind, since its parts are committed and its document
+        is not, and clearing them would spend its whole measurement again
+        without saying so.
 
         Judging happens here, with the whole dataset in view and in one process.
         A worker holds a copy of this branch and nothing it learns comes home,
         so a part judged there could not be counted.
 
         Raises:
-            FileExistsError: If the document is already there and this one was
-                not told it may replace it.
+            FileExistsError: If the document is already there, or a sequence
+                already has a part here, and this one was not told it may
+                replace them.
             RuntimeError: If this document has been opened before.
         """
         if self._entered:
@@ -937,21 +957,20 @@ class RangeDocument:
 
         ensure_dir_exists(self.parts_root, make=True)
 
-        emptied = set()
-        for stale in self._list_staging():
-            emptied.add(stale.parent)
-            stale.unlink()
+        self._drop(self._list_staging())
 
         if self.if_present == "reuse":
             kept = (part for part, _ in self._read_valid(strict=False))
             self._reused = frozenset(map(self._source_of, kept))
-        else:
-            for stale in self.list_parts():
-                emptied.add(stale.parent)
-                stale.unlink()
+        elif present := self.list_parts():
+            if self.if_present == "error":
+                left = quantify(len(present), "part")
+                first = self._source_of(present[0])
+                fix = "set `if_present` to 'reuse' or 'overwrite'"
+                msg = f"{left} already here, from {first!r}: {fix}"
+                raise FileExistsError(msg)
 
-        for folder in emptied:
-            prune_upward(folder, self.parts_root)
+            self._drop(present)
 
         return self
 

@@ -1192,9 +1192,8 @@ def test_a_narrowed_run_leaves_the_parts_it_was_not_given(tmp_path):
     }
 
 
-@pytest.mark.parametrize("policy", ("error", "overwrite"))
-def test_the_other_policies_still_clear_the_folder(tmp_path, policy):
-    # Reuse is what stopped the clearing, so the two that did not ask for it
+def test_overwrite_still_clears_the_folder(tmp_path):
+    # Reuse is what stopped the clearing, so the policy that did not ask for it
     # must still get a folder holding only what this run put there.
     with _reusing(tmp_path, "a", "b") as first:
         _measured(first, tmp_path, "a", (0.0, 1.0))
@@ -1205,10 +1204,8 @@ def test_the_other_policies_still_clear_the_folder(tmp_path, policy):
         contents=_contents("a", "b"),
         settings=SETTINGS,
         source="plate_A",
-        if_present=policy,
+        if_present="overwrite",
     )
-    if policy == "error":
-        (tmp_path / "range.json").unlink()
 
     with fresh:
         assert _measured(fresh, tmp_path, "a", (5.0, 6.0))
@@ -1216,6 +1213,31 @@ def test_the_other_policies_still_clear_the_folder(tmp_path, policy):
 
     assert _saved(tmp_path)["coverage"]["reused"] == 0
     assert _saved(tmp_path)["coverage"]["skipped"] == ["b"]
+
+
+def test_error_refuses_the_parts_a_killed_run_left(tmp_path):
+    # A run killed outright commits its parts and never its document, so the
+    # document's own guard finds nothing to refuse on and the parts are all
+    # that is left to say so. Clearing them spends the whole measurement again.
+    with _reusing(tmp_path, "a", "b") as first:
+        _measured(first, tmp_path, "a", (0.0, 1.0))
+        _measured(first, tmp_path, "b", (2.0, 3.0))
+
+    (tmp_path / "range.json").unlink()
+
+    fresh = RangeDocument(
+        tmp_path / "range",
+        contents=_contents("a", "b"),
+        settings=SETTINGS,
+        source="plate_A",
+        if_present="error",
+    )
+
+    with pytest.raises(FileExistsError, match="2 parts already here"):
+        fresh.__enter__()
+
+    kept = sorted(part.name for part in (tmp_path / "range.parts").iterdir())
+    assert kept == ["a.json", "b.json"]
 
 
 def test_a_part_that_is_not_a_mapping_at_all_is_refused(tmp_path):
