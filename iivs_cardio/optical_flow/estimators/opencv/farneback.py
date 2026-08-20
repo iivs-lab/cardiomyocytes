@@ -1,23 +1,33 @@
 from __future__ import annotations
 
-__all__ = ("Farneback", "FarnebackConfig")
+__all__ = ("FarnebackConfig",)
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, override
 
 import cv2
-from kaparoo.utils.optional import unwrap_or_factory
 
-from iivs_cardio.optical_flow.estimators.base import EstimatorConfig
-from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVEstimator
+from iivs_cardio.optical_flow.estimators.opencv.base import DenseAlgorithm, OpenCVConfig
 
 if TYPE_CHECKING:
-    from iivs_cardio.common.device import DeviceLike
-    from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVAlgorithm
+    from iivs_cardio.common.device import Device
 
 
 @dataclass(frozen=True, slots=True)
-class FarnebackConfig(EstimatorConfig):
+class FarnebackConfig(OpenCVConfig):
+    """Farneback's settings, which cv2's two factories read alike.
+
+    Attributes:
+        num_levels: The pyramid levels to build.
+        pyr_scale: The scale between one level and the next.
+        fast_pyramids: Whether to build the pyramid the cheaper way.
+        win_size: The averaging window, in pixels.
+        num_iters: The iterations run at each level.
+        poly_n: The neighbourhood the polynomial is fitted over.
+        poly_sigma: The gaussian weighting that fit uses.
+        flags: cv2's own flag word, passed through.
+    """
+
     num_levels: int = 3
     pyr_scale: float = 0.5
     fast_pyramids: bool = False
@@ -28,43 +38,25 @@ class FarnebackConfig(EstimatorConfig):
     flags: int = 0
 
     @override
-    def build(self, device: DeviceLike = "cpu") -> Farneback:
-        return Farneback(self, device=device)
+    def create(self, device: Device) -> DenseAlgorithm:
+        """Create the Farneback algorithm, from whichever factory `device` names.
 
+        The two take the same eight arguments, so the device chooses the
+        factory and nothing else.
+        """
+        factory = (
+            cv2.cuda.FarnebackOpticalFlow
+            if device.is_cuda
+            else cv2.FarnebackOpticalFlow
+        )
 
-class Farneback(OpenCVEstimator):
-    def __init__(
-        self,
-        config: FarnebackConfig | None = None,
-        *,
-        device: DeviceLike = "cpu",
-    ) -> None:
-        self.config = unwrap_or_factory(config, FarnebackConfig)
-        super().__init__(device)
-
-    @override
-    def _create_algorithm(self) -> OpenCVAlgorithm:
-        config = self.config
-
-        if self.is_cuda:
-            return cv2.cuda.FarnebackOpticalFlow.create(
-                numLevels=config.num_levels,
-                pyrScale=config.pyr_scale,
-                fastPyramids=config.fast_pyramids,
-                winSize=config.win_size,
-                numIters=config.num_iters,
-                polyN=config.poly_n,
-                polySigma=config.poly_sigma,
-                flags=config.flags,
-            )
-
-        return cv2.FarnebackOpticalFlow.create(
-            numLevels=config.num_levels,
-            pyrScale=config.pyr_scale,
-            fastPyramids=config.fast_pyramids,
-            winSize=config.win_size,
-            numIters=config.num_iters,
-            polyN=config.poly_n,
-            polySigma=config.poly_sigma,
-            flags=config.flags,
+        return factory.create(
+            numLevels=self.num_levels,
+            pyrScale=self.pyr_scale,
+            fastPyramids=self.fast_pyramids,
+            winSize=self.win_size,
+            numIters=self.num_iters,
+            polyN=self.poly_n,
+            polySigma=self.poly_sigma,
+            flags=self.flags,
         )

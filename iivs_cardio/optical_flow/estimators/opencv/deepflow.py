@@ -1,35 +1,34 @@
 from __future__ import annotations
 
-__all__ = ("DeepFlow", "DeepFlowConfig")
+__all__ = ("DeepFlowConfig",)
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, override
+from typing import ClassVar, override
 
 import cv2
 
-from iivs_cardio.optical_flow.estimators.base import EstimatorConfig
-from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVEstimator
-
-if TYPE_CHECKING:
-    from iivs_cardio.common.device import DeviceLike
-
-
-class DeepFlow(OpenCVEstimator):
-    SUPPORTED_DEVICES = frozenset({"cpu"})  # CPU only; OpenCV ships no CUDA DeepFlow
-
-    @override
-    def _create_algorithm(self) -> cv2.DenseOpticalFlow:
-        return cv2.optflow.createOptFlow_DeepFlow()  # no tunable parameters
+from iivs_cardio.common.device import Device, DeviceKind
+from iivs_cardio.optical_flow.estimators.opencv.base import DenseAlgorithm, OpenCVConfig
 
 
 @dataclass(frozen=True, slots=True)
-class DeepFlowConfig(EstimatorConfig):
+class DeepFlowConfig(OpenCVConfig):
     """DeepFlow's (empty) recipe: it exposes no tunable parameters.
 
-    Held anyway so every estimator has a buildable `EstimatorConfig`, letting a
-    worker construct any of them through the one `build` interface.
+    Held anyway so every algorithm has a buildable config, letting a worker
+    construct any of them through the one `build`.
+
+    Attributes:
+        SUPPORTED_DEVICES: CPU alone, since OpenCV ships no CUDA DeepFlow.
     """
 
+    SUPPORTED_DEVICES: ClassVar[frozenset[DeviceKind]] = frozenset({"cpu"})
+
     @override
-    def build(self, device: DeviceLike = "cpu") -> DeepFlow:
-        return DeepFlow(device=device)
+    def create(self, device: Device) -> DenseAlgorithm:
+        """Create the DeepFlow algorithm, which takes neither settings nor a device.
+
+        `device` is the contract's, not this algorithm's: `SUPPORTED_DEVICES`
+        has already refused everything but the one it runs on.
+        """
+        return cv2.optflow.createOptFlow_DeepFlow()

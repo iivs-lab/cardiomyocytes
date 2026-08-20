@@ -1,23 +1,41 @@
 from __future__ import annotations
 
-__all__ = ("DualTVL1", "DualTVL1Config")
+__all__ = ("DualTVL1Config",)
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, override
 
 import cv2
-from kaparoo.utils.optional import unwrap_or_factory
 
-from iivs_cardio.optical_flow.estimators.base import EstimatorConfig
-from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVEstimator
+from iivs_cardio.optical_flow.estimators.opencv.base import DenseAlgorithm, OpenCVConfig
 
 if TYPE_CHECKING:
-    from iivs_cardio.common.device import DeviceLike
-    from iivs_cardio.optical_flow.estimators.opencv.base import OpenCVAlgorithm
+    from iivs_cardio.common.device import Device
 
 
 @dataclass(frozen=True, slots=True)
-class DualTVL1Config(EstimatorConfig):
+class DualTVL1Config(OpenCVConfig):
+    """TV-L1's settings, whose two factories disagree on more than their name.
+
+    The last four fields are read by one device each. cv2 offers no way to ask
+    an algorithm what it ignored, so a sweep over one of them on the other
+    device runs to the end and reports no difference.
+
+    Attributes:
+        tau: The time step of the dual ascent.
+        lambda_: The weight the data term carries against smoothness.
+        theta: The tightness coupling the two variables.
+        nscales: The pyramid levels to build.
+        warps: The warpings run at each level.
+        epsilon: The stopping threshold.
+        scale_step: The scale between one level and the next.
+        gamma: The weight on the gradient constancy term.
+        inner_iterations: The inner loop's iterations. **CPU only.**
+        outer_iterations: The outer loop's iterations. **CPU only.**
+        median_filtering: The median filter's size, 1 to disable. **CPU only.**
+        iterations: The iterations run at each warping. **CUDA only.**
+    """
+
     tau: float = 0.25
     lambda_: float = 0.05
     theta: float = 0.3
@@ -26,57 +44,43 @@ class DualTVL1Config(EstimatorConfig):
     epsilon: float = 0.005
     scale_step: float = 0.8
     gamma: float = 0.0
-    # CPU-only (ignored on CUDA):
     inner_iterations: int = 20
     outer_iterations: int = 5
     median_filtering: int = 5
-    # CUDA-only (ignored on CPU):
     iterations: int = 300
 
     @override
-    def build(self, device: DeviceLike = "cpu") -> DualTVL1:
-        return DualTVL1(self, device=device)
+    def create(self, device: Device) -> DenseAlgorithm:
+        """Create the TV-L1 algorithm, from the factory `device` names.
 
-
-class DualTVL1(OpenCVEstimator):
-    def __init__(
-        self,
-        config: DualTVL1Config | None = None,
-        *,
-        device: DeviceLike = "cpu",
-    ) -> None:
-        self.config = unwrap_or_factory(config, DualTVL1Config)
-        super().__init__(device)
-
-    @override
-    def _create_algorithm(self) -> OpenCVAlgorithm:
-        config = self.config
-
-        if self.is_cuda:
+        The two take different iteration settings and the CUDA one takes no
+        median filter, so this branches where Farneback only picks a factory.
+        """
+        if device.is_cuda:
             return cv2.cuda.OpticalFlowDual_TVL1.create(
-                tau=config.tau,
-                lambda_=config.lambda_,
-                theta=config.theta,
-                nscales=config.nscales,
-                warps=config.warps,
-                epsilon=config.epsilon,
-                iterations=config.iterations,
-                scaleStep=config.scale_step,
-                gamma=config.gamma,
+                tau=self.tau,
+                lambda_=self.lambda_,
+                theta=self.theta,
+                nscales=self.nscales,
+                warps=self.warps,
+                epsilon=self.epsilon,
+                iterations=self.iterations,
+                scaleStep=self.scale_step,
+                gamma=self.gamma,
                 useInitialFlow=False,
             )
 
         return cv2.optflow.DualTVL1OpticalFlow.create(
-            tau=config.tau,
-            lambda_=config.lambda_,
-            theta=config.theta,
-            nscales=config.nscales,
-            warps=config.warps,
-            epsilon=config.epsilon,
-            innnerIterations=config.inner_iterations,  # OpenCV's parameter name (triple n)
-            outerIterations=config.outer_iterations,
-            scaleStep=config.scale_step,
-            gamma=config.gamma,
-            medianFiltering=config.median_filtering,
+            tau=self.tau,
+            lambda_=self.lambda_,
+            theta=self.theta,
+            nscales=self.nscales,
+            warps=self.warps,
+            epsilon=self.epsilon,
+            innnerIterations=self.inner_iterations,  # OpenCV's own name (triple n)
+            outerIterations=self.outer_iterations,
+            scaleStep=self.scale_step,
+            gamma=self.gamma,
+            medianFiltering=self.median_filtering,
             useInitialFlow=False,
         )

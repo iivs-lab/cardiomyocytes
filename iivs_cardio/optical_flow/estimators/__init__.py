@@ -1,11 +1,11 @@
 __all__ = (
-    "DeepFlow",
     "DeepFlowConfig",
-    "DualTVL1",
+    "DenseAlgorithm",
     "DualTVL1Config",
     "EstimatorConfig",
-    "Farneback",
     "FarnebackConfig",
+    "OpenCVAlgorithm",
+    "OpenCVConfig",
     "OpenCVEstimator",
     "OpticalFlowEstimator",
 )
@@ -15,11 +15,11 @@ from iivs_cardio.optical_flow.estimators.base import (
     OpticalFlowEstimator,
 )
 from iivs_cardio.optical_flow.estimators.opencv import (
-    DeepFlow,
     DeepFlowConfig,
-    DualTVL1,
+    DenseAlgorithm,
     DualTVL1Config,
-    Farneback,
     FarnebackConfig,
+    OpenCVAlgorithm,
+    OpenCVConfig,
     OpenCVEstimator,
 )

@@ -32,10 +32,8 @@ class OpticalFlowEstimator(ABC):
     backend takes `(H, W)` uint8 frames and returns `(2, H, W)` float32 flow).
     """
 
-    SUPPORTED_DEVICES: ClassVar[frozenset[DeviceKind]] = DEVICE_KINDS
-
     def __init__(self, device: DeviceLike = "cpu") -> None:
-        self.device = Device.resolve(device, self.SUPPORTED_DEVICES)
+        self.device = Device.resolve(device)
 
     @property
     def is_cuda(self) -> bool:
@@ -80,8 +78,22 @@ class EstimatorConfig(ABC):
     reconstructs one on the target device inside the worker. Mirrors
     `filtering.kernel.KernelConfig`; `device` is the one addition, since an
     estimator is device-bound where a kernel is not.
+
+    Which devices an algorithm runs on is declared here rather than on the
+    estimator: OpenCV shipping no CUDA DeepFlow is a fact about DeepFlow, not
+    about the machinery that streams frames through it.
+
+    Attributes:
+        SUPPORTED_DEVICES: The device kinds this algorithm has an
+            implementation for. Defaults to every kind.
     """
+
+    SUPPORTED_DEVICES: ClassVar[frozenset[DeviceKind]] = DEVICE_KINDS
 
     @abstractmethod
     def build(self, device: DeviceLike = "cpu") -> OpticalFlowEstimator:
-        """Construct the estimator these describe, on `device`."""
+        """Construct the estimator these describe, on `device`.
+
+        Raises:
+            ValueError: If `device` is not one of `SUPPORTED_DEVICES`.
+        """

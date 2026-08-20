@@ -7,19 +7,18 @@ import torch
 
 from iivs_cardio.common import Device
 from iivs_cardio.optical_flow.estimators import (
-    DeepFlow,
     DeepFlowConfig,
-    DualTVL1,
     DualTVL1Config,
     EstimatorConfig,
-    Farneback,
     FarnebackConfig,
+    OpenCVEstimator,
 )
 
 # All three OpenCV methods run on CPU, so the streaming contract is tested
-# GPU-free; the CUDA path is gated on an actual device below.
-CPU_METHODS = (Farneback, DualTVL1, DeepFlow)
-CUDA_METHODS = (Farneback, DualTVL1)
+# GPU-free; the CUDA path is gated on an actual device below. Each is named by
+# its config, which is the only thing that differs between them now.
+CPU_METHODS = (FarnebackConfig, DualTVL1Config, DeepFlowConfig)
+CUDA_METHODS = (FarnebackConfig, DualTVL1Config)
 
 requires_cuda = pytest.mark.skipif(
     cv2.cuda.getCudaEnabledDeviceCount() < 1,
@@ -73,7 +72,7 @@ class _CountingAlgorithm:
 
 @pytest.mark.parametrize("flow_cls", CPU_METHODS)
 def test_push_streams_pairwise_flow(flow_cls):
-    of = flow_cls(device="cpu")
+    of = flow_cls().build("cpu")
     prev, curr = _frames()
 
     assert of.push(prev) is None  # first frame: no previous, no flow
@@ -87,7 +86,7 @@ def test_push_streams_pairwise_flow(flow_cls):
 
 @pytest.mark.parametrize("flow_cls", CPU_METHODS)
 def test_reset_restarts_the_sequence(flow_cls):
-    of = flow_cls(device="cpu")
+    of = flow_cls().build("cpu")
     prev, curr = _frames()
     of.push(prev)
     assert of.push(curr) is not None
@@ -98,7 +97,7 @@ def test_reset_restarts_the_sequence(flow_cls):
 
 @pytest.mark.parametrize("flow_cls", CPU_METHODS)
 def test_calc_is_a_stateless_one_shot(flow_cls):
-    of = flow_cls(device="cpu")
+    of = flow_cls().build("cpu")
     prev, curr = _frames()
 
     flow = of.calc(prev, curr)
@@ -112,7 +111,7 @@ def test_calc_is_a_stateless_one_shot(flow_cls):
 def test_push_result_survives_the_next_push(flow_cls):
     # The returned flow must own its memory: a later push (which may reuse an
     # internal output buffer) must not mutate an already-returned flow.
-    of = flow_cls(device="cpu")
+    of = flow_cls().build("cpu")
     a, b = _frames()
     of.push(a)
     first = of.push(b)
@@ -122,11 +121,11 @@ def test_push_result_survives_the_next_push(flow_cls):
     assert torch.equal(first, kept)
 
 
-@pytest.mark.parametrize("flow_cls", (Farneback, DualTVL1))
+@pytest.mark.parametrize("flow_cls", CUDA_METHODS)
 def test_recovers_known_shift(flow_cls):
     # Farneback and DualTVL1 recover a small translation precisely; DeepFlow is
     # checked separately below.
-    of = flow_cls(device="cpu")
+    of = flow_cls().build("cpu")
     prev, curr = _frames()
     _assert_recovers_shift(of.calc(prev, curr))
 
@@ -135,21 +134,21 @@ def test_deepflow_recovers_shift():
     # DeepFlow's output values (elsewhere only its shape/dtype are asserted): zero
     # for identical frames and the known (dx, dy) = (3, 2) shift recovered — a
     # real, motion-dependent result that a garbage/no-op calc would fail.
-    of = DeepFlow(device="cpu")
+    of = DeepFlowConfig().build("cpu")
     base, shifted = _frames()
     assert of.calc(base, base).abs().max().item() < 1e-3  # no motion -> zero flow
     _assert_recovers_shift(of.calc(base, shifted))
 
 
 def test_push_rejects_wrong_dtype():
-    of = Farneback(device="cpu")
+    of = FarnebackConfig().build("cpu")
     bad = torch.zeros((64, 64), dtype=torch.float32)  # not uint8
     with pytest.raises(Exception, match=r"f32\[64,64\]"):
         of.push(bad)
 
 
 def test_push_rejects_wrong_shape():
-    of = Farneback(device="cpu")
+    of = FarnebackConfig().build("cpu")
     bad = torch.zeros((3, 64, 64), dtype=torch.uint8)  # not (H, W)
     with pytest.raises(Exception, match=r"\[3,64,64\]"):
         of.push(bad)
@@ -157,45 +156,61 @@ def test_push_rejects_wrong_shape():
 
 def test_deepflow_rejects_cuda():
     with pytest.raises(ValueError, match="unsupported device 'cuda'"):
-        DeepFlow(device="cuda")
+        DeepFlowConfig().build("cuda")
 
 
 def test_supported_devices():
-    assert frozenset({"cpu", "cuda"}) == Farneback.SUPPORTED_DEVICES
-    assert frozenset({"cpu"}) == DeepFlow.SUPPORTED_DEVICES
+    # Declared by the algorithm's config, not by the estimator: OpenCV shipping
+    # no CUDA DeepFlow is a fact about DeepFlow.
+    assert frozenset({"cpu", "cuda"}) == FarnebackConfig.SUPPORTED_DEVICES
+    assert frozenset({"cpu"}) == DeepFlowConfig.SUPPORTED_DEVICES
 
 
-def test_custom_params_are_retained():
-    of = Farneback(FarnebackConfig(num_levels=1, win_size=7), device="cpu")
-    assert of.config.num_levels == 1
-    assert of.config.win_size == 7
+def test_custom_params_reach_the_algorithm():
+    # Asked of cv2 rather than of a config the estimator kept: what matters is
+    # that the settings arrived at the thing that computes, and an estimator
+    # holding a copy of them would pass whether they did or not.
+    of = FarnebackConfig(num_levels=1, win_size=7).build("cpu")
+
+    assert of.algorithm.getNumLevels() == 1
+    assert of.algorithm.getWinSize() == 7
 
 
 @pytest.mark.parametrize(
-    ("config", "expected"),
+    "config",
     (
-        pytest.param(FarnebackConfig(win_size=21), Farneback, id="farneback"),
-        pytest.param(DualTVL1Config(nscales=5), DualTVL1, id="dualtvl1"),
-        pytest.param(DeepFlowConfig(), DeepFlow, id="deepflow"),
+        pytest.param(FarnebackConfig(win_size=21), id="farneback"),
+        pytest.param(DualTVL1Config(nscales=5), id="dualtvl1"),
+        pytest.param(DeepFlowConfig(), id="deepflow"),
     ),
 )
-def test_params_build_their_estimator_on_the_given_device(config, expected):
+def test_params_build_their_estimator_on_the_given_device(config):
     # The `EstimatorConfig.build` recipe a pool worker uses: a picklable config
     # object reconstructs the (unpicklable) estimator on the worker's device.
+    # Every algorithm arrives as the same estimator, holding a different cv2
+    # object, which is what taking the algorithm as a value rather than a
+    # subclass buys.
     assert isinstance(config, EstimatorConfig)
 
     estimator = config.build("cpu")
-    assert isinstance(estimator, expected)
+    assert isinstance(estimator, OpenCVEstimator)
     assert estimator.device == Device("cpu")
 
 
-def test_build_forwards_the_held_params():
+def test_build_forwards_the_held_params_of_every_algorithm():
     # `build` must pass its own fields through, not defaults -- the one step that
-    # turns a stored config back into a configured estimator.
-    built = FarnebackConfig(num_levels=1, win_size=7).build("cpu")
+    # turns a stored config back into a configured algorithm.
+    farneback = FarnebackConfig(num_levels=1, win_size=7).build("cpu")
+    tvl1 = DualTVL1Config(nscales=5, warps=2).build("cpu")
 
-    assert built.config.num_levels == 1
-    assert built.config.win_size == 7
+    assert (farneback.algorithm.getNumLevels(), farneback.algorithm.getWinSize()) == (
+        1,
+        7,
+    )
+    assert (tvl1.algorithm.getScalesNumber(), tvl1.algorithm.getWarpingsNumber()) == (
+        5,
+        2,
+    )
 
 
 def test_estimator_params_pickle_across_a_process_boundary():
@@ -207,9 +222,9 @@ def test_estimator_params_pickle_across_a_process_boundary():
         assert pickle.loads(pickle.dumps(config)) == config  # noqa: S301
 
 
-@pytest.mark.parametrize("flow_cls", (Farneback, DualTVL1))
+@pytest.mark.parametrize("flow_cls", CUDA_METHODS)
 def test_calc_batch_matches_per_pair(flow_cls):
-    of = flow_cls(device="cpu")
+    of = flow_cls().build("cpu")
     rng = np.random.default_rng(1)
     prevs = torch.as_tensor(rng.integers(0, 256, size=(3, 64, 64), dtype=np.uint8))
     currs = torch.as_tensor(rng.integers(0, 256, size=(3, 64, 64), dtype=np.uint8))
@@ -224,9 +239,9 @@ def test_calc_batch_matches_per_pair(flow_cls):
 def test_calc_batch_calls_algorithm_once_per_pair(monkeypatch):
     # Contract: exactly one core `algorithm.calc` per source pair. Verified with a
     # spy, not just by values — a redundant re-compute would still match results.
-    of = Farneback(device="cpu")
+    of = FarnebackConfig().build("cpu")
     spy = _CountingAlgorithm()
-    monkeypatch.setattr(of, "_algorithm", spy)
+    monkeypatch.setattr(of, "algorithm", spy)
     prevs = torch.zeros((3, 64, 64), dtype=torch.uint8)
     of.calc_batch(prevs, prevs)
     assert spy.calls == 3
@@ -234,22 +249,22 @@ def test_calc_batch_calls_algorithm_once_per_pair(monkeypatch):
 
 def test_push_chunk_calls_algorithm_once_per_consecutive_pair(monkeypatch):
     # 5 frames -> 4 flows -> exactly 4 core calls (the first frame is only retained).
-    of = Farneback(device="cpu")
+    of = FarnebackConfig().build("cpu")
     spy = _CountingAlgorithm()
-    monkeypatch.setattr(of, "_algorithm", spy)
+    monkeypatch.setattr(of, "algorithm", spy)
     of.push_chunk(_sequence(5))
     assert spy.calls == 4
 
 
 def test_calc_batch_empty_returns_empty():
     empty = torch.zeros((0, 64, 64), dtype=torch.uint8)
-    out = Farneback(device="cpu").calc_batch(empty, empty)
+    out = FarnebackConfig().build("cpu").calc_batch(empty, empty)
     assert out.shape == (0, 2, 64, 64)
     assert out.dtype == torch.float32
 
 
 def test_calc_batch_rejects_mismatched_batch():
-    of = Farneback(device="cpu")
+    of = FarnebackConfig().build("cpu")
     prev = torch.zeros((3, 64, 64), dtype=torch.uint8)
     curr = torch.zeros((4, 64, 64), dtype=torch.uint8)  # N mismatch vs prev
     with pytest.raises(Exception, match=r"u8\[4,64,64\]"):
@@ -259,20 +274,20 @@ def test_calc_batch_rejects_mismatched_batch():
 def test_push_chunk_matches_individual_pushes():
     frames = _sequence(5)
     individual = []
-    of1 = Farneback(device="cpu")
+    of1 = FarnebackConfig().build("cpu")
     for i in range(5):
         flow = of1.push(frames[i])
         if flow is not None:
             individual.append(flow)
 
-    chunk = Farneback(device="cpu").push_chunk(frames)
+    chunk = FarnebackConfig().build("cpu").push_chunk(frames)
     assert chunk.shape == (4, 2, 64, 64)  # first chunk: 5 frames -> 4 flows
     assert torch.equal(chunk, torch.stack(individual))
 
 
 def test_push_chunk_continues_across_chunks():
     frames = _sequence(5)
-    of = Farneback(device="cpu")
+    of = FarnebackConfig().build("cpu")
     first = of.push_chunk(frames[:3])  # first chunk: 3 frames -> 2 flows
     rest = of.push_chunk(
         frames[3:]
@@ -280,7 +295,7 @@ def test_push_chunk_continues_across_chunks():
     assert first.shape == (2, 2, 64, 64)
     assert rest.shape == (2, 2, 64, 64)
 
-    of2 = Farneback(device="cpu")
+    of2 = FarnebackConfig().build("cpu")
     individual = []
     for i in range(5):
         flow = of2.push(frames[i])
@@ -290,7 +305,7 @@ def test_push_chunk_continues_across_chunks():
 
 
 def test_push_chunk_first_single_frame_retains_without_flow():
-    of = Farneback(device="cpu")
+    of = FarnebackConfig().build("cpu")
     frames = _sequence(2)
     out = of.push_chunk(frames[:1])  # first chunk of 1 -> 0 flows, retains the frame
     assert out.shape == (0, 2, 64, 64)
@@ -299,14 +314,14 @@ def test_push_chunk_first_single_frame_retains_without_flow():
 
 def test_push_chunk_empty_returns_empty():
     empty = torch.zeros((0, 64, 64), dtype=torch.uint8)
-    out = Farneback(device="cpu").push_chunk(empty)
+    out = FarnebackConfig().build("cpu").push_chunk(empty)
     assert out.shape == (0, 2, 64, 64)
 
 
 @requires_cuda
 @pytest.mark.parametrize("flow_cls", CUDA_METHODS)
 def test_cuda_push_stays_on_device(flow_cls):
-    of = flow_cls(device="cuda")
+    of = flow_cls().build("cuda")
     prev, curr = _frames(device="cuda")
 
     assert of.push(prev) is None
@@ -324,7 +339,7 @@ def test_cuda_recovers_known_shift(flow_cls):
     # against the known frame shift rather than the (differently-implemented)
     # CPU result.
     prev, curr = _frames(device="cuda")
-    flow = flow_cls(device="cuda").calc(prev, curr)
+    flow = flow_cls().build("cuda").calc(prev, curr)
     assert flow.device.type == "cuda"
     _assert_recovers_shift(flow)
 
@@ -332,7 +347,7 @@ def test_cuda_recovers_known_shift(flow_cls):
 @requires_cuda
 @pytest.mark.parametrize("flow_cls", CUDA_METHODS)
 def test_cuda_reset_restarts_the_sequence(flow_cls):
-    of = flow_cls(device="cuda")
+    of = flow_cls().build("cuda")
     prev, curr = _frames(device="cuda")
     of.push(prev)
     assert of.push(curr) is not None
@@ -345,7 +360,7 @@ def test_cuda_reset_restarts_the_sequence(flow_cls):
 def test_cuda_push_streams_without_corrupting_retained_flows():
     # The CUDA push copies frames into an alternating double-buffer and reuses
     # the flow buffer, so a retained early flow must survive later pushes.
-    of = Farneback(device="cuda")
+    of = FarnebackConfig().build("cuda")
     frames = _sequence(4, device="cuda")
 
     flows = []
@@ -363,7 +378,7 @@ def test_cuda_push_streams_without_corrupting_retained_flows():
 
 @requires_cuda
 def test_cuda_push_chunk_streams():
-    of = Farneback(device="cuda")
+    of = FarnebackConfig().build("cuda")
     chunk = of.push_chunk(_sequence(5, device="cuda"))
     assert chunk.shape == (4, 2, 64, 64)  # 5 frames -> 4 flows
     assert chunk.device.type == "cuda"
@@ -372,7 +387,7 @@ def test_cuda_push_chunk_streams():
 
 @requires_cuda
 def test_push_rejects_tensor_on_wrong_device():
-    of = Farneback(device="cuda")
+    of = FarnebackConfig().build("cuda")
     cpu_frame = torch.zeros((64, 64), dtype=torch.uint8)  # on cpu, estimator on cuda
     with pytest.raises(ValueError, match="expects a cuda:0 tensor"):
         of.push(cpu_frame)
