@@ -574,6 +574,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stage reads its own trees by.
 ### Fixed
 
+- Building a `DualTVL1Config` warns about a setting the device it is built for
+  will not read. cv2 takes `inner_iterations`, `outer_iterations` and
+  `median_filtering` only in its CPU implementation and `iterations` only in its
+  CUDA one, and offers no way to ask an algorithm what it ignored, so a sweep
+  over one of them on the other device ran to the end and reported no
+  difference. Only the ones changed from their defaults are named: one config
+  carries both sets, so holding them is not the same as having meant them.
 - A CPU `push` copies the frame it retains, as the CUDA path always did. It kept
   the caller's tensor, so a caller streaming into one reusable buffer -- the
   ordinary shape of frame IO -- had the retained frame overwritten by the next

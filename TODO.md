@@ -906,13 +906,6 @@ source.root=$OUT/filtered       filter=identity                (1)이 남긴 캐
 
 ## 열린 것
 
-- **`DualTVL1Config`가 장치에 따라 조용히 무시되는 필드를 넷 든다.**
-  `inner_iterations`·`outer_iterations`·`median_filtering`은 CUDA에서, `iterations`는 CPU에서
-  읽히지 않는다. `iterations=1000`으로 스윕을 돌렸는데 CPU였다면 아무 일도 일어나지 않고
-  로그도 말하지 않는다. 파라미터 탐색을 시작하기 전에 닫을 것 — **읽지 않는 필드를 명시적으로
-  지정하면 거절하거나 로그로 말하게** 할 수 있고, (1)의 `if_frames_short`가 「짧으면 말한다」로
-  처리한 것과 같은 자리다. (`_create(device)` 재작성 때 함께 하기로 했다가 놓친 항목이다.)
-
 - **캐시 폴더는 자기가 어디서부터 시작하는지 말하지 않는다.** `KoalaFrameWriter`는 도착한
   첫 프레임부터 0으로 번호를 매기므로, 시간 방향으로 줄어드는 단마다 원본과의 어긋남이 하나씩
   쌓인다. 6프레임 시퀀스를 실제로 세 단에 통과시킨 결과:
