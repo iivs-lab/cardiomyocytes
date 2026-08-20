@@ -161,10 +161,14 @@ def _validate_output(
 ) -> None:
     """Raise unless the target names an output this run can safely write.
 
-    A sequence is written by replacing its folder whole, so a destination that
-    is a source folder, holds one, or sits inside one is refused, as is one the
-    source search would find again. A tree written beside the source under a
-    name of its own collides with neither, and is left open.
+    A sequence is written by replacing its folder whole, so an output under the
+    source root is refused wherever its layout would land on the frames being
+    read: the same folder, or either one holding the other.
+
+    An output beside the source, or above it, is left open. It writes a tree of
+    its own and collides with nothing here, and whether a later run pointed at
+    a parent of both would then find two of every sequence is that run's own
+    `source.root` to get right.
 
     Raises:
         ValueError: If the target writes nothing, or the frames it writes would
