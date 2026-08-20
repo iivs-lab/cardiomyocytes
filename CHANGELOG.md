@@ -40,24 +40,25 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   indices is refused rather than closed. `phase_frame_writer` binds the phase
   `.bin` format to it, taking the calibration as numbers rather than reaching
   into a reader for them.
-- `preprocess` writes the filtered frames when `target.save_frames` is set.
-  `target.overwrite` decides whether an output already under `target.root` may
-  be replaced, and `target.subpath` where a written sequence keeps its frames,
-  defaulting to wherever the source keeps its own. Naming one is what lets a run
-  write beside the frames it read -- `Phase/Float/FilteredBin` next to
-  `Phase/Float/Bin` -- rather than over them, and a run whose frames would land
-  on the source is refused before the search: a sequence is committed by
-  replacing its folder whole, so writing back to where it was read from
-  destroyed the acquisition under a run that logged `N of N done` and exited 0.
-  Either subpath is refused outright if it could reach outside a sequence's own
-  folder, since a `..` would walk past that comparison and land wherever it
-  pointed. `FrameTree` carries what every sequence's writer shares
-  and `PhaseStageFactory` hands out a stage with its hooks already registered,
-  so whatever owns a stage never wires that stage's side branches.
-- `preprocess` refuses `target.save_frames` in a `--multirun`. Frames go to
-  `target.root`, which carries no job number, so every job of a sweep would write
-  the one tree: 1.45 TB apiece, in turn, and nothing in the tree would say which
-  config finally left it there. `is_multirun` is what answers the question.
+- `preprocess` writes the filtered frames when `target.frames.save` is set.
+  `target.frames.if_present` decides whether an output already under the job's
+  own directory may be replaced, and `target.frames.subpath` where a written
+  sequence keeps its frames, defaulting to wherever the source keeps its own.
+  Naming one is what lets a run write beside the frames it read --
+  `Phase/Float/FilteredBin` next to `Phase/Float/Bin` -- rather than over them,
+  and a run whose frames would land on the source is refused before the search:
+  a sequence is committed by replacing its folder whole, so writing back to
+  where it was read from destroyed the acquisition under a run that logged `N of
+  N done` and exited 0. Either subpath is refused outright if it could reach
+  outside a sequence's own folder, since a `..` would walk past that comparison
+  and land wherever it pointed. `FrameTree` carries what every sequence's writer
+  shares and `SequenceStageFactory` hands out a stage with its hooks already
+  registered, so whatever owns a stage never wires that stage's side branches.
+- `preprocess` refuses `target.frames.save` in a `--multirun`. Each job writes a
+  tree of its own at 1.45 TB apiece, which is not what a sweep is for: the
+  filter is what it varies and only the winning one is worth keeping, so the run
+  says so rather than filling the disk in turn. `is_multirun` is what answers
+  the question.
 - `StageFactory` in `iivs_cardio/common/pipeline.py`, the whole of what a
   driver sees: how many items, what each is called, how to run one on a device,
   and how to bracket the run. It carries the stage's own `name`, which the job
@@ -130,6 +131,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   path every source frame takes is an allocation worth not making (672 -> 247 us
   per 900x900 float32 frame, against ~3000 us of filtering).
 
+- `check_compute_env` speaks for CuPy, the third thing in this stack that
+  reaches CUDA and the only one with no CPU build to fall back on. Two
+  arithmetic checks for different reasons -- CuPy builds its kernels at first
+  use rather than shipping them, so a toolkit the driver disagrees with fails
+  there and nowhere above, and the matmul goes through cuBLAS and back to the
+  host -- and two for what this project actually asks of it: `cuda_utils` wraps
+  a tensor as an array and back with no copy, which holds only while torch and
+  CuPy read one `__cuda_array_interface__`, so the device pointer is what is
+  compared rather than the values, which would agree either way. The linkage
+  line reports the CUDA runtime CuPy found, which is not obliged to be the one
+  torch was built against.
+- `check_compute_env` names the cuDNN trees a Linux run mapped, read off
+  `/proc/self/maps`. One soname is loaded once per process, so the sub-libraries
+  torch asks for can come from two trees at once -- a system copy that arrived
+  first and the wheel's own for everything it did not carry -- which is the
+  mismatch it dies on, and is visible as nothing more than two parent
+  directories among the mapped files. The section runs last, since it can only
+  report what the ones above loaded, and off Windows alone, which is where
+  `/proc` is.
+- `iivs_cardio/beating_profile/`, a sketch of the field graph a profile is
+  folded from: `base.py` is where a field declares what it needs of its
+  neighbours and how far either side it reads, `graph.py` folds those into an
+  order and into the frames each end of a sequence gives up, and `fields.py`
+  holds the metrics. Asking for force is asking for five computations rather
+  than one. A scaffold rather than a design: nothing re-exports it and nothing
+  tests it.
 ### Changed
 
 - Every layer stores a `Device` where it stored a `torch.device`; torch calls
@@ -188,14 +215,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is always valid, so the pipeline cannot reach it; the index is clamped anyway,
   since `apply` is a public function of its arguments and on CUDA that gather is
   a device-side assert that takes the worker's context with it.
-- A run reuses what an earlier one left. `target.overwrite` is gone into
-  `if_frames_exist` and `if_ranges_exist`, each `error | overwrite` and the
-  ranges also `reuse`, plus `if_sources_gone` (`keep | delete`) for an output
-  whose sequence the dataset no longer holds. The two axes are separate because
-  they answer different questions -- what to do with the output of a sequence
-  being written, and what to do with one nothing will be written for -- and
-  because only the second can destroy something the source can no longer
-  remake.
+- A run reuses what an earlier one left, through a block per branch:
+  `if_present` (`error | overwrite | reuse`) and `if_unsourced` (`keep |
+  delete`) sit on `target.frames` and `target.ranges` alike, the second for an
+  output whose sequence the dataset no longer holds. The two axes are separate
+  because they answer different questions -- what to do with the output of a
+  sequence being written, and what to do with one nothing will be written for --
+  and a run may want either without the other.
 - A range document counts against the whole dataset rather than against the run
   that wrote it. `RangeDocument` takes a contents of every sequence the source
   holds against the frames each would be measured over, and `selected` names
@@ -306,8 +332,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `iivs_cardio/common/`: `hydra.py` holds the hydra boundary (`apply_schema`,
   `output_directory`, `is_multirun`), `compute.py` the machine's division
   (`ComputeConfig`, `plan_devices`, `pin_threads`, `log_insights`),
-  `dataset.py` where the data is and which of it a run takes (`TreeConfig`,
-  `SelectConfig`), and `phase.py` how a phase tree is searched. Elsewhere in
+  `dataset.py` where the data is and which of it a run takes
+  (`SourceConfig`, `SequenceSelectConfig`, `FrameSelectConfig`), and
+  `phase.py` how a phase tree is searched. Elsewhere in
   `scripts/` a leading underscore marks a module that is not an entry point;
   the folder carries it once here, since nothing inside is one. A second
   modality would join as `hologram.py` beside the first. `scripts/_config.py`
@@ -369,17 +396,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   at the source and 39 to 7 ms at the output. The source pays the listing once
   more when `PhaseBinFolder` opens each folder for its frames, which is the one
   that is needed.
-- `if_frames_exist` takes `reuse`. A tree opening under it reads each written
-  sequence's `source.json` and keeps the folder when three things still hold:
-  the settings match, the source names match, and the folder holds as many
-  frames as its record says. The third has no counterpart in a range part,
-  which is one file and so is either there or not; a folder can be half
-  removed, and reusing that would leave a short sequence reading as a whole
-  one. Judging happens when the tree opens, in one process with the whole
-  dataset in view, for the same reason the document judges there.
-- `if_frames_exist: error` refuses when the tree opens rather than when the
-  writer meets the folder. The writer meets them one at a time, so a run over
-  500 sequences whose 300th was already written paid for 299 of them first.
+- `target.frames.if_present` takes `reuse`. A tree opening under it reads each
+  written sequence's `source.json` and keeps the folder when three things still
+  hold: the settings match, the source names match, and the folder holds as many
+  frames as its record says. The third has no counterpart in a range part, which
+  is one file and so is either there or not; a folder can be half removed, and
+  reusing that would leave a short sequence reading as a whole one. Judging
+  happens when the tree opens, in one process with the whole dataset in view,
+  for the same reason the document judges there.
+- `if_present: error` refuses when the tree opens rather than when the writer
+  meets the folder. The writer meets them one at a time, so a run over 500
+  sequences whose 300th was already written paid for 299 of them first.
   `FrameTree` takes `selected` for this, so a retry of one sequence is not
   refused by the ones that already succeeded.
 - `source.frame_start` and `source.frame_count` beside `frame_step`, with
@@ -437,15 +464,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that computed nothing the pool's bar reached the end and closed while four
   more results were still being logged beneath it. The bar now trails a slow
   item, since `imap` returns in order, and catches up by the end.
-- `SourceConfig` is `TreeConfig` (`root` + `subpath`) and `SelectConfig`
-  (`include` / `exclude` / `frame_*` / `if_frames_short`), and the preprocess
-  config carries both as `source:` and `select:`. A stage reading two trees
-  takes the same sequences and the same frames from each, so a per-tree copy of
-  the selection could disagree and pair frames that do not correspond. Every
-  reader takes the two as separate arguments. `TargetConfig` still inherits
-  `TreeConfig`, and `DEFAULT_SUBPATH` moved to that base: it is the one setting
-  there that assumes a modality, and it moves to whatever names the reader once
-  a second one is read.
+- The selection splits by what it survives. `SequenceSelectConfig` (`include` /
+  `exclude`) is the run's, since a sequence keeps its name wherever it is
+  written and the same two settings pick the same sequences from every tree;
+  `FrameSelectConfig` (`start` / `step` / `count` / `if_short`) is each tree's,
+  since frame numbers do not survive a stage boundary and two trees a run reads
+  may be at different rates -- a 20 Hz source asked for 10 Hz takes every second
+  frame where a 10 Hz flow cache takes every one, and the same rate is what they
+  arrive at. The preprocess config carries them as `select:` and
+  `source.frames:`.
 - `frame_indices` takes `count` rather than `limit`, matching the
   `select.frame_count` key that feeds it and the refusal it already wrote
   (`invalid frame count`). `FilteredSequence` and `PhaseFilteredSequence` follow.
@@ -453,6 +480,56 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   without `indent=2`. The whitespace was a large share of a file that carries an
   entry per frame, and nothing reads these by eye.
 
+- `run_root` places the job's directory, where `target.root` did. That field was
+  the one nothing read: it fed `hydra.run.dir` while the folder the branches
+  write under came from `runtime.output_dir`, and in a sweep the two differ by
+  the job number. `PreprocessTargetConfig` keeps only the two branch blocks,
+  both of which are read.
+- A config settles its own layout. `SequenceLayout` holds `subpath` and reserves
+  `DEFAULT_SUBPATH` without a value, resolving as a method; the stage's
+  `PreprocessSourceConfig` supplies Koala's and `FrameBranchConfig` supplies
+  `frames`. Eight call sites had passed the default by hand from a constant in
+  the phase reader, which is how `_process.py` came to know across six lines
+  that this stage reads phase.
+- `PhaseStageFactory` is `SequenceStageFactory`, and `TargetConfig` is
+  `PreprocessTargetConfig`. The first mentions phase in two annotations and
+  nowhere else -- it holds sequences, asks each branch for a hook, runs them and
+  logs -- and the second describes what one stage writes, so it takes that
+  stage's prefix and a second stage declares its own beside it.
+- `compute.device` is a `DeviceKind` rather than a `str`. `plan_devices` asks it
+  only whether it is cuda, taking the gpu ids from `workers`, so a spec naming
+  an index was accepted with the index dropped and the run went to whichever
+  card `workers` named. omegaconf refuses it at composition instead.
+- `main` reads the filter where it reads the rest, handing the builder a
+  `KernelConfig` rather than a `DictConfig`: four config nodes arrived as
+  objects and the fifth as a container, and omegaconf now stops at the entry
+  point.
+- The builders take their arguments to one rule: the configs and the logger
+  positional, and what the run discovers or is told at runtime keyword-only,
+  ordered destination, dataset, this run's share, reporting. `output_root` had
+  been positional in two of the three entry points and keyword-only in the
+  third.
+- `WorkerLogFolder` takes its name off the run it was built for, where the stage
+  name was written twice with nothing checking that the two agreed.
+- The five parses in `main`, and the builders below it, follow the order the run
+  consumes them: read, select, filter, write.
+- `check_compute_env` hands its checks back as values rather than printing them
+  where they are found. Every section computed, judged, printed and accumulated
+  in one breath, over thirty-six lines that each rebuilt the layout by hand:
+  nine copies of one PASS/FAIL ternary, and twenty-two strings carrying their
+  own indentation. `Check` and `Section` hold what a section found and `_render`
+  is the single place a line's shape is decided, so a section's verdict falls
+  out of `all()` and the accumulator whose two operands could be written the
+  wrong way round is gone. The script gains a `main()` behind the usual guard
+  with it, where it had run on import with the summary and the exit at module
+  level.
+- `generate_dotenv --help` says what the file is for. The parser took
+  `description=__doc__` and the module has no docstring to take, the convention
+  here being that it should not have one, so `--help` led with a blank line and
+  the one thing a reader opens it for was the one thing it did not say.
+- `ruff` reads a `dataclass`'s annotations at runtime. `OmegaConf.structured`
+  builds a node from a config class's annotations, so a policy alias left behind
+  `TYPE_CHECKING` is a `NameError` rather than a check.
 ### Removed
 
 - `counted` and `prune_above` from `iivs_cardio.common.pipeline`, and
@@ -467,8 +544,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   which every membership check downstream then accepts.
 - `FRAME_POLICIES`, an alias for `EXISTING_OUTPUT_POLICIES`. `build_branches`
   reached for both in one function, which read as two vocabularies where there
-  is one: `if_frames_exist` and `if_ranges_exist` take the same three values.
+  is one: both branches take `if_present`, and the same three values.
 
+- The two standalone optical flow probes. Both questions they answered -- that
+  cuda and cpu agree, and what the speedup is -- are answered, and the
+  acquisition they ran against is being replaced. Neither was ever imported, and
+  every `ruff` and `ty` finding left in the repository was one of theirs, so a
+  green CI said nothing while they stayed.
+- The per-key comments in the preprocess config, a second copy of the
+  `Attributes:` block that had drifted from it. The `frames` ones had drifted
+  furthest, describing a phase tree where the block is the general one every
+  stage reads its own trees by.
 ### Fixed
 
 - A frame folder half removed no longer reads as complete. `_count_frames`
@@ -489,6 +575,62 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   second time, so anything added there read as committed locally and was absent
   on the server. The five virtualenv directory patterns are anchored to the root.
 
+- `setup-opencv-cuda.ps1` picks the newest cuDNN by version rather than by how
+  it spells. `Sort-Object FullName` compares paths as text, so `v9.9` came after
+  both `v9.10` and the `v9.23` in use: a machine holding 9.9 beside a later
+  release relinked 9.9, and nothing said so -- the links are made, the script
+  reports success, and the compute check passes, since what is linked is a
+  perfectly good cuDNN of the wrong age. The upgrade the script asks for
+  afterwards is what walks into it, the installer keeping each release in a
+  folder of its own. Ranking is on the version the DLL carries, with the folder
+  as a fallback, and a build for another CUDA major ranks below one for this
+  toolkit rather than being refused.
+- A cuDNN fault points at the repair the running platform has. Both pieces of
+  advice named Windows and the PowerShell script whatever the host was, so a
+  Linux run was handed a file it cannot execute. The fault is one thing either
+  way -- a soname is loaded once per process, and torch gets whichever cuDNN
+  arrived first -- but on Linux there is nothing to repair, only a system copy
+  or an `LD_LIBRARY_PATH` to find, so the lines name the two commands that show
+  them.
+- `target.ranges.if_present: error` refuses the parts an earlier run left rather
+  than clearing them, which is what the frame tree already did with a folder.
+  The two are only ever apart in one case and it is the expensive one: a run
+  that finishes writes its document whatever went wrong, so parts without a
+  document belong to a run killed outright, and the retry walked in, dropped
+  everything it had committed, and started over without a line to say what it
+  had just spent.
+- The range document is written from the parts that read. One that could not be
+  read took the whole document with it, since the fold refuses such a part
+  rather than passing it over, so the sequences that finished cleanly were left
+  as parts with nothing folding them, stating their bounds, or saying what they
+  cover. A sequence whose part did not read is not among the folded ones, so
+  `coverage` counts it in `skipped`, which is where a retry looks; the refusal
+  is raised once the document is on disk rather than instead of it.
+- A selection that came out empty is refused rather than read as no selection at
+  all. An empty container is no filter to the reader, so a list built and left
+  empty took the whole dataset instead of none of it, and said nothing either
+  way. That is the one mistake here that runs quietly in the expensive
+  direction.
+- A selection naming a listing that is not there says which setting carried it.
+  The reader opened `select.include` only once the walk was done, so a mistyped
+  path spent the whole search before failing, and failed as a bare
+  `FileNotFoundError` from inside the library.
+- Staging a killed run left is cleared at the end that runs next. It was cleared
+  on the way out, which is the one end a run killed outright never reaches, so
+  what it staged sat in the output tree for as long as the tree did.
+- Three settings that only failed once the run had started are refused before
+  the walk. A `start` past the end of every sequence took none of their frames
+  and nothing said so, `if_short` being guarded on `count`; and an empty layout,
+  which is how a flat tree says its frames sit in the sequence folder itself,
+  left `if_present` guarding nothing and `if_unsourced` offering to delete
+  `.hydra`, both plates and the range parts on a nested one.
+- The two paths in one log block are written in the separators the source was
+  written in. `source:` printed the string the run was given and `target:` a
+  `Path`, so on Windows one line came back with slashes and the other with
+  backslashes.
+- The short-sequence warning stops at five names, the bound its sibling already
+  had. It joined every name into one line, so a dataset most of whose sequences
+  fall short of the count would have put all of them in a single warning.
 ### Performance
 
 - A sweep searches the dataset once rather than once per filter. Every job of a
