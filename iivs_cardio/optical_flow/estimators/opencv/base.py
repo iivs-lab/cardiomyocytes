@@ -52,14 +52,8 @@ class OpenCVConfig(EstimatorConfig, ABC):
     def _create(self, device: Device) -> DenseAlgorithm:
         """Make the cv2 algorithm these settings describe, for `device`.
 
-        Called with `device` already current, so an implementation asks cv2 for
-        the factory it wants rather than binding anything itself.
-
-        Args:
-            device: The device to make it for, resolved and activated.
-
-        Returns:
-            The algorithm, which `build` pairs with `device`.
+        Called with `device` resolved and already current, so an implementation
+        asks cv2 for the factory it wants rather than binding anything itself.
         """
 
     def _backend(self, device: DeviceLike = "cpu") -> Backend:
@@ -69,8 +63,8 @@ class OpenCVConfig(EstimatorConfig, ABC):
             device: The device to make it for, in any form a caller may write.
 
         Returns:
-            A backend of its own, so two estimators built from one algorithm do
-            not share the buffers or the retained frame.
+            A backend of its own, so two estimators built from one config share
+            no state.
         """
         device = Device.resolve(device, self.SUPPORTED_DEVICES)
         device.activate()
@@ -95,10 +89,6 @@ class OpenCVConfig(EstimatorConfig, ABC):
         Args:
             device: The device to build for, in any form a caller may write.
 
-        Returns:
-            The estimator, holding an algorithm made for `device` and carrying
-            it, so the two cannot be paired wrongly by whoever receives them.
-
         Raises:
             ValueError: If `device` is not one of `SUPPORTED_DEVICES`.
         """
@@ -116,8 +106,7 @@ def _stack_flows(flows: list[Tensor], frames: Tensor) -> Tensor:
 def _as_flow(channels_last: Tensor) -> Tensor:
     """Return cv2's `(H, W, 2)` flow as the `(2, H, W)` torch ops consume.
 
-    The copy `contiguous` makes after the permute is also what frees the result
-    from the buffer cv2 wrote it into, which the next call writes over.
+    The result is a copy, so it outlives the buffer cv2 wrote it into.
     """
     return channels_last.permute(2, 0, 1).contiguous()
 
@@ -134,12 +123,6 @@ class Backend(ABC):
     it, and how the answer comes back. Everything above them, the validation and
     the streaming and the batching, is one.
 
-    Both attributes are declared rather than made abstract: an attribute an
-    `__init__` sets does not clear an `abstractmethod`, which would leave every
-    subclass uninstantiable. A subclass declares `algorithm` again as the
-    concrete cv2 type it calls, which is what lets it call one without saying a
-    second time which of the two it holds.
-
     Attributes:
         algorithm: The cv2 algorithm this calls, which is the one an estimator
             reads its settings back from.
@@ -147,6 +130,9 @@ class Backend(ABC):
             which device cv2 made it on, and whoever runs it has to know.
     """
 
+    # Declared, not abstract: an attribute an `__init__` sets does not clear an
+    # `abstractmethod`. A subclass re-declares `algorithm` as the concrete cv2
+    # type it calls, so a call needs no second word on which of the two it is.
     algorithm: DenseAlgorithm
     device: Device
 
@@ -155,9 +141,8 @@ class Backend(ABC):
         """Return the flow from the retained frame, and retain `frame`.
 
         Returns:
-            The flow, or `None` where nothing was retained yet. `frame` is taken
-            in a form of this backend's own, so a caller may write over its own
-            afterwards.
+            The flow, or `None` where nothing was retained yet. `frame` is
+            copied, so a caller may write over its own afterwards.
         """
 
     @abstractmethod
@@ -209,14 +194,6 @@ class CPUBackend(Backend):
 
 class CUDABackend(Backend):
     """The CUDA calls, over `GpuMat`s the backend owns and reuses.
-
-    `push` alternates between a pair, so the frame one call retains is the one
-    the next reads back. `calc` takes a pair of its own rather than borrowing
-    that one, which is what leaves a stream undisturbed by a one-shot between
-    two pushes.
-
-    Throughout, `prev` and `curr` are the frames a caller passed and
-    `buffer_prev` and `buffer_curr` the `GpuMat`s they were copied into.
 
     Attributes:
         algorithm: The cv2 algorithm to call.
@@ -284,11 +261,9 @@ class OpenCVEstimator(OpticalFlowEstimator):
     keeps the whole computation on the device, so its output chains into the next
     GPU stage without a host transfer.
 
-    One class serves every algorithm and every device: which algorithm runs
-    changes the settings, and which device runs it changes where a frame is put
-    and how the answer comes back, neither of which is the streaming this holds.
-    Build one through `OpenCVConfig.build`, which is what pairs an algorithm with
-    the device it was made on.
+    One class serves every algorithm and every device, what differs between
+    them being the backend's business rather than the streaming this holds.
+    Build one through `OpenCVConfig.build`.
 
     Separate from `OpticalFlowEstimator` so a future PyTorch (`nn.Module`)
     backend can extend the neutral base directly.
@@ -299,9 +274,8 @@ class OpenCVEstimator(OpticalFlowEstimator):
 
     Attributes:
         algorithm: The cv2 algorithm itself, which is where the settings it was
-            made with can be read back from. Held by the backend that calls it
-            rather than beside it, so a spy put on one is seen by both.
-        device: As `OpticalFlowEstimator`, taken from `algorithm`.
+            made with can be read back from.
+        device: As `OpticalFlowEstimator`, the device the algorithm was made on.
         is_cuda: As `OpticalFlowEstimator`.
     """
 
@@ -329,10 +303,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
 
     @override
     def reset(self) -> None:
-        """Forget the retained frame, restarting the sequence.
-
-        The output buffer stays, being scratch the next call sizes for itself.
-        """
+        """Forget the retained frame, restarting the sequence."""
         self._backend.reset()
 
     @jaxtyped(typechecker=beartype)
