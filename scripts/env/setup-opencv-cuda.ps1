@@ -38,7 +38,8 @@
 .PARAMETER CUDNN_PATH
     Folder to link cuDNN from -- the installer's root (default) or the folder
     an extracted zip was unpacked to. The newest cuDNN found underneath is
-    used. Ignored when cuDNN is already present in the CUDA bin.
+    used, preferring one built for the installed CUDA major version. Ignored
+    when cuDNN is already present in the CUDA bin.
 
 .PARAMETER CUDA_PATH
     CUDA toolkit root to link into. Defaults to the CUDA_PATH environment
@@ -84,6 +85,55 @@ function Test-CoreCudnn {
     return $false
 }
 
+function ConvertTo-Version {
+    param([string]$Text)
+    if ($Text -and $Text -match '(\d+(?:\.\d+)+)') {
+        try { return [version]$Matches[1] } catch { return $null }
+    }
+    return $null
+}
+
+function Get-CudnnVersion {
+    # cuDNN stamps its own version into the DLL, which holds however the tree is
+    # laid out -- the installer's `v9.23\bin\13.3\x64` and a bare extracted zip
+    # alike. The `v9.23` folder is the fallback for a build carrying no stamp,
+    # and 0.0 ranks one with neither below everything else.
+    param([Parameter(Mandatory)][IO.FileInfo]$File)
+
+    $stamped = ConvertTo-Version $File.VersionInfo.FileVersion
+    if ($stamped) { return $stamped }
+
+    foreach ($part in ($File.FullName -split '[\\/]')) {
+        if ($part -match '^v\d') {
+            $named = ConvertTo-Version $part
+            if ($named) { return $named }
+        }
+    }
+
+    return [version]'0.0'
+}
+
+function Test-BuiltForCuda {
+    # The installer nests one build per CUDA release under a bare `13.3`, where
+    # the cuDNN release's own folder carries a `v` and must not be read as one.
+    # Only the major has to agree: a 13.3 build serves a 13.0 toolkit. A layout
+    # naming no build at all, an extracted zip among them, has nothing to
+    # disagree with and is left alone.
+    param([Parameter(Mandatory)][IO.FileInfo]$File, [version]$Toolkit)
+
+    if (-not $Toolkit) { return $true }
+
+    $named = $false
+    foreach ($part in ($File.Directory.FullName -split '[\\/]')) {
+        if ($part -notmatch '^\d+\.\d+$') { continue }
+
+        $named = $true
+        if (([version]$part).Major -eq $Toolkit.Major) { return $true }
+    }
+
+    return -not $named
+}
+
 if (-not $DryRun) {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -117,19 +167,38 @@ if (-not (Test-Path $CUDNN_PATH)) {
     throw "cuDNN not found at '$CUDNN_PATH'. Pass -CUDNN_PATH pointing at your cuDNN folder (installer dir or extracted zip), or copy its DLLs into $cudaBin."
 }
 
-$loader = Get-ChildItem -Path $CUDNN_PATH -Recurse -Filter 'cudnn64_*.dll' -ErrorAction SilentlyContinue |
-    Sort-Object FullName | Select-Object -Last 1
-if (-not $loader) {
+$candidates = @(Get-ChildItem -Path $CUDNN_PATH -Recurse -Filter 'cudnn64_*.dll' -ErrorAction SilentlyContinue)
+if (-not $candidates) {
     throw "No cuDNN DLLs (cudnn64_*.dll) found under '$CUDNN_PATH'. Install cuDNN, or pass -CUDNN_PATH pointing at the extracted zip."
 }
 
+# The toolkit names its own version in its folder (`...\CUDA\v13.0`), which is
+# what a cuDNN build is ranked against.
+$toolkit = ConvertTo-Version (Split-Path $CUDA_PATH -Leaf)
+
+# Sorting the paths as text ranked v9.9 above both v9.10 and v9.23, so the
+# re-run this script asks for after an upgrade would have relinked the older
+# one and said nothing. A build for another CUDA major ranks below one for this
+# toolkit rather than being refused, so a machine holding only that still gets
+# told what it has.
+$loader = $candidates |
+    Sort-Object `
+        @{ Expression = { Test-BuiltForCuda -File $_ -Toolkit $toolkit } }, `
+        @{ Expression = { Get-CudnnVersion -File $_ } } |
+    Select-Object -Last 1
+
 $srcDir = $loader.Directory.FullName
+$version = Get-CudnnVersion -File $loader
+
+if (-not (Test-BuiltForCuda -File $loader -Toolkit $toolkit)) {
+    Write-Warning "cuDNN at '$srcDir' names no CUDA $($toolkit.Major) build; linking it anyway."
+}
 if ($srcDir -eq $cudaBin) {
     Write-Host "cuDNN source is the CUDA bin itself; nothing to do."
     return
 }
 
-Write-Host "cuDNN source: $srcDir"
+Write-Host "cuDNN source: $srcDir (cuDNN $version)"
 Write-Host "CUDA target:  $cudaBin"
 if ($DryRun) { Write-Host 'Mode:         DryRun (nothing will change)' }
 if ($LinkAll) { Write-Host 'Mode:         LinkAll (non-core files linked too -- may break torch)' }
