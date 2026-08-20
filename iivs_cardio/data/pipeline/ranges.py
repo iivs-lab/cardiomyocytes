@@ -794,7 +794,7 @@ class RangeDocument:
             if self._still_describes(document, sequence):
                 yield part, sequence
 
-    def to_range(self) -> DatasetRange | None:
+    def to_range(self, *, strict: bool = True) -> DatasetRange | None:
         """Fold every part on disk into one range for the dataset.
 
         Only the parts of sequences the source still holds, and only those a run
@@ -810,6 +810,12 @@ class RangeDocument:
         that disagrees would be sorted under one name and counted under
         another, which no number in the finished document would show.
 
+        Args:
+            strict: Whether a part that cannot be read stops the fold. `False`
+                passes over it, which leaves its sequence out of the range and
+                so among the coverage's `skipped`, where a retry will find it.
+                Defaults to `True`.
+
         Returns:
             The folded range, or `None` when no part is there. A run whose
             sequences all failed has nothing to take bounds from, and that is
@@ -817,12 +823,13 @@ class RangeDocument:
             rather than not being written at all.
 
         Raises:
-            ValueError: If one of the parts cannot be read, or one is filed
-                under a sequence other than the one it holds. A part that
-                cannot be read is named, since the folder holds one file per
-                sequence and only the name says which to go and look at.
+            ValueError: Under `strict`, if one of the parts cannot be read, or
+                one is filed under a sequence other than the one it holds. A
+                part that cannot be read is named, since the folder holds one
+                file per sequence and only the name says which to go and look
+                at.
         """
-        folded = tuple(sequence for _, sequence in self._read_valid(strict=True))
+        folded = tuple(sequence for _, sequence in self._read_valid(strict=strict))
         if not folded:
             return None
 
@@ -853,22 +860,26 @@ class RangeDocument:
 
         return Coverage(self.found, selected, covered, reused, skipped, unselected)
 
-    def save(self) -> Path:
+    def save(self, *, strict: bool = True) -> Path:
         """Fold the parts and write the document, coverage included.
 
         What was folded is remembered once the file is on disk and not before,
         so a write that failed leaves this branch with nothing to report rather
         than a line about a document that is not there.
 
+        Args:
+            strict: Whether a part that cannot be read stops the fold, as for
+                `to_range`. Defaults to `True`.
+
         Returns:
             The path actually written, extension included.
 
         Raises:
-            ValueError: If one of the parts cannot be read.
+            ValueError: Under `strict`, if one of the parts cannot be read.
             FileExistsError: If the document is already there and this one was
                 not told it may replace it.
         """
-        dataset = self.to_range()
+        dataset = self.to_range(strict=strict)
 
         written = save_range_document(
             self.path,
@@ -1018,6 +1029,13 @@ class RangeDocument:
         for and names the rest, where refusing to write leaves the healthy
         results on disk with nothing to read them by.
 
+        A part that cannot be read is the one thing that could take the whole
+        document with it, since the fold refuses such a part rather than
+        passing it over. It is written from what does read instead, which
+        leaves that sequence out of the range and so among the coverage's
+        `skipped`, where a retry will find it, and the refusal is raised once
+        the document is on disk rather than instead of it.
+
         Parts of sequences the source has lost go afterwards where the policy
         says so. The fold passes over them either way, so removing them is
         tidying rather than part of the answer, and one that cannot be removed
@@ -1025,8 +1043,16 @@ class RangeDocument:
 
         The failure itself is not this branch's to report. It reaches the
         driver, which is what decides the run's verdict.
+
+        Raises:
+            ValueError: If one of the parts cannot be read, after the document
+                folded from the rest has been written.
         """
-        self.save()
+        try:
+            self.save()
+        except ValueError:
+            self.save(strict=False)
+            raise
 
         if self.if_unsourced == "delete":
             self.drop_unsourced()

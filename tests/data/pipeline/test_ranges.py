@@ -1004,6 +1004,30 @@ def test_an_unreadable_part_says_which_one_it_was(tmp_path):
         document.to_range()
 
 
+def test_one_unreadable_part_does_not_take_the_whole_document(tmp_path):
+    # The sequences that finished are on disk, and the document is the only
+    # thing that folds them, states their bounds, and says what they cover.
+    # Refusing to write it over one part leaves the rest with nothing to read
+    # them by, so it is written from what does read and the refusal follows.
+    document = RangeDocument(
+        tmp_path / "range", contents=_contents("a", "b", "c"), source="p"
+    )
+
+    document.__enter__()
+    _scan(_meter(tmp_path, "a"), (0.0, 1.0))
+    _scan(_meter(tmp_path, "b"), (2.0, 3.0))
+    _scan(_meter(tmp_path, "c"), (4.0, 5.0))
+    (document.parts_root / "b.json").write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"unreadable part 'b'"):
+        document.__exit__(None, None, None)
+
+    saved = _saved(tmp_path)
+    assert saved["coverage"]["covered"] == 2
+    assert saved["coverage"]["skipped"] == ["b"]
+    assert (saved["dataset"]["min_value"], saved["dataset"]["max_value"]) == (0.0, 5.0)
+
+
 def test_a_part_holding_a_backwards_range_is_named_too(tmp_path):
     # Malformed is not only unparseable: a part whose bounds are the wrong way
     # round parses cleanly and is refused a layer later, and the name has to
