@@ -213,10 +213,13 @@ class OpenCVEstimator(OpticalFlowEstimator):
     # ----------------------------- cpu (numpy) ----------------------------- #
 
     def _push_cpu(self, frame: Tensor) -> Tensor | None:
-        prev, self._prev_frame = self._prev_frame, frame
+        # Copied, as the CUDA path copies into a `GpuMat` of its own: a caller
+        # refilling one buffer would otherwise overwrite the retained frame,
+        # and a frame taken from a chunk is a view that pins the whole batch.
+        prev, self._prev_frame = self._prev_frame, frame.clone()
         if prev is None:
             return None
-        return self._calc_cpu(prev, frame)
+        return self._calc_cpu(prev, self._prev_frame)
 
     def _calc_cpu(self, prev: Tensor, curr: Tensor) -> Tensor:
         prev_np: NDArray[np.uint8] = prev.contiguous().numpy()

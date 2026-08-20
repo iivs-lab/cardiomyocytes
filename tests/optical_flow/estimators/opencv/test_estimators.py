@@ -108,6 +108,34 @@ def test_calc_is_a_stateless_one_shot(flow_cls):
 
 
 @pytest.mark.parametrize("flow_cls", CPU_METHODS)
+def test_push_does_not_alias_the_callers_frame(flow_cls):
+    # Streaming into one reusable buffer is the ordinary shape of frame IO, and
+    # a retained reference makes the next read overwrite the retained frame:
+    # `prev` and `curr` become one picture and the motion goes silently to zero.
+    of = flow_cls().build("cpu")
+    first, second = _frames()
+    buffer = torch.zeros_like(first)
+
+    buffer.copy_(first)
+    of.push(buffer)
+    buffer.copy_(second)
+
+    flow = of.push(buffer)
+    assert flow is not None
+    assert flow.abs().max().item() > 0.5  # zero flow is what aliasing produces
+
+
+def test_push_chunk_retains_one_frame_rather_than_the_chunk():
+    # `for frame in frames` yields views, so retaining the last one keeps the
+    # whole batch alive where the contract is one frame however long the chunk.
+    of = FarnebackConfig().build("cpu")
+    of.push_chunk(_sequence(8))
+
+    held = of._prev_frame  # noqa: SLF001
+    assert held.untyped_storage().nbytes() == held.numel() * held.element_size()
+
+
+@pytest.mark.parametrize("flow_cls", CPU_METHODS)
 def test_push_result_survives_the_next_push(flow_cls):
     # The returned flow must own its memory: a later push (which may reuse an
     # internal output buffer) must not mutate an already-returned flow.
