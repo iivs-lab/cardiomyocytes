@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 import numpy as np
+
+_SETUP_SCRIPT = "scripts/env/setup-opencv-cuda.ps1"
 
 
 def _print_torch_gpus() -> bool:
@@ -36,10 +36,9 @@ def _print_opencv_gpus() -> bool:
 
     for i in range(device_count):
         info = cv2.cuda.DeviceInfo(i)
+        capability = f"{info.majorVersion()}.{info.minorVersion()}"
         vram = info.totalMemory() / (1024**3)
-        print(
-            f"   GPU {i}: cc {info.majorVersion()}.{info.minorVersion()}, {vram:.2f} GB"
-        )
+        print(f"   GPU {i}: cc {capability}, {vram:.2f} GB")
 
     return True
 
@@ -79,8 +78,8 @@ def _report_conv_fault() -> None:
     print("      Works with cuDNN disabled, so cuDNN itself is the cause. Usually a")
     print("      foreign cuDNN shadowing the one torch bundles in torch/lib. On")
     print("      Windows the OpenCV setup is the usual source -- preview and repair:")
-    print("        scripts/env/setup-opencv-cuda.ps1 -DryRun")
-    print("        scripts/env/setup-opencv-cuda.ps1     (as Administrator)")
+    print(f"        {_SETUP_SCRIPT} -DryRun")
+    print(f"        {_SETUP_SCRIPT}     (as Administrator)")
 
 
 def check_pytorch() -> bool:
@@ -111,8 +110,8 @@ def check_pytorch() -> bool:
         print(f"   CUDA matmul matches CPU ... {'PASS' if gpu_ok else 'FAIL'}")
         ok = ok and gpu_ok
 
-    # CPU baseline: a 3x3 ramp convolved with a 2x2 box sums each 2x2 window --
-    # [[0,1,2],[3,4,5],[6,7,8]] -> [[0+1+3+4, 1+2+4+5], [3+4+6+7, 4+5+7+8]].
+    # CPU baseline: a 3x3 ramp convolved with a 2x2 box sums each 2x2 window, so
+    # [[0,1,2],[3,4,5],[6,7,8]] gives [[0+1+3+4, 1+2+4+5], [3+4+6+7, 4+5+7+8]].
     image = torch.arange(9, dtype=torch.float32).reshape(1, 1, 3, 3)
     box = torch.ones(1, 1, 2, 2)
     cpu_conv = torch.nn.functional.conv2d(image, box)[0, 0]
@@ -121,8 +120,8 @@ def check_pytorch() -> bool:
     ok = ok and conv_ok
 
     if cuda:
-        # Convolution is the only op checked here that goes through cuDNN --
-        # matmul and TorchVision's NMS do not -- so it is what catches a cuDNN
+        # Convolution is the only op checked here that goes through cuDNN.
+        # matmul and TorchVision's NMS do not, so it is what catches a cuDNN
         # that is broken or shadowed by a foreign build.
         try:
             gpu_conv = torch.nn.functional.conv2d(image.cuda(), box.cuda()).cpu()[0, 0]
@@ -174,9 +173,7 @@ def check_opencv() -> bool:
         import cv2
     except (ImportError, OSError) as exc:
         print(f"[!] OpenCV import failed: {exc}")
-        print(
-            "    On Windows, run scripts/env/setup-opencv-cuda.ps1 as Administrator first."
-        )
+        print(f"    On Windows, run {_SETUP_SCRIPT} as Administrator first.")
         return False
 
     # A plain CPU OpenCV can expose an empty `cv2.cuda` namespace, so read the
@@ -186,10 +183,9 @@ def check_opencv() -> bool:
     ]
     built_with_cuda = bool(cuda_lines) and "YES" in cuda_lines[0]
     device_count = cv2.cuda.getCudaEnabledDeviceCount() if hasattr(cv2, "cuda") else 0
-    print(
-        f"OpenCV {cv2.__version__} - built with CUDA: "
-        f"{'Yes' if built_with_cuda else 'No'}, devices visible: {device_count}"
-    )
+    built = "Yes" if built_with_cuda else "No"
+    linkage = f"built with CUDA: {built}, devices visible: {device_count}"
+    print(f"OpenCV {cv2.__version__} - {linkage}")
 
     # CPU baseline: BGR->GRAY weights blue at 0.114, so pure blue (255 in the B
     # channel) maps to round(255 * 0.114) == 29.
@@ -219,25 +215,30 @@ def check_opencv() -> bool:
     return ok
 
 
-print("=" * 60)
-print("CUDA compute environment check")
-print("=" * 60)
+def main() -> None:
+    print("=" * 60)
+    print("CUDA compute environment check")
+    print("=" * 60)
 
-print("\n[ GPU hardware ]")
-print_gpu_hardware()
+    print("\n[ GPU hardware ]")
+    print_gpu_hardware()
 
-results = {}
-for name, check in (
-    ("PyTorch", check_pytorch),
-    ("TorchVision", check_torchvision),
-    ("OpenCV", check_opencv),
-):
-    print(f"\n[ {name} ]")
-    results[name] = check()
+    results = {}
+    for name, check in (
+        ("PyTorch", check_pytorch),
+        ("TorchVision", check_torchvision),
+        ("OpenCV", check_opencv),
+    ):
+        print(f"\n[ {name} ]")
+        results[name] = check()
 
-print("\n" + "=" * 60)
-for name, ok in results.items():
-    print(f"  {name:<12} {'OK' if ok else 'FAIL'}")
-print("=" * 60)
+    print("\n" + "=" * 60)
+    for name, ok in results.items():
+        print(f"  {name:<12} {'OK' if ok else 'FAIL'}")
+    print("=" * 60)
 
-raise SystemExit(0 if all(results.values()) else 1)
+    raise SystemExit(0 if all(results.values()) else 1)
+
+
+if __name__ == "__main__":
+    main()
