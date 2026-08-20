@@ -318,19 +318,6 @@ class OpenCVEstimator(OpticalFlowEstimator):
         """The cv2 algorithm this estimator streams through."""
         return self._backend.algorithm
 
-    def validate_device(self, frame: Tensor) -> None:
-        """Raise if `frame` is not on this estimator's device.
-
-        Raises:
-            ValueError: If `frame` sits on another device. The algorithm names
-                itself in the refusal, the estimator being one class for all of
-                them.
-        """
-        if frame.device != self.device.as_torch:
-            name = type(self.algorithm).__name__
-            msg = f"{name} expects a {self.device} tensor, got one on {frame.device}"
-            raise ValueError(msg)
-
     @override
     def reset(self) -> None:
         """Forget the retained frame, restarting the sequence."""
@@ -340,7 +327,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
     @override
     def push(self, frame: FrameType) -> FlowType | None:
         """Return the flow from the retained frame, or `None` on the first frame."""
-        self.validate_device(frame)
+        self._validate_device(frame)
 
         return self._backend.push(frame)
 
@@ -352,7 +339,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
         Each flow is written into the batch as it comes, rather than collected
         and stacked afterwards, which would hold the whole chunk twice over.
         """
-        self.validate_device(frames)
+        self._validate_device(frames)
 
         count = len(frames) if self._backend.retained else max(len(frames) - 1, 0)
         flows = self._flow_batch(count, frames)
@@ -370,8 +357,8 @@ class OpenCVEstimator(OpticalFlowEstimator):
     @override
     def calc(self, prev: FrameType, curr: FrameType) -> FlowType:
         """Compute the flow `prev -> curr` in one shot, leaving no retained state."""
-        self.validate_device(prev)
-        self.validate_device(curr)
+        self._validate_device(prev)
+        self._validate_device(curr)
 
         return self._backend.calc(prev, curr)
 
@@ -379,14 +366,27 @@ class OpenCVEstimator(OpticalFlowEstimator):
     @override
     def calc_batch(self, prev: BatchFrameType, curr: BatchFrameType) -> BatchFlowType:
         """Compute the flow for each independent pair `prev[i] -> curr[i]`, stacked."""
-        self.validate_device(prev)
-        self.validate_device(curr)
+        self._validate_device(prev)
+        self._validate_device(curr)
 
         flows = self._flow_batch(len(prev), prev)
         for index, (p, c) in enumerate(zip(prev, curr, strict=True)):
             self._backend.calc(p, c, out=flows[index])
 
         return flows
+
+    def _validate_device(self, frame: Tensor) -> None:
+        """Raise if `frame` is not on this estimator's device.
+
+        Raises:
+            ValueError: If `frame` sits on another device. The algorithm names
+                itself in the refusal, the estimator being one class for all of
+                them.
+        """
+        if frame.device != self.device.as_torch:
+            name = type(self.algorithm).__name__
+            msg = f"{name} expects a {self.device} tensor, got one on {frame.device}"
+            raise ValueError(msg)
 
     def _flow_batch(self, count: int, frames: Tensor) -> Tensor:
         """An uninitialized `(count, 2, H, W)` float32 batch beside `frames`.
