@@ -42,16 +42,34 @@ class OpenCVAlgorithm:
 
     A CUDA algorithm is allocated on whichever device was current when cv2 was
     asked for it, and nothing on the object says which that was. Pairing the two
-    is what lets whoever holds one know where it runs, so an algorithm made for
-    one device cannot be presented as another's.
+    is what lets whoever holds one know where it runs, and the pair is checked
+    rather than taken on trust, so an algorithm cannot be presented as another
+    device's.
 
     Attributes:
         algorithm: The cv2 algorithm, CPU or CUDA.
         device: The device it was created on.
+
+    Raises:
+        ValueError: If the algorithm's backend is not `device`'s.
     """
 
     algorithm: DenseAlgorithm
     device: Device
+
+    def __post_init__(self) -> None:
+        """Refuse a pairing cv2 could not have produced.
+
+        Which backend an algorithm came from is the one thing it does say,
+        through its type, where the device it was made on is not recoverable
+        from it at all.
+        """
+        on_cuda = isinstance(self.algorithm, cv2.cuda.DenseOpticalFlow)
+        if on_cuda != self.device.is_cuda:
+            made = "cuda" if on_cuda else "cpu"
+            name = type(self.algorithm).__name__
+            msg = f"{name} was made for {made}, not for {self.device}"
+            raise ValueError(msg)
 
 
 class OpenCVConfig(EstimatorConfig, ABC):
@@ -144,6 +162,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
         if self.is_cuda:
             self._flow_buffer = GpuMat()
             self._frame_buffers = (GpuMat(), GpuMat())
+            self._one_shot_buffers = (GpuMat(), GpuMat())
             self._prev_slot = 0
         else:
             self._prev_frame: Tensor | None = None
@@ -163,7 +182,10 @@ class OpenCVEstimator(OpticalFlowEstimator):
 
     @override
     def reset(self) -> None:
-        """Forget the retained frame and CUDA buffers, restarting the sequence."""
+        """Forget the retained frame, restarting the sequence.
+
+        The output buffer stays, being scratch the next call sizes for itself.
+        """
         if self.is_cuda:
             self._frame_buffers = (GpuMat(), GpuMat())
             self._prev_slot = 0
@@ -241,15 +263,23 @@ class OpenCVEstimator(OpticalFlowEstimator):
         return self._calc_cuda_core(prev, curr)
 
     def _calc_cuda(self, prev: Tensor, curr: Tensor) -> Tensor:
+        # Buffers of its own, so a batch pays for two rather than two a pair and
+        # a one-shot leaves the stream's retained frame where it was.
         self.device.activate()
-        prev_cv = tensor_to_gpumat(prev)
-        curr_cv = tensor_to_gpumat(curr)
-        return self._calc_cuda_core(prev_cv, curr_cv)
+        prev_slot, curr_slot = self._one_shot_buffers
+        return self._calc_cuda_core(
+            tensor_to_gpumat(prev, out=prev_slot),
+            tensor_to_gpumat(curr, out=curr_slot),
+        )
 
     def _calc_cuda_core(self, prev: GpuMat, curr: GpuMat) -> Tensor:
         if self._flow_buffer.size() != prev.size():
             self._flow_buffer = GpuMat(prev.size(), cv2.CV_32FC2)
         algorithm = cast("cv2.cuda.DenseOpticalFlow", self.algorithm)
-        algorithm.calc(prev, curr, self._flow_buffer)
+        # Taken back rather than assumed written in place: cv2 returns the flow,
+        # and a call that resized would leave the buffer here holding the last.
+        self._flow_buffer = algorithm.calc(prev, curr, self._flow_buffer)
         flow = torch.as_tensor(gpumat_to_cupy(self._flow_buffer))
+        # `contiguous` after the permute is the copy that frees the caller from
+        # the buffer, which the next call writes over.
         return flow.permute(2, 0, 1).contiguous()

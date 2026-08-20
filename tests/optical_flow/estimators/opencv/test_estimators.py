@@ -11,6 +11,7 @@ from iivs_cardio.optical_flow.estimators import (
     DualTVL1Config,
     EstimatorConfig,
     FarnebackConfig,
+    OpenCVAlgorithm,
     OpenCVEstimator,
 )
 
@@ -180,6 +181,31 @@ def test_push_rejects_wrong_shape():
     bad = torch.zeros((3, 64, 64), dtype=torch.uint8)  # not (H, W)
     with pytest.raises(Exception, match=r"\[3,64,64\]"):
         of.push(bad)
+
+
+@pytest.mark.parametrize(
+    ("algorithm", "device", "made"),
+    (
+        pytest.param(
+            cv2.FarnebackOpticalFlow.create(), "cuda", "cpu", id="cpu-as-cuda"
+        ),
+        pytest.param(
+            cv2.optflow.createOptFlow_DeepFlow(), "cuda", "cpu", id="deepflow"
+        ),
+    ),
+)
+def test_an_algorithm_cannot_be_paired_with_another_device(algorithm, device, made):
+    # `build` sets the two together and nothing else should be trusted to: a
+    # CPU algorithm labelled CUDA would be handed CUDA tensors and read them as
+    # host memory, which is the one mistake the label exists to prevent.
+    with pytest.raises(ValueError, match=f"made for {made}"):
+        OpenCVAlgorithm(algorithm, Device(device))
+
+
+@requires_cuda
+def test_a_cuda_algorithm_cannot_be_paired_with_the_cpu():
+    with pytest.raises(ValueError, match="made for cuda"):
+        OpenCVAlgorithm(cv2.cuda.FarnebackOpticalFlow.create(), Device("cpu"))
 
 
 def test_deepflow_rejects_cuda():
