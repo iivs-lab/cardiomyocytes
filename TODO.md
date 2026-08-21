@@ -906,6 +906,17 @@ source.root=$OUT/filtered       filter=identity                (1)이 남긴 캐
 
 ## 열린 것
 
+- **`DualTVL1Config`가 장치에 따라 조용히 무시되는 필드를 넷 든다.**
+  `inner_iterations`·`outer_iterations`·`median_filtering`은 CUDA에서, `iterations`는 CPU에서
+  읽히지 않는다. `iterations=1000`으로 스윕을 돌렸는데 CPU였다면 아무 일도 일어나지 않고
+  로그도 말하지 않는다.
+
+  **말하는 것은 config가 아니라 드라이버다.** 한 번 config가 직접 `logging.getLogger(__name__)`로
+  경고하도록 짰다가 물렸다 — §관측이 정한 것은 로거 이름이 **스테이지**이고 그 이름을 잡이
+  준다는 것이며, 얼어붙은 값 객체는 자기가 어느 실행에 속하는지 모른다. `_algorithm(device)`가
+  아니라 `run_estimator.py`가 config를 instantiate하는 자리에 붙일 것. 파라미터 탐색을
+  시작하기 전에 닫을 것.
+
 - **캐시 폴더는 자기가 어디서부터 시작하는지 말하지 않는다.** `KoalaFrameWriter`는 도착한
   첫 프레임부터 0으로 번호를 매기므로, 시간 방향으로 줄어드는 단마다 원본과의 어긋남이 하나씩
   쌓인다. 6프레임 시퀀스를 실제로 세 단에 통과시킨 결과:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import weakref
 from typing import TYPE_CHECKING, override
 
@@ -262,49 +261,6 @@ def test_supported_devices():
     # no CUDA DeepFlow is a fact about DeepFlow.
     assert frozenset({"cpu", "cuda"}) == FarnebackConfig.SUPPORTED_DEVICES
     assert frozenset({"cpu"}) == DeepFlowConfig.SUPPORTED_DEVICES
-
-
-def test_tvl1_says_which_settings_the_device_will_not_read(caplog):
-    # cv2 takes `iterations` only in its CUDA build and reports nothing about a
-    # setting it ignored, so a CPU sweep over it would run to the end and find
-    # no difference. Named rather than refused: a config carries both devices'
-    # settings, so having them is not the same as having meant them.
-    with caplog.at_level(logging.WARNING):
-        DualTVL1Config(iterations=1000).build("cpu")
-
-    assert len(caplog.records) == 1
-    message = caplog.records[0].getMessage()
-    assert "iterations" in message
-    assert "cuda" in message  # where it would have been read
-
-
-@pytest.mark.parametrize(
-    "config",
-    (
-        pytest.param(DualTVL1Config(), id="defaults"),
-        pytest.param(DualTVL1Config(inner_iterations=7), id="cpu-setting-on-cpu"),
-        pytest.param(DualTVL1Config(lambda_=0.1), id="setting-both-devices-read"),
-    ),
-)
-def test_tvl1_is_quiet_about_settings_the_device_does_read(caplog, config):
-    # Both sets sit at their defaults in every config, so warning about the
-    # untouched ones would fire on every build and say nothing.
-    with caplog.at_level(logging.WARNING):
-        config.build("cpu")
-
-    assert caplog.records == []
-
-
-@requires_cuda
-def test_tvl1_says_so_on_cuda_too(caplog):
-    with caplog.at_level(logging.WARNING):
-        DualTVL1Config(median_filtering=3, outer_iterations=9).build("cuda")
-
-    assert len(caplog.records) == 1
-    message = caplog.records[0].getMessage()
-    assert "median_filtering" in message
-    assert "outer_iterations" in message
-    assert "inner_iterations" not in message  # untouched, so nothing was meant
 
 
 def test_custom_params_reach_the_algorithm():
