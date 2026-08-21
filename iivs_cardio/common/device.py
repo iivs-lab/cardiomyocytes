@@ -100,9 +100,11 @@ class Device:
         Raises:
             ValueError: If `spec` is malformed, or its kind is not in `supported`.
         """
-        kind, index = (
-            (spec.kind, spec.index) if isinstance(spec, Device) else _parse(spec)
-        )
+
+        if isinstance(spec, Device):
+            kind, index = spec.kind, spec.index
+        else:
+            kind, index = _parse(spec)
 
         if kind not in supported:
             allowed = ", ".join(sorted(supported))
