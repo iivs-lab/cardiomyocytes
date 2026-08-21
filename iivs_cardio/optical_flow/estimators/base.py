@@ -79,9 +79,9 @@ class EstimatorConfig(ABC):
     Separate from `OpticalFlowEstimator` so a config, a CLI, or a process-pool
     recipe carries the settings without a live estimator, which cannot cross a
     process boundary while it holds a library object that does not pickle.
-    `build` reconstructs one on the target device inside the worker. Mirrors
-    `filtering.kernel.KernelConfig`; `device` is the one addition, since an
-    estimator is device-bound where a kernel is not.
+    `build` reconstructs one inside the worker, and takes the device because an
+    estimator is bound to one: a cv2 CUDA algorithm is allocated on whichever
+    device was current when it was made.
 
     Which devices an algorithm runs on is declared here rather than on the
     estimator: an algorithm with no implementation for one is a fact about the
