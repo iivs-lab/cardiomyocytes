@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
     from iivs_cardio.common.device import DeviceLike
 
-DenseAlgorithm = cv2.DenseOpticalFlow | cv2.cuda.DenseOpticalFlow
+OpenCVAlgorithm = cv2.DenseOpticalFlow | cv2.cuda.DenseOpticalFlow
 
 FrameType = UInt8[Tensor, "H W"]
 FlowType = Float32[Tensor, "2 H W"]
@@ -49,7 +49,7 @@ class OpenCVConfig(EstimatorConfig, ABC):
     """
 
     @abstractmethod
-    def _algorithm(self, device: Device) -> DenseAlgorithm:
+    def _algorithm(self, device: Device) -> OpenCVAlgorithm:
         """Make the cv2 algorithm these settings describe, for `device`.
 
         Called with `device` resolved and already current, so an implementation
@@ -119,7 +119,7 @@ class Backend(ABC):
     # Declared, not abstract: an attribute an `__init__` sets does not clear an
     # `abstractmethod`. A subclass re-declares `algorithm` as the concrete cv2
     # type it calls, so a call needs no second word on which of the two it is.
-    algorithm: DenseAlgorithm
+    algorithm: OpenCVAlgorithm
     device: Device
 
     @property
@@ -314,7 +314,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
         self._backend = backend
 
     @property
-    def algorithm(self) -> DenseAlgorithm:
+    def algorithm(self) -> OpenCVAlgorithm:
         """The cv2 algorithm this estimator streams through."""
         return self._backend.algorithm
 

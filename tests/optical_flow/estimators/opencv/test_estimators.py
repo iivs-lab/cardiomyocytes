@@ -19,7 +19,7 @@ from iivs_cardio.optical_flow.estimators import (
 )
 
 if TYPE_CHECKING:
-    from iivs_cardio.optical_flow.estimators.opencv.base import DenseAlgorithm
+    from iivs_cardio.optical_flow.estimators.opencv.estimator import OpenCVAlgorithm
 
 # All three OpenCV methods run on CPU, so the streaming contract is tested
 # GPU-free; the CUDA path is gated on an actual device below. Each is named by
@@ -201,7 +201,7 @@ class _MisreadingConfig(OpenCVConfig):
         self._factory = factory
 
     @override
-    def _algorithm(self, device: Device) -> DenseAlgorithm:
+    def _algorithm(self, device: Device) -> OpenCVAlgorithm:
         return self._factory()
 
 

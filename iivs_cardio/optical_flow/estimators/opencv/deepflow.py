@@ -8,7 +8,10 @@ from typing import ClassVar, override
 import cv2
 
 from iivs_cardio.common.device import Device, DeviceKind
-from iivs_cardio.optical_flow.estimators.opencv.base import DenseAlgorithm, OpenCVConfig
+from iivs_cardio.optical_flow.estimators.opencv.estimator import (
+    OpenCVAlgorithm,
+    OpenCVConfig,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,7 +28,7 @@ class DeepFlowConfig(OpenCVConfig):
     SUPPORTED_DEVICES: ClassVar[frozenset[DeviceKind]] = frozenset({"cpu"})
 
     @override
-    def _algorithm(self, device: Device) -> DenseAlgorithm:
+    def _algorithm(self, device: Device) -> OpenCVAlgorithm:
         """Make the DeepFlow algorithm, which takes no settings.
 
         Raises:

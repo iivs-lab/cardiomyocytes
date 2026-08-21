@@ -7,7 +7,10 @@ from typing import TYPE_CHECKING, override
 
 import cv2
 
-from iivs_cardio.optical_flow.estimators.opencv.base import DenseAlgorithm, OpenCVConfig
+from iivs_cardio.optical_flow.estimators.opencv.estimator import (
+    OpenCVAlgorithm,
+    OpenCVConfig,
+)
 
 if TYPE_CHECKING:
     from iivs_cardio.common.device import Device
@@ -50,7 +53,7 @@ class DualTVL1Config(OpenCVConfig):
     iterations: int = 300
 
     @override
-    def _algorithm(self, device: Device) -> DenseAlgorithm:
+    def _algorithm(self, device: Device) -> OpenCVAlgorithm:
         if device.is_cuda:
             return cv2.cuda.OpticalFlowDual_TVL1.create(
                 tau=self.tau,

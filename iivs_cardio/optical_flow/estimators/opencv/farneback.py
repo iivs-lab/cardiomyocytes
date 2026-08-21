@@ -7,7 +7,10 @@ from typing import TYPE_CHECKING, override
 
 import cv2
 
-from iivs_cardio.optical_flow.estimators.opencv.base import DenseAlgorithm, OpenCVConfig
+from iivs_cardio.optical_flow.estimators.opencv.estimator import (
+    OpenCVAlgorithm,
+    OpenCVConfig,
+)
 
 if TYPE_CHECKING:
     from iivs_cardio.common.device import Device
@@ -40,7 +43,7 @@ class FarnebackConfig(OpenCVConfig):
     flags: int = 0
 
     @override
-    def _algorithm(self, device: Device) -> DenseAlgorithm:
+    def _algorithm(self, device: Device) -> OpenCVAlgorithm:
         factory = cv2.FarnebackOpticalFlow
         if device.is_cuda:
             factory = cv2.cuda.FarnebackOpticalFlow
