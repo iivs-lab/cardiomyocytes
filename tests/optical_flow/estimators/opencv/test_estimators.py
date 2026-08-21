@@ -17,6 +17,7 @@ from iivs_cardio.optical_flow.estimators import (
     OpenCVConfig,
     OpenCVEstimator,
 )
+from iivs_cardio.optical_flow.estimators.opencv.estimator import CUDABackend
 
 if TYPE_CHECKING:
     from iivs_cardio.optical_flow.estimators.opencv.estimator import OpenCVAlgorithm
@@ -254,6 +255,17 @@ def test_deepflow_refuses_cuda_below_the_policy_too():
     # who would otherwise hold a CPU algorithm paired with a CUDA device.
     with pytest.raises(ValueError, match="DeepFlow"):
         DeepFlowConfig()._algorithm(Device("cuda"))  # noqa: SLF001
+
+
+@requires_cuda
+def test_a_cuda_backend_refuses_a_device_that_is_not_cuda():
+    # `CPUBackend` takes no device and so cannot be handed a wrong one; this one
+    # can. Nothing would have said so: `activate` binds nothing for a `cpu`
+    # device, leaving cv2 and CuPy on whichever GPU was already current.
+    algorithm = cv2.cuda.FarnebackOpticalFlow.create()
+
+    with pytest.raises(ValueError, match="expected one of cuda"):
+        CUDABackend(algorithm, Device("cpu"))
 
 
 def test_supported_devices():

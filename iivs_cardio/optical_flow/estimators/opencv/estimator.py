@@ -223,16 +223,23 @@ class CUDABackend(Backend):
 
     Attributes:
         algorithm: The cv2 algorithm to call.
-        device: The device it and the buffers live on.
+        device: The device it and the buffers live on, which has to be a CUDA
+            one and is refused otherwise.
         retained: As `Backend`. Held as a flag of its own rather than read off
             an empty buffer, so `reset` keeps the buffers it has.
+
+    Raises:
+        ValueError: If `device` is not a CUDA device.
     """
 
     algorithm: cv2.cuda.DenseOpticalFlow
 
     def __init__(self, algorithm: cv2.cuda.DenseOpticalFlow, device: Device) -> None:
         self.algorithm = algorithm
-        self.device = device
+        # Where `CPUBackend` takes no device and so cannot be given a wrong one,
+        # this one can: `activate` binds nothing for a `cpu` device, leaving cv2
+        # and CuPy on whichever GPU was already current.
+        self.device = Device.resolve(device, frozenset({"cuda"}))
         self._flow_buffer = GpuMat()
         self._calc_buffers = (GpuMat(), GpuMat())
         self._push_buffers = (GpuMat(), GpuMat())
