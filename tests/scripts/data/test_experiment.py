@@ -5,9 +5,10 @@ from pathlib import Path
 import pytest
 from hydra import compose, initialize_config_dir
 from hydra.core.hydra_config import HydraConfig
+from hydra.types import RunMode
 from omegaconf import OmegaConf
 
-from scripts._common.hydra import sweep_parameters
+from scripts._common.hydra import ensure_sweep_runs
 from scripts.data._filtering import parse_filter_config
 from scripts.data.preprocess import CONFIG_NAME, CONFIG_PATH
 
@@ -64,24 +65,45 @@ def test_an_experiment_leaves_the_rest_of_the_config_alone(name):
     assert config.target.ranges.save is True
 
 
-@pytest.mark.parametrize("name", EXPERIMENTS)
-def test_sweep_parameters_are_what_an_experiment_named(name):
-    config = _composed(name)
-    HydraConfig.instance().set_config(config)
+def _entered(name: str | None, mode: RunMode):
+    """Put a composed config in place as a run of `mode` would leave it."""
+    overrides = ["run_root=/runs", "source.root=/data"]
+    if name is not None:
+        overrides.insert(0, f"+experiment={name}")
 
-    assert sweep_parameters() == ("filter",)
-
-
-def test_sweep_parameters_are_empty_without_one():
     with initialize_config_dir(config_dir=CONFIG_PATH, version_base=None):
         config = compose(
-            config_name=CONFIG_NAME,
-            overrides=["run_root=/runs", "source.root=/data"],
-            return_hydra_config=True,
+            config_name=CONFIG_NAME, overrides=overrides, return_hydra_config=True
         )
+
+    config.hydra.mode = mode
     HydraConfig.instance().set_config(config)
 
-    assert sweep_parameters() == ()
+
+@pytest.mark.parametrize("name", EXPERIMENTS)
+def test_an_experiment_without_multirun_is_refused(name):
+    # The jobs are named and nobody runs them: the run takes the defaults,
+    # sweeps nothing, and reports success, which is a whole run to notice.
+    _entered(name, RunMode.RUN)
+
+    with pytest.raises(ValueError, match=r"sweeps filter.*only --multirun runs"):
+        ensure_sweep_runs()
+
+
+@pytest.mark.parametrize("name", EXPERIMENTS)
+def test_an_experiment_under_multirun_passes(name):
+    _entered(name, RunMode.MULTIRUN)
+
+    ensure_sweep_runs()
+
+
+@pytest.mark.parametrize("mode", (RunMode.RUN, RunMode.MULTIRUN))
+def test_a_run_with_no_experiment_passes(mode):
+    # A `--multirun` over something else is not an experiment, and a lone run
+    # of the defaults is the ordinary case.
+    _entered(None, mode)
+
+    ensure_sweep_runs()
 
 
 def test_every_experiment_declares_the_global_package():

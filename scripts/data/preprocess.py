@@ -11,9 +11,9 @@ from scripts._common.compute import ComputeConfig, WorkerLogFolder, run_all
 from scripts._common.dataset import SequenceSelectConfig
 from scripts._common.hydra import (
     apply_schema,
+    ensure_sweep_runs,
     is_multirun,
     output_directory,
-    sweep_parameters,
 )
 from scripts.data._filtering import parse_filter_config
 from scripts.data._process import (
@@ -36,6 +36,8 @@ STAGE: Final = "preprocess"
 
 @hydra.main(version_base=None, config_path=CONFIG_PATH, config_name=CONFIG_NAME)
 def main(config: DictConfig) -> None:
+    ensure_sweep_runs()
+
     source_config = apply_schema(PreprocessSourceConfig, config.source)
     sequence_config = apply_schema(SequenceSelectConfig, config.select)
     kernel_config = parse_filter_config(config.get("filter"))
@@ -44,11 +46,6 @@ def main(config: DictConfig) -> None:
 
     if target_config.frames.save and is_multirun():
         msg = "cannot write frames in a sweep: run the winning config alone instead"
-        raise ValueError(msg)
-
-    if (parameters := sweep_parameters()) and not is_multirun():
-        named = ", ".join(parameters)
-        msg = f"an experiment sweeps {named}, which only --multirun runs"
         raise ValueError(msg)
 
     output_root = ensure_dir_exists(output_directory())

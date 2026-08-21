@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("apply_schema", "is_multirun", "output_directory", "sweep_parameters")
+__all__ = ("apply_schema", "ensure_sweep_runs", "is_multirun", "output_directory")
 
 from typing import TYPE_CHECKING, cast
 
@@ -49,15 +49,28 @@ def is_multirun() -> bool:
     return HydraConfig.get().mode is RunMode.MULTIRUN
 
 
-def sweep_parameters() -> tuple[str, ...]:
-    """The settings a composed sweep would vary, empty where none was composed.
-
-    An experiment names its jobs under `hydra.sweeper.params`, which the sweeper
-    reads and a lone run never looks at. Answering it is what lets a caller
-    refuse the one shape that fails silently: `+experiment=...` written without
-    `--multirun` runs once, on the defaults, saying nothing about the sweep it
-    was handed.
-    """
+def _sweep_parameters() -> tuple[str, ...]:
+    """The settings a composed sweep would vary, empty where none was composed."""
     params = HydraConfig.get().sweeper.get("params")
 
     return () if params is None else tuple(params)
+
+
+def ensure_sweep_runs() -> None:
+    """Raise where a sweep was composed that this run will not perform.
+
+    An experiment names its jobs under `hydra.sweeper.params`, which only the
+    sweeper reads. Written without `--multirun` it runs once on the defaults,
+    sweeping nothing and saying nothing, which is the one way of getting this
+    wrong that costs a whole run to notice. Asked off the invocation rather
+    than the configuration, so a script may call it before reading anything.
+
+    Raises:
+        ValueError: If an experiment named a sweep and this is a lone run.
+    """
+    if not (parameters := _sweep_parameters()) or is_multirun():
+        return
+
+    named = ", ".join(parameters)
+    msg = f"an experiment sweeps {named}, which only --multirun runs"
+    raise ValueError(msg)
