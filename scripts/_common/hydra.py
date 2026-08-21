@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("apply_schema", "is_multirun", "output_directory")
+__all__ = ("apply_schema", "is_multirun", "output_directory", "sweep_parameters")
 
 from typing import TYPE_CHECKING, cast
 
@@ -47,3 +47,17 @@ def is_multirun() -> bool:
     refuse the sweep rather than let the jobs race for it.
     """
     return HydraConfig.get().mode is RunMode.MULTIRUN
+
+
+def sweep_parameters() -> tuple[str, ...]:
+    """The settings a composed sweep would vary, empty where none was composed.
+
+    An experiment names its jobs under `hydra.sweeper.params`, which the sweeper
+    reads and a lone run never looks at. Answering it is what lets a caller
+    refuse the one shape that fails silently: `+experiment=...` written without
+    `--multirun` runs once, on the defaults, saying nothing about the sweep it
+    was handed.
+    """
+    params = HydraConfig.get().sweeper.get("params")
+
+    return () if params is None else tuple(params)

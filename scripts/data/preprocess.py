@@ -9,7 +9,12 @@ from kaparoo.filesystem import ensure_dir_exists
 
 from scripts._common.compute import ComputeConfig, WorkerLogFolder, run_all
 from scripts._common.dataset import SequenceSelectConfig
-from scripts._common.hydra import apply_schema, is_multirun, output_directory
+from scripts._common.hydra import (
+    apply_schema,
+    is_multirun,
+    output_directory,
+    sweep_parameters,
+)
 from scripts.data._filtering import parse_filter_config
 from scripts.data._process import (
     PreprocessSourceConfig,
@@ -39,6 +44,11 @@ def main(config: DictConfig) -> None:
 
     if target_config.frames.save and is_multirun():
         msg = "cannot write frames in a sweep: run the winning config alone instead"
+        raise ValueError(msg)
+
+    if (parameters := sweep_parameters()) and not is_multirun():
+        named = ", ".join(parameters)
+        msg = f"an experiment sweeps {named}, which only --multirun runs"
         raise ValueError(msg)
 
     output_root = ensure_dir_exists(output_directory())

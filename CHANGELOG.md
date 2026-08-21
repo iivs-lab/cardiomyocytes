@@ -10,6 +10,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `configs/experiment/`, where a sweep is named once rather than typed out per
+  invocation. `filters.yaml` holds every option of the filter group, so
+  `--multirun +experiment=filters` runs the search that was 470 characters of
+  comma-separated names before. An experiment is a `@package _global_` overlay
+  that fills no key of its own: it writes `hydra.sweeper.params` and leaves the
+  rest of the config standing, which is why it does not sit under the group it
+  varies -- a sweep can name two keys at once, and one that varied an estimator
+  and a cache would have no group folder to live in.
+- `sweep_parameters`, the settings a composed experiment would vary, and a
+  refusal in the preprocess script for the one shape that fails quietly:
+  `+experiment=...` written without `--multirun` runs once on the defaults,
+  sweeping nothing and saying nothing. The sweeper is what reads those params,
+  and a lone run never looks at them.
+
 - `Device`, a compute device as every library in this stack must agree to see
   it, with `DeviceLike = str | torch.device | Device` for what a caller may
   write. `Device.activate` points `cv2.cuda` and CuPy at the same GPU as torch;

@@ -1118,6 +1118,21 @@ source.root=$OUT/filtered       filter=identity                (1)이 남긴 캐
   `scripts/`만 hydra를 임포트하므로 런타임 의존성이 아니라 PEP 735 그룹에 산다
   (`uv sync --group scripts`). 1.4 stable이 나오면 재검토.
 
+- **`configs/experiment/`는 평평하게 두었다. 늘어나면 스크립트별로 한 단계 나눌 것.**
+  실험 묶음은 채우는 키가 없는 `@package _global_` 오버레이라 위 규칙(폴더 이름 = 채우는 키)의
+  바깥에 있다. 그래서 `configs/filter/sweep/`처럼 **가르는 그룹 아래에 두지 않았다** — 스윕은
+  키 하나짜리가 아니고(`filter`와 `source.frames.step`을 함께 가르는 것을 실측 확인했다),
+  (2)에서 추정기와 전처리 캐시를 함께 가르는 스윕이 나오면 넣을 폴더가 없어진다.
+
+  대신 경계는 **어느 스크립트가 읽는가**다. `preprocess.py`용 실험을 flow 스크립트에 주면 없는
+  키를 오버라이드하다 죽는다. 지금은 `filters.yaml` 하나뿐이라 이름으로 충분하지만, (2)·(3)의
+  실험이 붙어 대여섯 개를 넘으면 `configs/experiment/preprocess/`·`.../optical_flow/`로 나눌
+  것. 그러면 `+experiment/preprocess=filters`가 되어 명령줄이 길어지는 대신 소속이 경로에
+  박힌다.
+
+  **`configs/filter/sweep.yaml`(폴더가 아닌 파일)은 두지 말 것.** 실측: `filter` 그룹의 옵션
+  목록에 끼어들고, `filter=sweep`이 **에러 없이 필터를 없앤 채** 실행된다.
+
 - **결정 — 그룹 폴더 이름은 그것이 채우는 키와 같게 둔다.** 짧은 오버라이드(`filter=identity`)는
   **그룹 경로와 패키지가 같을 때만** 통한다. `compute=cpu`가 되는 이유가 그것이고, 필터가
   `configs/data/transforms/filtering/`에 있을 때 `filter=identity`가 값 오버라이드로 읽혀

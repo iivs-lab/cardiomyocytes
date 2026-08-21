@@ -1,0 +1,34 @@
+# @package _global_
+# Every option the group holds, which is the search itself: two shapes
+# over ten extents, and the unfiltered baseline they are read against.
+#
+# Read by `hydra.sweeper`, which only a `--multirun` runs:
+#   --multirun +experiment=filters
+#
+# A folded scalar, not a YAML list. A list composes without complaint
+# and then sweeps its last entry alone.
+hydra:
+  sweeper:
+    params:
+      filter: >-
+        identity,
+        median_cuboid_1x1x0,
+        median_ellipsoid_1x1x0,
+        median_cuboid_1x1x1,
+        median_ellipsoid_1x1x1,
+        median_cuboid_1x1x2,
+        median_ellipsoid_1x1x2,
+        median_cuboid_1x1x3,
+        median_ellipsoid_1x1x3,
+        median_cuboid_2x2x0,
+        median_ellipsoid_2x2x0,
+        median_cuboid_2x2x1,
+        median_ellipsoid_2x2x1,
+        median_cuboid_2x2x2,
+        median_ellipsoid_2x2x2,
+        median_cuboid_3x3x0,
+        median_ellipsoid_3x3x0,
+        median_cuboid_3x3x1,
+        median_ellipsoid_3x3x1,
+        median_cuboid_3x3x3,
+        median_ellipsoid_3x3x3
