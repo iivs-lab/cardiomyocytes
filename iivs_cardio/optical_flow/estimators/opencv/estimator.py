@@ -65,6 +65,10 @@ class OpenCVConfig(EstimatorConfig, ABC):
         Returns:
             A backend of its own, so two estimators built from one config share
             no state.
+
+        Raises:
+            ValueError: If `device` is not one of `SUPPORTED_DEVICES`, or if
+                `_algorithm` answered with one belonging to the other backend.
         """
         device = Device.resolve(device, self.SUPPORTED_DEVICES)
         device.activate()
@@ -90,7 +94,8 @@ class OpenCVConfig(EstimatorConfig, ABC):
             device: The device to build for, in any form a caller may write.
 
         Raises:
-            ValueError: If `device` is not one of `SUPPORTED_DEVICES`.
+            ValueError: If `device` is not one of `SUPPORTED_DEVICES`, or if the
+                algorithm made for it came out belonging to the other backend.
         """
         backend = self._backend(device)  # raises if device is unsupported
         return OpenCVEstimator(backend)
@@ -135,7 +140,8 @@ class Backend(ABC):
             frame: The frame to retain, copied, so a caller may write over its
                 own afterwards.
             out: Where to put the flow, sparing the allocation a caller that
-                already has somewhere to put it would only copy out of.
+                already has somewhere to put it would only copy out of. Taken on
+                trust to be the flow's own shape, dtype and device.
 
         Returns:
             The flow, or `None` where nothing was retained yet, in which case
@@ -162,7 +168,9 @@ class Backend(ABC):
         Args:
             flow: The flow as cv2 wrote it, which may be a view of a buffer the
                 next call writes over.
-            out: Where to put it, or `None` to allocate.
+            out: Where to put it, or `None` to allocate. A `copy_` casts to
+                another dtype and crosses to another device without a word, so
+                a wrong one is silently honoured rather than refused.
 
         Returns:
             A flow of the caller's own either way, so it outlives the buffer.
@@ -353,7 +361,9 @@ class OpenCVEstimator(OpticalFlowEstimator):
 
         index = 0
         for frame in frames:
-            # No row to write only on the frame a fresh sequence spends retaining.
+            # `index` stops at `count`, so this falls back to `None` in one case
+            # only: the lone frame a fresh sequence spends retaining, which has
+            # no row because there is no flow to come.
             out = flows[index] if index < count else None
             if self._backend.push(frame, out=out) is not None:
                 index += 1
@@ -398,7 +408,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
     def _flow_batch(self, count: int, frames: Tensor) -> Tensor:
         """An uninitialized `(count, 2, H, W)` float32 batch beside `frames`.
 
-        Sized to the flows that will be written rather than to `frames`, so no
-        row of it is returned still holding whatever `new_empty` picked up.
+        `count` is the flows a caller is about to write, not the frames it was
+        given, which is what keeps a row of noise from ever being returned.
         """
         return frames.new_empty((count, 2, *frames.shape[1:]), dtype=torch.float32)
