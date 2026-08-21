@@ -31,10 +31,12 @@ def all_finite(frame: Tensor) -> bool:
 def finite_range(frame: Tensor) -> tuple[float, float] | None:
     """Return the `(min, max)` of `frame`'s finite values, or `None` if it has none.
 
-    Non-finite values are ignored rather than propagated, so a masked frame's NaN
-    background does not swallow the range. An empty frame and an entirely
-    non-finite one both answer `None`: whether that is a frame to skip or a run
-    to refuse is the caller's to decide, which is why it is not an exception.
+    Non-finite values are ignored rather than propagated. That tolerance is this
+    function's, not the pipeline's, which refuses a phase frame holding one on
+    the way in, a NaN there meaning the frame came out broken. An empty frame and
+    an entirely non-finite one both answer `None`: whether that is a frame to
+    skip or a run to refuse is the caller's to decide, which is why it is not an
+    exception.
 
     The bounds come back as Python floats, so an integer frame holding values a
     float cannot tell apart answers with them rounded together. Phase frames are
