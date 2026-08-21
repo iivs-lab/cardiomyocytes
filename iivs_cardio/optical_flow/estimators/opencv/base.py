@@ -49,7 +49,7 @@ class OpenCVConfig(EstimatorConfig, ABC):
     """
 
     @abstractmethod
-    def _create(self, device: Device) -> DenseAlgorithm:
+    def _algorithm(self, device: Device) -> DenseAlgorithm:
         """Make the cv2 algorithm these settings describe, for `device`.
 
         Called with `device` resolved and already current, so an implementation
@@ -69,7 +69,7 @@ class OpenCVConfig(EstimatorConfig, ABC):
         device = Device.resolve(device, self.SUPPORTED_DEVICES)
         device.activate()
 
-        algorithm = self._create(device)
+        algorithm = self._algorithm(device)
 
         on_cuda = isinstance(algorithm, cv2.cuda.DenseOpticalFlow)
         if on_cuda != device.is_cuda:

@@ -82,7 +82,7 @@ class DualTVL1Config(OpenCVConfig):
         )
 
     @override
-    def _create(self, device: Device) -> DenseAlgorithm:
+    def _algorithm(self, device: Device) -> DenseAlgorithm:
         self._warn_unread(device)
 
         if device.is_cuda:

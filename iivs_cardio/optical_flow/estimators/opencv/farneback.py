@@ -40,7 +40,7 @@ class FarnebackConfig(OpenCVConfig):
     flags: int = 0
 
     @override
-    def _create(self, device: Device) -> DenseAlgorithm:
+    def _algorithm(self, device: Device) -> DenseAlgorithm:
         factory = cv2.FarnebackOpticalFlow
         if device.is_cuda:
             factory = cv2.cuda.FarnebackOpticalFlow

@@ -196,13 +196,13 @@ def test_push_rejects_wrong_shape():
 
 
 class _MisreadingConfig(OpenCVConfig):
-    """A config whose `_create` answers for a device other than the one it took."""
+    """A config whose `_algorithm` answers for a device other than the one it took."""
 
     def __init__(self, factory) -> None:
         self._factory = factory
 
     @override
-    def _create(self, device: Device) -> DenseAlgorithm:
+    def _algorithm(self, device: Device) -> DenseAlgorithm:
         return self._factory()
 
 
@@ -218,7 +218,7 @@ class _MisreadingConfig(OpenCVConfig):
 )
 def test_a_config_creating_for_the_wrong_device_is_refused(factory, device, made):
     # What is left to catch once `SUPPORTED_DEVICES` has run and the backends
-    # take the concrete cv2 types: a `_create` that read its device wrongly. A
+    # take the concrete cv2 types: an `_algorithm` that read its device wrongly. A
     # CPU algorithm run as CUDA would be handed device tensors and read as host
     # memory.
     with pytest.raises(ValueError, match=f"made for {made}"):
@@ -254,7 +254,7 @@ def test_deepflow_refuses_cuda_below_the_policy_too():
     # nothing else covers it. What it answers is a caller reaching past `build`,
     # who would otherwise hold a CPU algorithm paired with a CUDA device.
     with pytest.raises(ValueError, match="DeepFlow"):
-        DeepFlowConfig()._create(Device("cuda"))  # noqa: SLF001
+        DeepFlowConfig()._algorithm(Device("cuda"))  # noqa: SLF001
 
 
 def test_supported_devices():

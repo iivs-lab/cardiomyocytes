@@ -25,7 +25,7 @@ class DeepFlowConfig(OpenCVConfig):
     SUPPORTED_DEVICES: ClassVar[frozenset[DeviceKind]] = frozenset({"cpu"})
 
     @override
-    def _create(self, device: Device) -> DenseAlgorithm:
+    def _algorithm(self, device: Device) -> DenseAlgorithm:
         """Make the DeepFlow algorithm, which takes no settings.
 
         Raises:
