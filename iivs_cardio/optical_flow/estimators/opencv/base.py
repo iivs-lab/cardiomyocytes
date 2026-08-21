@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("DenseAlgorithm", "OpenCVConfig", "OpenCVEstimator")
+__all__ = ("OpenCVConfig", "OpenCVEstimator")
 
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, override

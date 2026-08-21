@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import weakref
-from typing import override
+from typing import TYPE_CHECKING, override
 
 import cv2
 import numpy as np
@@ -12,13 +12,15 @@ import torch
 from iivs_cardio.common import Device
 from iivs_cardio.optical_flow.estimators import (
     DeepFlowConfig,
-    DenseAlgorithm,
     DualTVL1Config,
     EstimatorConfig,
     FarnebackConfig,
     OpenCVConfig,
     OpenCVEstimator,
 )
+
+if TYPE_CHECKING:
+    from iivs_cardio.optical_flow.estimators.opencv.base import DenseAlgorithm
 
 # All three OpenCV methods run on CPU, so the streaming contract is tested
 # GPU-free; the CUDA path is gated on an actual device below. Each is named by

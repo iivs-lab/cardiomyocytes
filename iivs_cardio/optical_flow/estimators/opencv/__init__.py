@@ -1,6 +1,5 @@
 __all__ = (
     "DeepFlowConfig",
-    "DenseAlgorithm",
     "DualTVL1Config",
     "FarnebackConfig",
     "OpenCVConfig",
@@ -8,7 +7,6 @@ __all__ = (
 )
 
 from iivs_cardio.optical_flow.estimators.opencv.base import (
-    DenseAlgorithm,
     OpenCVConfig,
     OpenCVEstimator,
 )
