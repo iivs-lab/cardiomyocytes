@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from hydra import compose, initialize_config_dir
@@ -47,6 +48,27 @@ def test_a_node_that_names_no_kernel_points_at_the_group():
     # at all, and the default `median_ellipsoid_2x2x2` is not a kind.
     with pytest.raises(TypeError, match=r"select from `filter`"):
         parse_filter_config(OmegaConf.create({"radius": [1, 1, 1]}))
+
+
+def _filter_options() -> tuple[str, ...]:
+    return tuple(sorted(p.stem for p in Path(CONFIG_PATH, "filter").glob("*.yaml")))
+
+
+@pytest.mark.parametrize("name", _filter_options())
+def test_every_option_of_the_group_composes_and_says_what_it_is(name):
+    # A group option is reachable only by name, so a file that composes wrongly
+    # is refused in the middle of a sweep rather than here. The name is checked
+    # against what was built because the failure a copied file makes is a right
+    # name over the radius or the shape it was copied from.
+    kernel = parse_filter_config(_filter_node(name)).build()
+
+    if name == "identity":
+        assert isinstance(kernel, IdentityKernel)
+        return
+
+    assert isinstance(kernel, MedianKernel)
+    extent = "x".join(str(r) for r in kernel.radius)
+    assert name == f"median_{kernel.shape}_{extent}"
 
 
 def test_a_composed_node_builds_the_kernel_it_names():
