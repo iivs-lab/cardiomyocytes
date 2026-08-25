@@ -1,22 +1,29 @@
 from __future__ import annotations
 
-__all__ = ("LAST_SEARCH", "SearchResult", "build_sequences", "search_sources")
+__all__ = (
+    "LAST_SEARCH",
+    "PhaseSourceConfig",
+    "SearchResult",
+    "build_sequences",
+    "search_sources",
+)
 
-from dataclasses import astuple, fields, is_dataclass
+from dataclasses import astuple, dataclass, fields, is_dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
+from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import PhaseFileFolder, PhaseUnit, search_phase_bin_folders
 from kaparoo.filesystem import contains, is_spec_file, select, stringify_path
 from kaparoo.utils import quantify
 
 from iivs_cardio.common.pipeline import ensure_policy
 from iivs_cardio.data.phase import PhaseFilteredSequence
-from scripts._common.dataset import SHORT_SEQUENCE_POLICIES
+from scripts._common.dataset import SHORT_SEQUENCE_POLICIES, SourceConfig
 
 if TYPE_CHECKING:
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
-    from scripts._common.dataset import SequenceSelectConfig, SourceConfig
+    from scripts._common.dataset import SequenceSelectConfig
 
 
 # One folder per sequence taken, against the contents of the dataset they came from.
@@ -24,6 +31,25 @@ type SearchResult = tuple[list[PhaseFileFolder], dict[str, tuple[str, ...]]]
 
 # The newest search, held for the next job of a sweep to take.
 LAST_SEARCH: dict[tuple[object, ...], SearchResult] = {}
+
+
+@dataclass
+class PhaseSourceConfig(SourceConfig):
+    """A tree of phase sequences, laid out the way an acquisition arrives.
+
+    Every stage that reads phase reads it the same way, whether it filters the
+    frames or estimates flows across them.
+
+    Attributes:
+        DEFAULT_SUBPATH: Koala's own layout, which is where a phase sequence
+            comes off the microscope. A tree holding another modality names its
+            own `subpath`, and one that names the wrong layout is found empty.
+        subpath: As `SourceConfig`.
+        root: As `SourceConfig`.
+        frames: As `SourceConfig`.
+    """
+
+    DEFAULT_SUBPATH: ClassVar[str] = PHASE_FLOAT_BIN
 
 
 def _source_key(

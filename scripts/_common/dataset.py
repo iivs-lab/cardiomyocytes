@@ -3,16 +3,20 @@ from __future__ import annotations
 __all__ = (
     "LISTING_LIMIT",
     "SHORT_SEQUENCE_POLICIES",
+    "BranchConfig",
     "FrameSelectConfig",
     "SequenceLayout",
     "SequenceSelectConfig",
     "ShortSequencePolicy",
     "SourceConfig",
+    "TreeBranchConfig",
+    "ensure_output_clear",
+    "log_branch_policies",
     "log_source_config",
 )
 
 from dataclasses import dataclass, field
-from pathlib import PurePath
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, ClassVar, Final, Literal
 
 from kaparoo.filesystem import is_spec_file
@@ -20,10 +24,13 @@ from kaparoo.utils import literal_values, quantify, unwrap_or_default
 from omegaconf import MISSING
 
 from iivs_cardio.common.logging import log_indented
+from iivs_cardio.common.pipeline import PresentPolicy, UnsourcedPolicy
 from iivs_cardio.data.transforms.filtering import frame_indices
 
 if TYPE_CHECKING:
     from logging import Logger
+
+    from kaparoo.filesystem.types import StrPath
 
 
 # ========================== #
@@ -158,6 +165,60 @@ class SequenceSelectConfig:
     exclude: list[str] | str | None = None
 
 
+@dataclass
+class BranchConfig:
+    """What one side branch writes, and what it does where it finds an output.
+
+    Every branch answers the same three questions, so a stage adding one adds a
+    block of this shape rather than another three keys beside the others.
+
+    Attributes:
+        save: Whether to write this output at all. Defaults to `False`.
+        if_present: The policy for a sequence this output already covers.
+            `"reuse"` keeps what an earlier run left that still describes this
+            one, and writes the rest. Defaults to `"error"`.
+        if_unsourced: The policy for part of this output whose sequence the
+            source no longer holds. Defaults to `"keep"`: the same absence is
+            what a half mounted share looks like, and what is kept is always
+            said out loud.
+    """
+
+    save: bool = False
+    if_present: PresentPolicy = "error"
+    if_unsourced: UnsourcedPolicy = "keep"
+
+
+@dataclass
+class TreeBranchConfig(BranchConfig, SequenceLayout):
+    """The branch that writes each sequence back out as a tree of its own.
+
+    A stage names the subclass it writes, so the layout a bare `subpath` falls
+    back to is the one that stage's own trees keep their frames in.
+
+    Attributes:
+        DEFAULT_SUBPATH: As `SequenceLayout`, supplied by the stage's subclass.
+            Never reached while the run has a source to follow, and there to
+            keep a caller without one from writing into the sequence folder
+            itself.
+        save: As `BranchConfig`.
+        subpath: The path a written sequence keeps its frames at inside its own
+            folder. Naming one is what lets a run write beside the frames it
+            read rather than over them. Defaults to `None`, which puts them
+            where the source keeps its own.
+        record_file: The name of the file each written folder keeps its own
+            account in, given `.json` if it has no extension. A later run reads
+            it to decide whether what is there still describes this run.
+            Defaults to `"source"`.
+        if_present: As `BranchConfig`, judged by the settings and the source
+            frames' names rather than by what those frames hold. A source
+            re-exported under the same names is kept rather than written again,
+            so a run that follows one takes `"overwrite"`.
+        if_unsourced: As `BranchConfig`.
+    """
+
+    record_file: str = "source"
+
+
 # ========================== #
 #          Logging           #
 # ========================== #
@@ -236,3 +297,77 @@ def log_source_config(
 
     if sequence_config.exclude:
         _log_sequence_selection("excluding", sequence_config.exclude, logger)
+
+
+def log_branch_policies(output: str, branch: BranchConfig, logger: Logger) -> None:
+    """Say what a branch does with what it finds, unless it refuses to run.
+
+    Set in under the line naming the output it belongs to, since a target
+    writes more than one and a policy at the same depth as both would read as
+    either.
+
+    Args:
+        output: What the branch writes, named as a plural the lines read with.
+        branch: The branch whose policies are being said.
+        logger: The logger the lines go to.
+    """
+    lines = {
+        "overwrite": f"overwriting the {output} it finds",
+        "reuse": f"reusing the {output} that match this run",
+    }
+    if (line := lines.get(branch.if_present)) is not None:
+        log_indented(logger, "%s", line, depth=2)
+
+    if branch.if_unsourced != "keep":
+        log_indented(logger, "dropping the %s a source no longer has", output, depth=2)
+
+
+# ========================== #
+#          Outputs           #
+# ========================== #
+
+
+def ensure_output_clear(
+    source_root: StrPath,
+    output_root: StrPath,
+    *,
+    what: str,
+    read: str,
+    written: str,
+    fix: str,
+) -> None:
+    """Raise where the tree a run writes would land on the one it reads.
+
+    A sequence is written by replacing its folder whole, so an output under the
+    source root is refused wherever its layout would land on the frames being
+    read: the same folder, or either one holding the other.
+
+    An output beside the source, or above it, is left open. It writes a tree of
+    its own and collides with nothing here, and whether a later run pointed at
+    a parent of both would then find two of every sequence is that run's own
+    `source.root` to get right.
+
+    Args:
+        source_root: The folder the sequences are read from.
+        output_root: The folder this run writes under.
+        what: What is being written, named as a plural the refusal reads with.
+        read: The layout the frames are read at, inside a sequence's folder.
+        written: The layout this run would write at, in the same terms.
+        fix: The settings to change, named as the refusal should say them.
+
+    Raises:
+        ValueError: If the two layouts would land on one another.
+    """
+    source_root = Path(source_root).resolve()
+    output_root = Path(output_root).resolve()
+
+    if not output_root.is_relative_to(source_root):
+        return
+
+    reading = PurePath(read)
+    writing = PurePath(written)
+
+    if reading.is_relative_to(writing) or writing.is_relative_to(reading):
+        where = f"{output_root.as_posix()}/*/{writing.as_posix()}"
+        msg = f"{what} would land on the source at {where}: set {fix}"
+        raise ValueError(msg)

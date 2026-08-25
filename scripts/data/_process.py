@@ -14,24 +14,23 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, ClassVar
 
-from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from kaparoo.utils import quantify, unwrap_or_factory
 
 from iivs_cardio.common.logging import log_indented
 from iivs_cardio.common.pipeline.branch import (
-    PresentPolicy,
-    UnsourcedPolicy,
     ensure_json_name,
 )
 from iivs_cardio.data.pipeline import FrameTree, RangeDocument, SequenceStageFactory
 from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig
 from scripts._common.dataset import (
     LISTING_LIMIT,
-    SequenceLayout,
-    SourceConfig,
+    BranchConfig,
+    TreeBranchConfig,
+    ensure_output_clear,
+    log_branch_policies,
     log_source_config,
 )
-from scripts._common.phase import build_sequences
+from scripts._common.phase import PhaseSourceConfig, build_sequences
 from scripts.data._filtering import describe_filter_kernel, log_filter_config
 
 if TYPE_CHECKING:
@@ -53,72 +52,32 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class PreprocessSourceConfig(SourceConfig):
-    """The tree this stage reads, laid out the way an acquisition arrives.
+class PreprocessSourceConfig(PhaseSourceConfig):
+    """The tree this stage reads, which is phase as it comes off the microscope.
 
     Attributes:
-        DEFAULT_SUBPATH: Koala's own layout, which is where a phase sequence
-            comes off the microscope. A tree holding another modality names its
-            own `subpath`, and one that names the wrong layout is found empty.
-        subpath: As `SourceConfig`.
-        root: As `SourceConfig`.
-        frames: As `SourceConfig`.
+        DEFAULT_SUBPATH: As `PhaseSourceConfig`.
+        subpath: As `PhaseSourceConfig`.
+        root: As `PhaseSourceConfig`.
+        frames: As `PhaseSourceConfig`.
     """
-
-    DEFAULT_SUBPATH: ClassVar[str] = PHASE_FLOAT_BIN
 
 
 @dataclass
-class BranchConfig:
-    """What one side branch writes, and what it does where it finds an output.
-
-    Every branch answers the same three questions, so a stage adding one adds a
-    block of this shape rather than another three keys beside the others.
-
-    Attributes:
-        save: Whether to write this output at all. Defaults to `False`.
-        if_present: The policy for a sequence this output already covers.
-            `"reuse"` keeps what an earlier run left that still describes this
-            one, and writes the rest. Defaults to `"error"`.
-        if_unsourced: The policy for part of this output whose sequence the
-            source no longer holds. Defaults to `"keep"`: the same absence is
-            what a half mounted share looks like, and what is kept is always
-            said out loud.
-    """
-
-    save: bool = False
-    if_present: PresentPolicy = "error"
-    if_unsourced: UnsourcedPolicy = "keep"
-
-
-@dataclass
-class FrameBranchConfig(BranchConfig, SequenceLayout):
+class FrameBranchConfig(TreeBranchConfig):
     """The branch that writes each sequence back out as a tree of frames.
 
     Attributes:
         DEFAULT_SUBPATH: Where the frames go for a branch that names no layout
-            and is given nothing to follow. Never reached while the run has a
-            source to follow, and there to keep a caller without one from
-            writing into the sequence folder itself.
-        save: Whether to write the filtered frames. Defaults to `False`.
-        subpath: The path a written sequence keeps its frames at inside its own
-            folder. Naming one is what lets a run write beside the frames it
-            read rather than over them. Defaults to `None`, which puts them
-            where the source keeps its own.
-        record_file: The name of the file each written folder keeps its own
-            account in, given `.json` if it has no extension. A later run reads
-            it to decide whether what is there still describes this run.
-            Defaults to `"source"`.
-        if_present: As `BranchConfig`, judged by the settings and the source
-            frames' names rather than by what those frames hold. A source
-            re-exported under the same names is kept rather than written again,
-            so a run that follows one takes `"overwrite"`.
-        if_unsourced: As `BranchConfig`.
+            and is given nothing to follow.
+        save: As `TreeBranchConfig`.
+        subpath: As `TreeBranchConfig`.
+        record_file: As `TreeBranchConfig`.
+        if_present: As `TreeBranchConfig`.
+        if_unsourced: As `TreeBranchConfig`.
     """
 
     DEFAULT_SUBPATH: ClassVar[str] = "frames"
-
-    record_file: str = "source"
 
 
 @dataclass
@@ -161,15 +120,6 @@ def _validate_output(
 ) -> None:
     """Raise unless the target names an output this run can safely write.
 
-    A sequence is written by replacing its folder whole, so an output under the
-    source root is refused wherever its layout would land on the frames being
-    read: the same folder, or either one holding the other.
-
-    An output beside the source, or above it, is left open. It writes a tree of
-    its own and collides with nothing here, and whether a later run pointed at
-    a parent of both would then find two of every sequence is that run's own
-    `source.root` to get right.
-
     Raises:
         ValueError: If the target writes nothing, or the frames it writes would
             land on the source they are read from.
@@ -180,20 +130,16 @@ def _validate_output(
             raise ValueError(msg)
         return
 
-    source_root = Path(source_config.root).resolve()
-    output_root = Path(output_root).resolve()
+    read = source_config.resolve_subpath()
 
-    if not output_root.is_relative_to(source_root):
-        return
-
-    subpath = PurePath(source_config.resolve_subpath())
-    written = PurePath(target_config.frames.resolve_subpath(subpath.as_posix()))
-
-    if subpath.is_relative_to(written) or written.is_relative_to(subpath):
-        where = f"{output_root.as_posix()}/*/{written.as_posix()}"
-        fix = "`target.frames.subpath` beside it, or `run_root` outside the source"
-        msg = f"frames would land on the source at {where}: set {fix}"
-        raise ValueError(msg)
+    ensure_output_clear(
+        source_config.root,
+        output_root,
+        what="frames",
+        read=read,
+        written=target_config.frames.resolve_subpath(read),
+        fix="`target.frames.subpath` beside it, or `run_root` outside the source",
+    )
 
 
 # ========================== #
@@ -214,23 +160,6 @@ def _range_file(target_config: PreprocessTargetConfig) -> str:
     except ValueError as error:
         msg = f"`target.ranges.file`: {error}"
         raise ValueError(msg) from error
-
-
-def _log_branch(output: str, branch: BranchConfig, logger: Logger) -> None:
-    """Say what a branch does with what it finds, unless it refuses to run.
-
-    Set in under the line naming the output it belongs to, since the target
-    writes two and a policy at the same depth as both would read as either.
-    """
-    lines = {
-        "overwrite": f"overwriting the {output} it finds",
-        "reuse": f"reusing the {output} that match this run",
-    }
-    if (line := lines.get(branch.if_present)) is not None:
-        log_indented(logger, "%s", line, depth=2)
-
-    if branch.if_unsourced != "keep":
-        log_indented(logger, "dropping the %s a source no longer has", output, depth=2)
 
 
 def log_target_config(
@@ -262,12 +191,12 @@ def log_target_config(
         written = target_config.frames.resolve_subpath(follow)
         layout = f"<sequence>/{written}" if written else "<sequence>/*"
         log_indented(logger, "writing the filtered frames to %s", layout)
-        _log_branch("frames", target_config.frames, logger)
+        log_branch_policies("frames", target_config.frames, logger)
 
     if target_config.ranges.save:
         name = _range_file(target_config)
         log_indented(logger, "writing the value ranges to %s", name)
-        _log_branch("ranges", target_config.ranges, logger)
+        log_branch_policies("ranges", target_config.ranges, logger)
 
 
 def log_configs(
