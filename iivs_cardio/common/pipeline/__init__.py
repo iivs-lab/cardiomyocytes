@@ -6,6 +6,7 @@ __all__ = (
     "Coverage",
     "DocumentBranch",
     "Folded",
+    "Held",
     "Holding",
     "Hook",
     "Named",
@@ -18,6 +19,7 @@ __all__ = (
     "Sourced",
     "Stage",
     "StageFactory",
+    "StageJob",
     "Step",
     "UnsourcedPolicy",
     "as_read_back",
@@ -61,3 +63,4 @@ from iivs_cardio.common.pipeline.document import (
     Sourced,
     save_document,
 )
+from iivs_cardio.common.pipeline.job import Held, StageJob
