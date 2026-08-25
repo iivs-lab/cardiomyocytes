@@ -423,6 +423,17 @@ class DatasetEvaluation:
         """The number of sequences folded here."""
         return len(self.sequences)
 
+    def __str__(self) -> str:
+        """The one axis the document exists for, shortened for reading.
+
+        Reconstruction alone says little without what the pair scored against
+        each other, so the gain over that floor is given beside it.
+        """
+        ssim = self.metrics["ssim"].mean
+        gain = ssim - self.metrics["ssim_floor"].mean
+
+        return f"SSIM {ssim:.4f} ({gain:+.4f})"
+
     def dropped(self, metric: str) -> int:
         """How many pairs this metric did not come back finite for.
 

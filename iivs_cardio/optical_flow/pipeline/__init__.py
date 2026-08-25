@@ -1,5 +1,7 @@
 __all__ = (
     "DatasetEvaluation",
+    "Evaluated",
+    "EvaluationDocument",
     "FlowTree",
     "FrameEvaluation",
     "Measured",
@@ -8,6 +10,10 @@ __all__ = (
     "Spread",
 )
 
+from iivs_cardio.optical_flow.pipeline.document import (
+    Evaluated,
+    EvaluationDocument,
+)
 from iivs_cardio.optical_flow.pipeline.evaluation import (
     DatasetEvaluation,
     FrameEvaluation,
