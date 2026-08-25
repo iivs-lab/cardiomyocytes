@@ -10,26 +10,19 @@ __all__ = (
     "ValueRange",
 )
 
-import json
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from math import isfinite
 from typing import TYPE_CHECKING, Any, Self, override
 
-from kaparoo.filesystem import (
-    StagedFile,
-    ensure_dir_exists,
-)
 from kaparoo.utils import quantify
 
-from iivs_cardio.common.pipeline.branch import JSON_EXT
-from iivs_cardio.common.pipeline.document import DocumentBranch
+from iivs_cardio.common.pipeline.document import DocumentBranch, PartMeter
 from iivs_cardio.common.range import finite_range
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from pathlib import Path
-    from types import TracebackType
 
     from kaparoo.filesystem.types import StrPath
     from torch import Tensor
@@ -293,34 +286,18 @@ class DatasetRange(CompositeRange):
 # ========================== #
 
 
-class SequenceRangeMeter:
+class SequenceRangeMeter(PartMeter[SequenceRange]):
     """Measure the range of every frame of one sequence, then write the result.
 
     This is the hook a range document hands to a sequence. It records a range
     per frame as the frames go by, and on a clean close writes them beside the
-    document as that sequence's part. Writing is how the result gets home: a
-    sequence may be measured in a worker process of its own, and nothing it
-    keeps in memory comes back.
-
-    A close that follows an error writes nothing, so a part on disk always
-    stands for a sequence that finished. Another hook of the same sequence
-    failing to commit is that same thing seen a moment later, and `revert` is
-    how the part goes with it.
+    document as that sequence's part.
 
     Args:
-        root: The folder the part is written into, created if it is not there.
-        source: The name the sequence has, used both in the record and as the
-            name of the file it is written to.
-        settings: The settings that shaped the numbers, written into the part so
-            it can be told from one an earlier run left under different ones.
-            The document carries the same block, and a part outliving the
-            document is the case that needs its own copy. Defaults to `None`,
-            which records nothing and so can never be reused.
-        overwrite: Whether a part already filed under `source` may be replaced.
-            Its own run clears the folder on the way in, so one that is there
-            belongs to something else: two sequences whose names came out the
-            same, most likely, which is a mistake rather than a second attempt.
-            Defaults to `False`.
+        root: As `PartMeter`.
+        source: As `PartMeter`.
+        settings: As `PartMeter`.
+        overwrite: As `PartMeter`.
     """
 
     def __init__(
@@ -331,16 +308,10 @@ class SequenceRangeMeter:
         *,
         overwrite: bool = False,
     ) -> None:
-        root = ensure_dir_exists(root, make=True)
-        file = f"{source}{JSON_EXT}"
+        super().__init__(root, source, settings, overwrite=overwrite)
 
-        self._path = root / file
-        self._source = source
-        self._settings = settings
-        self._overwrite = overwrite
         self._frames: list[FrameRange] = []
         self._cached: SequenceRange | None = None
-        self._saved = False
 
     def __call__(self, step: Step[Tensor, Path]) -> None:
         """Measure `step`, so the meter can be registered as a hook directly."""
@@ -373,6 +344,10 @@ class SequenceRangeMeter:
             self._cached = SequenceRange(self._source, tuple(self._frames))
         return self._cached
 
+    @override
+    def _fold(self) -> SequenceRange:
+        return self.to_range()
+
     def report(self) -> str | None:
         """Return one line naming the range measured, or `None` if none was."""
         if not self._frames:
@@ -380,56 +355,6 @@ class SequenceRangeMeter:
 
         frames = quantify(len(self._frames), "frame")
         return f"measured {self.to_range()} across {frames}"
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        """Write the sequence's part, unless the sequence ended in an error.
-
-        Raises:
-            FileExistsError: If a part is already filed under this name and
-                this meter was not told it may replace it.
-        """
-        if exc_type is not None:
-            return
-
-        cache = self.to_range()
-
-        document: dict[str, object] = {}
-        if self._settings is not None:
-            document["settings"] = dict(self._settings)
-        document |= cache.to_dict()
-
-        with StagedFile(
-            self._path,
-            overwrite=self._overwrite,
-            make_parents=True,
-            encoding="utf-8",
-        ) as file:
-            file.write(json.dumps(document, allow_nan=False))
-
-        self._cached = cache
-        self._saved = True
-
-    def revert(self) -> None:
-        """Take back the part, if this meter got as far as writing one.
-
-        A part on disk stands for a sequence that finished, and one whose other
-        outputs could not be committed did not. Taking it back is what puts the
-        sequence back among the skipped rather than leaving the document
-        counting it as covered while its frames are nowhere.
-        """
-        if not self._saved:
-            return
-
-        self._path.unlink(missing_ok=True)
-        self._saved = False
 
 
 # ========================== #
@@ -444,6 +369,14 @@ class RangeDocument(
 
     Attributes:
         PARTS_SUFFIX: As `DocumentBranch`.
+        path: As `DocumentBranch`.
+        parts_root: As `DocumentBranch`.
+        source: As `DocumentBranch`.
+        contents: As `DocumentBranch`.
+        settings: As `DocumentBranch`.
+        selected: As `DocumentBranch`.
+        if_present: As `DocumentBranch`.
+        if_unsourced: As `DocumentBranch`.
     """
 
     @override

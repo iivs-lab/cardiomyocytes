@@ -5,6 +5,7 @@ __all__ = (
     "DocumentBranch",
     "Folded",
     "Part",
+    "PartMeter",
     "Sourced",
     "save_document",
 )
@@ -62,6 +63,8 @@ class Part(Sourced, Protocol):
 
     @property
     def frames(self) -> Sequence[Sourced]: ...
+
+    def to_dict(self) -> dict[str, Any]: ...
 
 
 class Folded(Protocol):
@@ -200,6 +203,118 @@ def save_document(
 
 
 # ========================== #
+#           Meter            #
+# ========================== #
+
+
+class PartMeter[P: Part](ABC):
+    """Measure one sequence as its frames go by, then write down the result.
+
+    This is the hook a document hands to a sequence. Writing is how the result
+    gets home: a sequence may be measured in a worker process of its own, and
+    nothing it keeps in memory comes back.
+
+    A close that follows an error writes nothing, so a part on disk always
+    stands for a sequence that finished. Another hook of the same sequence
+    failing to commit is that same thing seen a moment later, and `revert` is
+    how the part goes with it.
+
+    A subclass says one thing and inherits the rest: what the frames it watched
+    fold into.
+
+    Type Parameters:
+        P: What this sequence's part holds.
+
+    Args:
+        root: The folder the part is written into, created if it is not there.
+        source: The name the sequence has, used both in the record and as the
+            name of the file it is written to.
+        settings: The settings that shaped the numbers, written into the part so
+            it can be told from one an earlier run left under different ones.
+            The document carries the same block, and a part outliving the
+            document is the case that needs its own copy. Defaults to `None`,
+            which records nothing and so can never be reused.
+        overwrite: Whether a part already filed under `source` may be replaced.
+            Its own run clears the folder on the way in, so one that is there
+            belongs to something else: two sequences whose names came out the
+            same, most likely, which is a mistake rather than a second attempt.
+            Defaults to `False`.
+    """
+
+    def __init__(
+        self,
+        root: StrPath,
+        source: str,
+        settings: Mapping[str, object] | None = None,
+        *,
+        overwrite: bool = False,
+    ) -> None:
+        root = ensure_dir_exists(root, make=True)
+
+        self._path = root / f"{source}{JSON_EXT}"
+        self._source = source
+        self._settings = settings
+        self._overwrite = overwrite
+        self._saved = False
+
+    @abstractmethod
+    def _fold(self) -> P:
+        """Fold what has been measured so far into this sequence's part.
+
+        Raises:
+            ValueError: If nothing has been measured, since a part standing for
+                a sequence that said nothing would count as covered.
+        """
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Write the sequence's part, unless the sequence ended in an error.
+
+        Raises:
+            FileExistsError: If a part is already filed under this name and
+                this meter was not told it may replace it.
+        """
+        if exc_type is not None:
+            return
+
+        document: dict[str, object] = {}
+        if self._settings is not None:
+            document["settings"] = dict(self._settings)
+        document |= self._fold().to_dict()
+
+        with StagedFile(
+            self._path,
+            overwrite=self._overwrite,
+            make_parents=True,
+            encoding="utf-8",
+        ) as file:
+            file.write(json.dumps(document, allow_nan=False))
+
+        self._saved = True
+
+    def revert(self) -> None:
+        """Take back the part, if this meter got as far as writing one.
+
+        A part on disk stands for a sequence that finished, and one whose other
+        outputs could not be committed did not. Taking it back is what puts the
+        sequence back among the skipped rather than leaving the document
+        counting it as covered while its frames are nowhere.
+        """
+        if not self._saved:
+            return
+
+        self._path.unlink(missing_ok=True)
+        self._saved = False
+
+
+# ========================== #
 #           Branch           #
 # ========================== #
 
@@ -247,6 +362,14 @@ class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
 
     Attributes:
         PARTS_SUFFIX: What the folder of parts beside the document is called.
+        path: The document itself, extension included.
+        parts_root: The folder the parts are written into.
+        source: As given.
+        contents: As given, each sequence's frames kept as a tuple.
+        settings: As given.
+        selected: As given, with repeats dropped.
+        if_present: As given.
+        if_unsourced: As given.
 
     Raises:
         ValueError: If `contents` is empty, since coverage would then have nothing

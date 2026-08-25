@@ -2,13 +2,11 @@ from __future__ import annotations
 
 __all__ = ("SequenceEvaluator",)
 
-import json
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, override
 
-from kaparoo.filesystem import StagedFile, ensure_dir_exists
 from kaparoo.utils import quantify
 
-from iivs_cardio.common.pipeline.branch import JSON_EXT
+from iivs_cardio.common.pipeline.document import PartMeter
 from iivs_cardio.optical_flow.metrics import (
     WarpConsistency,
     flow_magnitude,
@@ -23,7 +21,6 @@ from iivs_cardio.optical_flow.pipeline.evaluation import (
 if TYPE_CHECKING:
     from collections.abc import Mapping
     from pathlib import Path
-    from types import TracebackType
 
     from kaparoo.filesystem.types import StrPath
     from torch import Tensor
@@ -33,7 +30,7 @@ if TYPE_CHECKING:
     from iivs_cardio.optical_flow.estimators import OpticalFlowEstimator
 
 
-class SequenceEvaluator:
+class SequenceEvaluator(PartMeter[SequenceEvaluation]):
     """Score every flow of one sequence, then write the result.
 
     This is the hook an evaluation document hands to a sequence. Unlike the
@@ -52,19 +49,14 @@ class SequenceEvaluator:
     cache has no estimator, and so cannot have that axis at all.
 
     Args:
-        root: The folder the part is written into, created if it is not there.
-        source: The name the sequence has, used both in the record and as the
-            name of the file it is written to.
+        root: As `PartMeter`.
+        source: As `PartMeter`.
         frames: The stage the flows were computed from, held rather than
             rebuilt so that both consumers of an index share one computation.
         estimator: The estimator to take the reverse flow from, which doubles
             what a pair costs. Defaults to `None`, which leaves that axis out.
-        settings: The settings that shaped the numbers, written into the part so
-            it can be told from one an earlier run left under different ones.
-            Defaults to `None`, which records nothing and so can never be
-            reused.
-        overwrite: Whether a part already filed under `source` may be replaced.
-            Defaults to `False`.
+        settings: As `PartMeter`.
+        overwrite: As `PartMeter`.
         data_range: The value range SSIM and PSNR are scored against; taken from
             the frame dtype when omitted, which a float frame has none to give.
         padding_mode: `grid_sample` out-of-bounds policy for both warps.
@@ -82,21 +74,16 @@ class SequenceEvaluator:
         data_range: float | None = None,
         padding_mode: PaddingMode = "border",
     ) -> None:
-        root = ensure_dir_exists(root, make=True)
+        super().__init__(root, source, settings, overwrite=overwrite)
 
-        self._path = root / f"{source}{JSON_EXT}"
-        self._source = source
         self._frames = frames
         self._estimator = estimator
-        self._settings = settings
-        self._overwrite = overwrite
         self._data_range = data_range
         self._padding_mode = padding_mode
         self._consistency = WarpConsistency(
             data_range=data_range, padding_mode=padding_mode
         )
         self._scored: list[FrameEvaluation] = []
-        self._saved = False
 
     def __call__(self, step: Step[Tensor, Path]) -> None:
         """Score `step`, so the evaluator can be registered as a hook directly."""
@@ -157,8 +144,16 @@ class SequenceEvaluator:
 
         return float(error)
 
+    @override
+    def _fold(self) -> SequenceEvaluation:
+        return self.to_evaluation()
+
     def to_evaluation(self) -> SequenceEvaluation:
-        """Fold what has been scored so far into one evaluation of the sequence."""
+        """Fold what has been scored so far into one evaluation of the sequence.
+
+        Raises:
+            ValueError: If no pair has been scored yet.
+        """
         return SequenceEvaluation(self._source, tuple(self._scored))
 
     def report(self) -> str | None:
@@ -174,45 +169,3 @@ class SequenceEvaluator:
         error = folded.metrics["fb_error"]
 
         return f"{said}, {error.mean:.4f} px apart" if error.scored else said
-
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        traceback: TracebackType | None,
-    ) -> None:
-        """Write the sequence's part, unless the sequence ended in an error.
-
-        Raises:
-            FileExistsError: If a part is already filed under this name and
-                this evaluator was not told it may replace it.
-        """
-        if exc_type is not None:
-            return
-
-        document: dict[str, object] = {}
-        if self._settings is not None:
-            document["settings"] = dict(self._settings)
-        document |= self.to_evaluation().to_dict()
-
-        with StagedFile(
-            self._path, overwrite=self._overwrite, make_parents=True, encoding="utf-8"
-        ) as file:
-            file.write(json.dumps(document, allow_nan=False))
-
-        self._saved = True
-
-    def revert(self) -> None:
-        """Take back the part, if this evaluator got as far as writing one.
-
-        A part on disk stands for a sequence that finished, and one whose other
-        outputs could not be committed did not.
-        """
-        if not self._saved:
-            return
-
-        self._path.unlink(missing_ok=True)
-        self._saved = False
