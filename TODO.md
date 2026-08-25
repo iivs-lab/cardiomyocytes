@@ -599,6 +599,23 @@ estimator 자식을 두던 상속은 사라졌고 `OpenCVEstimator` 하나가 �
 
 프레임이 추정기에 닿기까지. 무엇으로 스케일하고, 그 범위를 누가 재는가.
 
+### 구현됨 — 상수는 고정이고, 스케일러는 얼어붙은 값이다
+
+
+- `FrameNormalizer(source, target, dtype)`는 **frozen dataclass**이고 `apply(frame)`은
+  프레임 **하나**를 받는다. 두 프레임을 한꺼번에 보던 자리가 사라졌다.
+- `perframe`과 `pairwise`를 지웠다. 둘 다 상수를 호출마다 다시 재므로 **밝기 항상성**을
+  깨고, `apply`를 프레임의 순수 함수가 아니게 만든다. 남은 셋은 상수를 **어디서 재는가**만
+  다르다: `given`(사용자가 준 span) · `sequence` · `dataset`.
+- `NormalizerConfig(level, source, target)`가 hydra 쪽이고, `build(dtype, measured)`가
+  스케일러를 낸다. `sequence`·`dataset`은 범위 문서의 해당 층을 `measured`로 받고,
+  `given`은 자기 `source`를 들고 `measured`를 **거절한다** — 범위 둘을 들고 어느 쪽으로
+  쟀는지 말하지 않는 실행이 생기지 않게.
+- `dtype`은 `EstimatorConfig.FRAME_DTYPE`에서 온다. **기본값 없이** 선언했다. 틀린 값은
+  라이브러리 안쪽 shape 오류로 나타나지 정규화기를 설정한 자리에서 나타나지 않기 때문이다.
+  §「프레임 표현이 추정기에 종속된다」가 여기로 닫혔다.
+- `target=None`이면 dtype 자신의 span을 쓴다 — float은 `[0, 1]`, 정수는 `iinfo` 전체.
+
 ### 결정 — 정규화는 필터링 **이후**다
 
 
@@ -1101,9 +1118,10 @@ flow:                      # 흐름을 어디서 얻는가
   subpath: null            # Flow/Float/Npy, 읽을 때만
 
 normalize:
-  mode: injected           # pairwise | injected  (perframe 은 기각됨)
-  range_file: ???          # 측정 실행이 남긴 value_range.json
-  level: dataset           # dataset | sequence
+  level: dataset           # given | sequence | dataset
+  range_file: ???          # 측정 실행이 남긴 value_range.json (given 이면 불필요)
+  source: null             # given 일 때의 span
+  target: null             # null 이면 FRAME_DTYPE 의 span
 
 target:
   root: ???
@@ -1265,7 +1283,8 @@ pins the concrete dtype and shape」로 이미 열어둔 자리다. cv2는 uint8
 float 3채널이다. 그러면 평가의 `data_range`가 dtype에서 안 나오고 **명시해야 한다** —
 `_resolve_data_range`가 float에 대해 추측을 거부한다. 표현을 둘 두고 uint8 쪽에서 채점하면
 「흐름을 계산한 그 프레임」이라는 전제가 깨지므로, **정규화 출력이 추정기를 따르고 평가가
-`data_range`를 받는 쪽**이 맞다. `FrameNormalizer` 설계의 전제로 놓을 것.
+`data_range`를 받는 쪽**이 맞다. `EstimatorConfig.FRAME_DTYPE`으로 닫혔다 —
+정규화기는 그 dtype으로 스케일하고, 평가기는 `data_range`를 인자로 받는다.
 
 **`no_grad`가 필요해진다(추정기 층).** `warp_consistency`의 gradient가 flow까지 닿는 것은 학습에
 좋은 성질이지만 평가 실행에서는 시퀀스 내내 그래프가 남아 메모리가 터진다. cv2에는 없던 요구다.
@@ -1400,8 +1419,9 @@ float 3채널이다. 그러면 평가의 `data_range`가 dtype에서 안 나오�
 
   - **어떤 추정기도 프로세스 경계를 넘지 못한다.** 전부 자기 `cv2` 객체에서 pickle에
     실패한다. 워커는 **레시피**(params·device·경로)를 받아 자기 것을 만들어야 한다.
-    `FarnebackConfig`·`MedianKernel`·`FrameNormalizer`는 pickle되지만, 정규화기는 가변
-    상태를 들고 `FilteredSequence`는 따뜻한 버퍼를 들고 있으므로 둘 다 보내지 말 것.
+    `FarnebackConfig`·`MedianKernel`·`FrameNormalizer`는 pickle된다. 정규화기가 이제
+    frozen이라 보내도 되지만, `FilteredSequence`는 따뜻한 버퍼를 들고 있으므로 보내지
+    말 것.
   - **풀 `initializer`가 워커를 싸게 만든다** — 시퀀스마다가 아니라 워커마다 추정기 하나.
   - **긴 것부터 정렬하고 동적으로 분배할 것.** 길이 균형 정적 분할과 긴 것부터의
     `imap_unordered`가 동일하게 측정됐다(둘 다 완벽한 분할의 1.07배). 정렬은 한 줄이고

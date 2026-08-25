@@ -1,239 +1,190 @@
 from __future__ import annotations
 
-__all__ = ("FrameNormalizer", "NormalizationMode")
+__all__ = ("RANGE_LEVELS", "FrameNormalizer", "NormalizerConfig", "RangeLevel")
 
-from typing import Literal
+from dataclasses import dataclass
+from typing import Final, Literal
 
 import torch
 from beartype import beartype
 from jaxtyping import Real, jaxtyped
-from kaparoo.utils.optional import unwrap_or_default
+from kaparoo.utils import ensure_one_of, literal_values
 from torch import Tensor
 
-type NormalizationMode = Literal["perframe", "pairwise", "injected"]
+# Which range a frame is scaled from. Not how far the constants are measured
+# over so much as how far two frames stay comparable: a level names the widest
+# thing whose frames a single pair of constants covers.
+type RangeLevel = Literal["given", "sequence", "dataset"]
+
+RANGE_LEVELS: Final[tuple[RangeLevel, ...]] = literal_values(RangeLevel)
+
 type FrameType = Real[Tensor, "*dim H W"]
 
-# The source `(min, max)` a frame is scaled *from*: scalars when injected,
-# `(*dim, 1, 1)` tensors when measured, so either broadcasts over the frame. The
-# target range a frame is scaled *to* is always a plain `(float, float)`.
-type _Range = tuple[Tensor | float, Tensor | float]
 
-
-def _ranges(frames: Tensor) -> tuple[Tensor, Tensor]:
-    flat = frames.flatten(start_dim=-2)
-    return flat.min(dim=-1).values, flat.max(dim=-1).values
-
-
-def _validate_source_ranges(minimum: Tensor, maximum: Tensor) -> None:
-    """Raise if any measured range is empty, which a uniform frame produces."""
-    empty = maximum <= minimum
-    if bool(empty.any()):
-        count = int(empty.sum())
-        msg = f"{count} frame(s) are uniform (max == min); drop or repair them"
-        raise ValueError(msg)
-
-
-def _validate_target(target: tuple[float, float], dtype: torch.dtype) -> None:
-    """Raise if `target` is empty, or an integer `dtype` cannot hold it.
-
-    Stands apart from `FrameNormalizer._resolve_target` so the `target_range`
-    setter can check a value before storing it.
-    """
-    minimum, maximum = target
+def _ensure_span(span: tuple[float, float], key: str) -> tuple[float, float]:
+    """Return `span`, refusing one whose maximum does not exceed its minimum."""
+    minimum, maximum = span
     if maximum <= minimum:
-        span = f"[{minimum}, {maximum}]"
-        msg = f"empty target_range {span}: maximum must exceed minimum"
+        msg = f"empty {key} [{minimum}, {maximum}]: maximum must exceed minimum"
         raise ValueError(msg)
 
-    if dtype.is_floating_point:  # a float dtype bounds nothing
-        return
+    return span
+
+
+def _dtype_span(dtype: torch.dtype) -> tuple[float, float]:
+    """Return the span an output of `dtype` covers when nothing else says.
+
+    `[0, 1]` for a float, whose own span bounds nothing worth scaling onto, and
+    the whole of `iinfo` for an integer, where every step spent is a step the
+    estimator downstream can read a brightness change in.
+    """
+    if dtype.is_floating_point:
+        return 0.0, 1.0
 
     info = torch.iinfo(dtype)
-    if minimum < info.min or maximum > info.max:
-        span = f"[{minimum}, {maximum}]"
-        msg = f"target_range {span} overflows {dtype} [{info.min}, {info.max}]"
-        raise ValueError(msg)
+
+    return float(info.min), float(info.max)
 
 
+@dataclass(frozen=True, slots=True)
 class FrameNormalizer:
-    """Min-max scale a frame pair onto a target range and dtype.
+    """Min-max scale a frame from one fixed range onto another, and onto a dtype.
 
-    `apply(frame1, frame2)` returns both frames scaled, each keeping its
-    `(*dim, H, W)` shape. The mode decides only *which* range they scale from:
+    The range is fixed rather than measured per call, which is what makes this a
+    pure function of the frame. Every frame a normalizer touches scales by the
+    same two constants however it was read, so the brightness constancy a dense
+    estimator assumes survives the scaling, and nothing has to see two frames at
+    once to scale either of them.
 
-    - `perframe`: each frame by its own range, which breaks the brightness
-      constancy every optical-flow estimator assumes.
-    - `pairwise`: both frames by their joint range, so a pair stays comparable.
-    - `injected`: both by `source_range`, spanning more frames than one call
-      sees, which keeps the result order-independent under random access.
-      Sequence or dataset scope is the caller's choice; scaling is identical.
+    Values outside the source range are clamped. That is lossy and expected: a
+    range measured across a sequence or a dataset is not a bound on any one
+    frame of it.
 
-    Args:
-        mode: The range each frame is scaled from.
-        dtype: The output dtype. Defaults to `None`, which keeps each input's
-            own.
-        source_range: The range to scale from, for `injected` mode, and the
-            baseline `reset` returns to. Defaults to `None`.
-        target_range: The span the output covers. Defaults to `None`, which
-            takes the dtype's own: `[0, 1]` for floats and the full `iinfo`
-            span for integers.
+    Attributes:
+        source: The `(min, max)` a frame is scaled from.
+        target: The `(min, max)` the output covers.
+        dtype: The dtype the output is cast to, rounding on the way where it is
+            an integer one.
 
     Raises:
-        ValueError: If `source_range` is set on a mode that measures its own,
-            either range is empty, or `dtype` cannot hold `target_range`.
+        ValueError: If either span is empty, or an integer `dtype` cannot hold
+            `target`.
     """
 
-    def __init__(
-        self,
-        mode: NormalizationMode,
-        *,
-        dtype: torch.dtype | None = None,
-        source_range: tuple[float, float] | None = None,
-        target_range: tuple[float, float] | None = None,
-    ) -> None:
-        self.mode = mode
-        self.dtype = dtype
+    source: tuple[float, float]
+    target: tuple[float, float]
+    dtype: torch.dtype
 
-        self._target_range: tuple[float, float] | None = None
-        if target_range is not None:
-            self.target_range = target_range
+    def __post_init__(self) -> None:
+        """Refuse a scaling that could not be carried out."""
+        _ensure_span(self.source, "source")
+        _ensure_span(self.target, "target")
 
-        self._source_range: tuple[float, float] | None = None
-        if source_range is not None:
-            self.source_range = source_range
+        if self.dtype.is_floating_point:  # a float dtype bounds nothing
+            return
 
-        self._initial_source_range = self._source_range
-
-    @property
-    def source_range(self) -> tuple[float, float] | None:
-        """The range `injected` mode scales from, until `reset` or the next set.
-
-        Raises:
-            ValueError: If set on a mode that measures its own range, or set
-                to a span whose maximum does not exceed its minimum.
-        """
-        return self._source_range
-
-    @source_range.setter
-    def source_range(self, value: tuple[float, float]) -> None:
-        if self.mode != "injected":
-            msg = f"source_range is for the 'injected' mode, not {self.mode!r}"
-            raise ValueError(msg)
-        minimum, maximum = value
-        if maximum <= minimum:
+        info = torch.iinfo(self.dtype)
+        minimum, maximum = self.target
+        if minimum < info.min or maximum > info.max:
             span = f"[{minimum}, {maximum}]"
-            msg = f"empty source_range {span}: maximum must exceed minimum"
+            msg = f"target {span} overflows {self.dtype} [{info.min}, {info.max}]"
             raise ValueError(msg)
-        self._source_range = value
-
-    @property
-    def target_range(self) -> tuple[float, float] | None:
-        """The span the output covers, or `None` to take `dtype`'s own.
-
-        Raises:
-            ValueError: If set to a span the output dtype cannot hold.
-        """
-        return self._target_range
-
-    @target_range.setter
-    def target_range(self, value: tuple[float, float]) -> None:
-        if self.dtype is not None:  # otherwise checked per input in `apply`
-            _validate_target(value, self.dtype)
-        self._target_range = value
-
-    def reset(self) -> None:
-        """Restore the `source_range` given at construction, dropping any set since.
-
-        Back-to-construction rather than back-to-empty, so ending a sequence does
-        not discard configuration.
-        """
-        self._source_range = self._initial_source_range
 
     @jaxtyped(typechecker=beartype)
-    def apply(
-        self, frame1: FrameType, frame2: FrameType
-    ) -> tuple[FrameType, FrameType]:
-        """Min-max scale both frames per the mode, onto the target range and dtype.
+    def apply(self, frame: FrameType) -> FrameType:
+        """Scale `frame` onto the target range and dtype, keeping its shape.
 
         Args:
-            frame1: The `(*dim, H, W)` frame(s) to scale, of any real dtype.
-            frame2: The `(*dim, H, W)` frame(s) sharing `frame1`'s leading dims.
+            frame: The `(*dim, H, W)` frame or frames to scale, of any real
+                dtype. Leading dimensions are along for the ride: one pair of
+                constants covers them all, so a batch scales as one frame does.
+        """
+        minimum, maximum = self.source
+        low, high = self.target
 
-        Returns:
-            Both frames scaled, each keeping its shape and dtype rule. Values
-            outside an injected range are clamped, which is lossy but expected
-            when the range was measured on another split.
+        normalized = (frame.float() - minimum) / (maximum - minimum)
+        scaled = normalized.clamp(0.0, 1.0) * (high - low) + low
+
+        if self.dtype.is_floating_point:
+            return scaled.to(self.dtype)
+
+        return scaled.round().clamp(low, high).to(self.dtype)
+
+
+@dataclass(frozen=True, slots=True)
+class NormalizerConfig:
+    """Where a normalizer's source range comes from, as one value.
+
+    The level is the whole of the choice. `"sequence"` and `"dataset"` name a
+    layer of the range document an earlier run wrote, which the caller reads and
+    hands to `build`. `"given"` carries the span itself, which is what makes two
+    runs under different filters comparable: a measured range is a property of
+    the filter that shaped it, so filter sweeps scale by ranges that are not the
+    same range.
+
+    Attributes:
+        level: Which range a frame is scaled from.
+        source: The span `"given"` scales from. Defaults to `None`, which is
+            what a measured level requires.
+        target: The span the output covers. Defaults to `None`, which takes the
+            output dtype's own.
+
+    Raises:
+        ValueError: If `level` is not one this offers, if `"given"` carries no
+            `source`, if a measured level carries one, or if either span given
+            is empty.
+    """
+
+    level: RangeLevel = "dataset"
+    source: tuple[float, float] | None = None
+    target: tuple[float, float] | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse a level nobody offers, and a source its level cannot use."""
+        ensure_one_of(self.level, RANGE_LEVELS, name="level")
+
+        if self.level == "given":
+            if self.source is None:
+                msg = "level 'given' scales from `source`, which is not set"
+                raise ValueError(msg)
+        elif self.source is not None:
+            msg = f"level {self.level!r} is measured: drop `source`, or use 'given'"
+            raise ValueError(msg)
+
+        if self.source is not None:
+            _ensure_span(self.source, "source")
+
+        if self.target is not None:
+            _ensure_span(self.target, "target")
+
+    def build(
+        self, dtype: torch.dtype, measured: tuple[float, float] | None = None
+    ) -> FrameNormalizer:
+        """Construct the normalizer this describes, for frames of `dtype`.
+
+        Args:
+            dtype: The dtype the output is cast to, which is the one the
+                estimator downstream takes: `EstimatorConfig.FRAME_DTYPE`.
+            measured: The range the document holds at this level. Every level
+                but `"given"` needs it, and `"given"` refuses it rather than
+                scaling by one of two ranges without saying which.
 
         Raises:
-            ValueError: If the `injected` mode has no `source_range`, a measured
-                range is empty (which a uniform frame produces), or an input's
-                own dtype cannot hold `target_range`.
+            ValueError: If a measured level was handed no range, if `"given"`
+                was handed one, or if the normalizer this describes could not
+                scale.
         """
-        dtype1 = unwrap_or_default(self.dtype, frame1.dtype)
-        dtype2 = unwrap_or_default(self.dtype, frame2.dtype)
-
-        source1, source2 = self._resolve_source_ranges(frame1, frame2)
-
-        frame1 = self._scale(frame1, source1, dtype1)
-        frame2 = self._scale(frame2, source2, dtype2)
-        return frame1, frame2
-
-    def _resolve_source_ranges(
-        self, frame1: Tensor, frame2: Tensor
-    ) -> tuple[_Range, _Range]:
-        """Return the `(min, max)` each frame scales from, ready to broadcast.
-
-        An injected range comes back as the stored scalars; a measured one as
-        `(*dim, 1, 1)` tensors, unsqueezed here so `_scale` need not know which.
-        """
-        if self.mode == "injected":
-            if self._source_range is None:
-                msg = f"mode {self.mode!r} has no source_range; set one first"
+        if self.source is not None:
+            if measured is not None:
+                msg = f"level {self.level!r} brings its own range: drop `measured`"
                 raise ValueError(msg)
-            return self._source_range, self._source_range
+            source = self.source
+        elif measured is None:
+            msg = f"level {self.level!r} scales from the range the document holds"
+            raise ValueError(msg)
+        else:
+            source = measured
 
-        min1, max1 = _ranges(frame1)
-        min2, max2 = _ranges(frame2)
+        target = _dtype_span(dtype) if self.target is None else self.target
 
-        if self.mode == "pairwise":
-            min1 = min2 = torch.minimum(min1, min2)
-            max1 = max2 = torch.maximum(max1, max2)
-
-        _validate_source_ranges(min1, max1)
-        _validate_source_ranges(min2, max2)
-
-        range1 = (min1[..., None, None], max1[..., None, None])
-        range2 = (min2[..., None, None], max2[..., None, None])
-
-        return range1, range2
-
-    def _resolve_target(self, dtype: torch.dtype) -> tuple[float, float]:
-        """Return the `(min, max)` an output of `dtype` scales to.
-
-        `target_range` when set, else the dtype's own span. Re-validates the set
-        range because a `dtype` of `None` leaves the output dtype unknown until a
-        frame arrives, so assignment could not check it.
-        """
-        if self._target_range is None:
-            if dtype.is_floating_point:
-                return 0.0, 1.0
-            info = torch.iinfo(dtype)
-            return float(info.min), float(info.max)
-
-        _validate_target(self._target_range, dtype)
-
-        return self._target_range
-
-    def _scale(self, frame: Tensor, source: _Range, dtype: torch.dtype) -> Tensor:
-        # One affine map for every dtype: the source range folds to `[0, 1]`,
-        # which then spans the target range. Integers add only the rounding step.
-        source_min, source_max = source
-        target_min, target_max = self._resolve_target(dtype)
-
-        normalized = (frame.float() - source_min) / (source_max - source_min)
-        normalized = normalized.clamp(0.0, 1.0)
-        scaled = normalized * (target_max - target_min) + target_min
-
-        if dtype.is_floating_point:
-            return scaled.to(dtype)
-        return scaled.round().clamp(target_min, target_max).to(dtype)
+        return FrameNormalizer(source, target, dtype)
