@@ -1140,10 +1140,10 @@ source.root=$OUT/filtered       filter=identity                (1)이 남긴 캐
 그리고 **C에서 `save_flows`는 거절한다.** 읽으면서 쓰면 복사이고, `_validate_output`이 (1)에서
 「소스 위에 쓰는 것」을 거절한 자리와 같다.
 
-#### `settings`가 담아야 하는 것 둘
-
+#### `settings`가 담아야 하는 것 넷
 
 재사용 판정이 `settings`를 비교하므로, **출력을 바꾸는 값이 거기 없으면 조용히 섞인다.**
+그리고 `.npy`가 배열만 나르므로, **나중에 필요한데 파일에 없는 값**도 여기밖에 갈 데가 없다.
 
 - **주입된 범위.** `level: dataset`이면 값이 하나이므로 `settings`에 그대로 넣는다.
   `level: sequence`면 시퀀스마다 다르므로 공유 `settings`가 아니라 **각 시퀀스의 record**에
@@ -1151,6 +1151,18 @@ source.root=$OUT/filtered       filter=identity                (1)이 남긴 캐
   있다. `range_file`의 **경로**만 넣는 것으로는 부족하다. 같은 경로의 문서가 다시 쓰였을 수
   있고, 그것은 `R15`와 같은 함정이다.
 - **흐름이 계산된 것인지 읽힌 것인지.** 두 실행이 같은 이름의 평가 문서를 낸다.
+- **픽셀 크기와 프레임 간격.** flow는 px/frame이고 (3)이 내려는 것은 속도와 힘이므로 µm/px와
+  초/프레임이 있어야 한다. `save_flow_npy`의 docstring이 「the pixel size and frame interval a
+  flow needs to become a physical velocity are **not carried here**」라고 못박아 두었고, 지금
+  `FlowTree`는 그 둘을 아무 데도 넣지 않는다. **캐시를 읽으면 알 방법이 없다.**
+
+  **`settings`에 넣는다. `_make_writer`가 소스에서 꺼내지 않는다.** 프레임 간격은 애초에
+  시퀀스 헤더에 없다 — `source.frames.step`과 취득 주파수(10/20/40 Hz)에서 나오는 **실행의
+  사실**이라 소스에서 꺼낼 수 있는 것이 아니다. 그래서 `FlowTree`의 `S`는 `Named`로 족하고,
+  `_make_writer`가 `source`를 쓰지 않는 것이 맞다(`FrameTree`는 헤더가 나르는 pixel_size와
+  height_scale을 꺼내야 해서 쓴다).
+
+  픽셀 크기가 재사용 판정에 들어가는 것도 맞다. 바뀌었다면 실제로 다른 데이터다.
 
 #### `frame_count`는 소스 프레임 수다
 
