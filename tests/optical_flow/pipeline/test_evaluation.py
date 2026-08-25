@@ -30,7 +30,7 @@ def _frame(index: int, **scores: float | None) -> FrameEvaluation:
 
 
 def _sequence(name: str, count: int, **scores: float | None) -> SequenceEvaluation:
-    return SequenceEvaluation.over(name, [_frame(i, **scores) for i in range(count)])
+    return SequenceEvaluation(name, tuple(_frame(i, **scores) for i in range(count)))
 
 
 def test_the_gain_is_what_the_score_rose_above_doing_nothing():
@@ -46,7 +46,7 @@ def test_a_fold_leaves_out_what_did_not_come_back_finite():
     # A duplicated frame reaches `mse` zero exactly and sends `psnr` to
     # infinity, which is a fact about the dataset rather than a defect here.
     frames = [_frame(0), _frame(1, psnr=math.inf), _frame(2)]
-    folded = SequenceEvaluation.over("plate/TL_00", frames)
+    folded = SequenceEvaluation("plate/TL_00", tuple(frames))
 
     assert folded.pairs == 3
     assert folded.metrics["psnr"].scored == 2
@@ -76,7 +76,7 @@ def test_two_levels_of_folding_answer_what_one_would_have():
     long = _sequence("plate/TL_00", 1200, ssim=0.99)
     short = _sequence("plate/TL_01", 600, ssim=0.90)
 
-    folded = DatasetEvaluation.over("nexel", [long, short])
+    folded = DatasetEvaluation("nexel", (long, short))
 
     flat = (1200 * 0.99 + 600 * 0.90) / 1800
     assert folded.metrics["ssim"].mean == pytest.approx(flat)
@@ -90,7 +90,7 @@ def test_weighting_by_pairs_instead_would_have_been_a_different_answer():
     long = _sequence("plate/TL_00", 1200, ssim=0.99)
     short = _sequence("plate/TL_01", 600, ssim=0.90)
 
-    folded = DatasetEvaluation.over("nexel", [long, short])
+    folded = DatasetEvaluation("nexel", (long, short))
 
     assert folded.metrics["ssim"].mean != pytest.approx((0.99 + 0.90) / 2)
 
@@ -105,7 +105,7 @@ def test_the_ends_name_the_sequences_that_reached_them():
         _sequence("plate/TL_02", 10, ssim=0.97),
     ]
 
-    spread = DatasetEvaluation.over("nexel", sequences).metrics["ssim"]
+    spread = DatasetEvaluation("nexel", tuple(sequences)).metrics["ssim"]
 
     assert spread.minimum == pytest.approx(0.40)
     assert spread.min_source == "plate/TL_01"
@@ -119,14 +119,14 @@ def test_a_sequence_that_scored_none_is_left_out_of_the_ends():
     scored = _sequence("plate/TL_00", 10, ssim=0.99)
     absent = _sequence("plate/TL_01", 10, fb_error=None)
 
-    spread = DatasetEvaluation.over("nexel", [scored, absent]).metrics["fb_error"]
+    spread = DatasetEvaluation("nexel", (scored, absent)).metrics["fb_error"]
 
     assert spread.min_source == "plate/TL_00"
     assert spread.scored == 10
 
 
 def test_a_metric_nobody_measured_reads_as_absent():
-    folded = DatasetEvaluation.over("nexel", [_sequence("a", 5, fb_error=None)])
+    folded = DatasetEvaluation("nexel", (_sequence("a", 5, fb_error=None),))
 
     assert folded.metrics["fb_error"] == Spread(0, 0.0, 0.0, 0.0, "", "")
 
@@ -137,7 +137,7 @@ def test_a_sequence_filed_twice_is_refused():
     twice = [_sequence("plate/TL_00", 5), _sequence("plate/TL_00", 5)]
 
     with pytest.raises(ValueError, match="appears twice"):
-        DatasetEvaluation.over("nexel", twice)
+        DatasetEvaluation("nexel", tuple(twice))
 
 
 @pytest.mark.parametrize("metric", METRICS)
@@ -146,7 +146,7 @@ def test_every_metric_is_folded_at_both_levels(metric):
     sequence = _sequence("plate/TL_00", 3)
 
     assert metric in sequence.metrics
-    assert metric in DatasetEvaluation.over("nexel", [sequence]).metrics
+    assert metric in DatasetEvaluation("nexel", (sequence,)).metrics
 
 
 @pytest.mark.parametrize(
@@ -155,7 +155,7 @@ def test_every_metric_is_folded_at_both_levels(metric):
         pytest.param(_frame(0), id="frame"),
         pytest.param(_sequence("plate/TL_00", 3), id="sequence"),
         pytest.param(
-            DatasetEvaluation.over("nexel", [_sequence("plate/TL_00", 3)]), id="dataset"
+            DatasetEvaluation("nexel", (_sequence("plate/TL_00", 3),)), id="dataset"
         ),
     ),
 )
@@ -164,8 +164,28 @@ def test_what_is_written_reads_back_as_what_it_was(value):
 
 
 def test_a_document_that_is_not_one_is_refused_by_the_key_that_gave_it_away():
-    with pytest.raises(ValueError, match="'pairs' is None"):
-        SequenceEvaluation.from_dict({"source": "plate/TL_00", "metrics": {}})
+    with pytest.raises(ValueError, match="'frames' is None"):
+        SequenceEvaluation.from_dict({"source": "plate/TL_00"})
+
+
+def test_a_fold_is_taken_again_rather_than_read_back():
+    # A document whose numbers were edited by hand cannot disagree with the
+    # pairs under them.
+    folded = _sequence("plate/TL_00", 3, ssim=0.99)
+    edited = folded.to_dict()
+    edited["metrics"]["ssim"]["mean"] = 0.10
+
+    assert SequenceEvaluation.from_dict(edited).metrics["ssim"].mean == pytest.approx(
+        0.99
+    )
+
+
+def test_an_evaluation_of_nothing_is_refused():
+    with pytest.raises(ValueError, match="answered no pair"):
+        SequenceEvaluation("plate/TL_00", ())
+
+    with pytest.raises(ValueError, match="holds no sequence"):
+        DatasetEvaluation("nexel", ())
 
 
 def test_a_score_that_is_not_finite_is_not_read_back():

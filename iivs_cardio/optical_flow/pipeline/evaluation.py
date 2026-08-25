@@ -10,12 +10,12 @@ __all__ = (
 )
 
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from math import isfinite
 from typing import TYPE_CHECKING, Any, Final, Self
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Iterable
 
 # The scores one pair is judged on, in the order a document lists them. `gain`
 # is not among them: it is `ssim` above `ssim_floor`, and folding a difference
@@ -62,6 +62,11 @@ def _number(document: Mapping[str, Any], key: str) -> float:
     return float(value)
 
 
+def _score(document: Mapping[str, Any], key: str) -> float | None:
+    """Read `key` as a score that may be absent, refusing a non-finite one."""
+    return None if document.get(key) is None else _number(document, key)
+
+
 # ========================== #
 #           Scores           #
 # ========================== #
@@ -71,11 +76,16 @@ def _number(document: Mapping[str, Any], key: str) -> float:
 class FrameEvaluation:
     """What one pair of frames scored, and the flow between them.
 
-    Every score is kept as it came, non-finite ones included, so that folding is
-    the one place that decides what to do about them. A duplicated frame reaches
-    `mse` zero exactly, and `psnr` is then infinite: a fact about the dataset
-    rather than a defect in the metric, and one no fold can recover once it has
-    been dropped here.
+    A score is a finite number or it is absent, and nothing in between: JSON has
+    no infinity to write and the fold has nothing to do with one, so a
+    non-finite score is taken as absent here rather than carried to be dropped
+    later. What is lost is only why it is absent, and what a metric that is
+    always computed cannot say is that it was not.
+
+    A duplicated frame is how that happens: the reconstruction is exact, `mse`
+    is zero, and `psnr` has nowhere to go. The count survives as the difference
+    between a fold's `pairs` and its `scored`, and which pair it was survives as
+    the absence here.
 
     Attributes:
         source: The frame this pair starts from, which is what a flow is
@@ -83,26 +93,37 @@ class FrameEvaluation:
         ssim: Structural similarity of the reconstruction against `frame1`.
         ssim_floor: What a zero flow would have scored, which `ssim` is read
             above rather than on its own.
-        psnr: Peak signal-to-noise ratio of the same reconstruction, in dB.
+        psnr: Peak signal-to-noise ratio of the same reconstruction, in dB,
+            which an exact reconstruction leaves absent.
         mse: Mean squared error of it.
         mae: Mean absolute error of it.
         magnitude: Mean `|flow|` in pixels, which is how much motion was found.
-        fb_error: Mean forward-backward inconsistency in pixels, or `None`
-            where no estimator was there to compute the reverse flow.
+        fb_error: Mean forward-backward inconsistency in pixels, absent where
+            no estimator was there to compute the reverse flow.
     """
 
     source: str
-    ssim: float
-    ssim_floor: float
-    psnr: float
-    mse: float
-    mae: float
-    magnitude: float
+    ssim: float | None
+    ssim_floor: float | None
+    psnr: float | None
+    mse: float | None
+    mae: float | None
+    magnitude: float | None
     fb_error: float | None = None
 
+    def __post_init__(self) -> None:
+        """Take a non-finite score as absent, there being nowhere to put one."""
+        for metric in METRICS:
+            value = getattr(self, metric)
+            if value is not None and not isfinite(value):
+                object.__setattr__(self, metric, None)
+
     @property
-    def gain(self) -> float:
+    def gain(self) -> float | None:
         """How far `ssim` rose above what doing nothing would have scored."""
+        if self.ssim is None or self.ssim_floor is None:
+            return None
+
         return self.ssim - self.ssim_floor
 
     def score(self, metric: str) -> float | None:
@@ -126,24 +147,15 @@ class FrameEvaluation:
     def from_dict(cls, document: Mapping[str, Any]) -> Self:
         """Rebuild one pair's scores from what `to_dict` produced.
 
-        A non-finite score is not read back, having been written by something
-        other than this: the fold that writes a part leaves them out.
+        A non-finite score is refused rather than read as absent: what wrote
+        it was not this, and taking it for an absence would be a guess.
 
         Raises:
             ValueError: If a key it needs is absent or unreadable.
         """
-        fb_error = document.get("fb_error")
+        scores = {metric: _score(document, metric) for metric in METRICS}
 
-        return cls(
-            source=_entry(document, "source", str),
-            ssim=_number(document, "ssim"),
-            ssim_floor=_number(document, "ssim_floor"),
-            psnr=_number(document, "psnr"),
-            mse=_number(document, "mse"),
-            mae=_number(document, "mae"),
-            magnitude=_number(document, "magnitude"),
-            fb_error=None if fb_error is None else _number(document, "fb_error"),
-        )
+        return cls(source=_entry(document, "source", str), **scores)
 
 
 # ========================== #
@@ -291,135 +303,148 @@ class Spread(Measured):
 
 @dataclass(frozen=True, slots=True)
 class SequenceEvaluation:
-    """What one sequence scored, folded from the pairs it was measured over.
+    """What one sequence scored, over the pairs it was measured on.
+
+    The pairs are kept, not only the fold of them, so a document carries what
+    it was folded from. That is what lets a run split into chunks be folded
+    again from its parts, and what a reader goes to when a mean is not the
+    whole story.
 
     Attributes:
         source: The name the sequence has in its dataset.
-        pairs: How many flows it answered, which is one fewer than the frames it
-            holds and is what every metric's `scored` is read against.
-        metrics: What each metric scored, by name.
+        frames: What each pair scored, in the order they were measured.
+        pairs: How many flows the sequence answered, which is one fewer than
+            the frames it holds and is what every `scored` is read against.
+        metrics: What each metric scored, by name, over the finite ones.
+
+    Raises:
+        ValueError: If there are no pairs, since a sequence that answered
+            nothing has nothing to say and a part standing for it would count
+            as covered.
     """
 
     source: str
-    pairs: int
-    metrics: Mapping[str, Measured]
+    frames: tuple[FrameEvaluation, ...]
+    pairs: int = field(init=False)
+    metrics: Mapping[str, Measured] = field(init=False)
 
-    @classmethod
-    def over(cls, source: str, frames: Sequence[FrameEvaluation]) -> Self:
-        """Fold every pair of one sequence, one metric at a time."""
-        metrics = {
-            metric: Measured.over(frame.score(metric) for frame in frames)
+    def __post_init__(self) -> None:
+        """Fold the pairs, one metric at a time."""
+        if not self.frames:
+            msg = f"evaluation is undefined: {self.source!r} answered no pair"
+            raise ValueError(msg)
+
+        folded = {
+            metric: Measured.over(frame.score(metric) for frame in self.frames)
             for metric in METRICS
         }
 
-        return cls(source, len(frames), metrics)
+        object.__setattr__(self, "pairs", len(self.frames))
+        object.__setattr__(self, "metrics", folded)
+
+    def __len__(self) -> int:
+        """The number of pairs folded here."""
+        return len(self.frames)
 
     def dropped(self, metric: str) -> int:
         """How many of the pairs this metric did not come back finite for."""
         return self.pairs - self.metrics[metric].scored
 
     def to_dict(self) -> dict[str, Any]:
-        """Return the fold as plain data, ready to be written as JSON."""
-        return {
-            "source": self.source,
-            "pairs": self.pairs,
-            "metrics": {
-                name: one.to_dict() for name, one in sorted(self.metrics.items())
-            },
-        }
+        """Return the evaluation as plain data, ready to be written as JSON."""
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, document: Mapping[str, Any]) -> Self:
-        """Rebuild one sequence's fold from what `to_dict` produced.
+        """Rebuild one sequence's evaluation from its `source` and its `frames`.
+
+        The fold is taken again rather than read back, so a document whose
+        numbers were edited by hand cannot disagree with the pairs under them.
 
         Raises:
-            ValueError: If a key it needs is absent or unreadable.
+            ValueError: If either key is absent, or a pair cannot be read.
         """
-        metrics = _entry(document, "metrics", dict)
+        frames = _entry(document, "frames", (list, tuple))
 
         return cls(
-            source=_entry(document, "source", str),
-            pairs=_entry(document, "pairs", int),
-            metrics={
-                name: Measured.from_dict(_entry(metrics, name, dict))
-                for name in METRICS
-            },
+            _entry(document, "source", str),
+            tuple(FrameEvaluation.from_dict(frame) for frame in frames),
         )
 
 
 @dataclass(frozen=True, slots=True)
 class DatasetEvaluation:
-    """What a dataset scored, folded from the sequences it was measured over.
+    """What a dataset scored, over the sequences it covers.
+
+    Folding the parts in one pass rather than merging folded documents is what
+    keeps this exact: every sequence is in view at once, so the ends are the
+    real ends and the weights the real weights however the run was split.
 
     Attributes:
-        source: The name the dataset is filed under.
+        source: The dataset root the run read, which is what tells two
+            documents apart when someone comes to merge them.
+        sequences: What each sequence scored, in the order they were folded.
         pairs: The flows every sequence answered together.
         metrics: What each metric scored across them, with the ends and who
             reached them.
+
+    Raises:
+        ValueError: If there are no sequences, or if two are filed under one
+            name, which would leave one out of every fold without saying so.
     """
 
     source: str
-    pairs: int
-    metrics: Mapping[str, Spread]
+    sequences: tuple[SequenceEvaluation, ...]
+    pairs: int = field(init=False)
+    metrics: Mapping[str, Spread] = field(init=False)
 
-    @classmethod
-    def over(cls, source: str, sequences: Sequence[SequenceEvaluation]) -> Self:
-        """Fold every sequence of one dataset, one metric at a time.
-
-        Folding the parts in one pass rather than merging folded documents is
-        what keeps this exact: every sequence is in view at once, so the ends
-        are the real ends and the weights are the real weights however the run
-        was split into chunks.
-
-        Raises:
-            ValueError: If two sequences are filed under one name, which would
-                leave one of them out of every fold without saying so.
-        """
-        names = [one.source for one in sequences]
-        if len(set(names)) != len(names):
-            msg = f"a sequence appears twice in {source!r}: {sorted(names)}"
+    def __post_init__(self) -> None:
+        """Fold the sequences, one metric at a time."""
+        if not self.sequences:
+            msg = f"evaluation is undefined: {self.source!r} holds no sequence"
             raise ValueError(msg)
 
-        metrics = {
+        names = [one.source for one in self.sequences]
+        if len(set(names)) != len(names):
+            msg = f"a sequence appears twice in {self.source!r}: {sorted(names)}"
+            raise ValueError(msg)
+
+        folded = {
             metric: Spread.across(
-                {one.source: one.metrics[metric] for one in sequences}
+                {one.source: one.metrics[metric] for one in self.sequences}
             )
             for metric in METRICS
         }
 
-        return cls(source, sum(one.pairs for one in sequences), metrics)
+        object.__setattr__(self, "pairs", sum(one.pairs for one in self.sequences))
+        object.__setattr__(self, "metrics", folded)
+
+    def __len__(self) -> int:
+        """The number of sequences folded here."""
+        return len(self.sequences)
 
     def dropped(self, metric: str) -> int:
         """How many pairs this metric did not come back finite for.
 
         Summed over the dataset, this is how many duplicated frames and empty
-        fields it holds: the only way a reconstruction is exact.
+        fields it holds: an exact reconstruction is the only way to reach one.
         """
         return self.pairs - self.metrics[metric].scored
 
     def to_dict(self) -> dict[str, Any]:
-        """Return the fold as plain data, ready to be written as JSON."""
-        return {
-            "source": self.source,
-            "pairs": self.pairs,
-            "metrics": {
-                name: one.to_dict() for name, one in sorted(self.metrics.items())
-            },
-        }
+        """Return the evaluation as plain data, ready to be written as JSON."""
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, document: Mapping[str, Any]) -> Self:
-        """Rebuild a dataset's fold from what `to_dict` produced.
+        """Rebuild a dataset's evaluation from its `source` and its `sequences`.
 
         Raises:
-            ValueError: If a key it needs is absent or unreadable.
+            ValueError: If either key is absent, or a sequence cannot be read.
         """
-        metrics = _entry(document, "metrics", dict)
+        sequences = _entry(document, "sequences", (list, tuple))
 
         return cls(
-            source=_entry(document, "source", str),
-            pairs=_entry(document, "pairs", int),
-            metrics={
-                name: Spread.from_dict(_entry(metrics, name, dict)) for name in METRICS
-            },
+            _entry(document, "source", str),
+            tuple(SequenceEvaluation.from_dict(one) for one in sequences),
         )
