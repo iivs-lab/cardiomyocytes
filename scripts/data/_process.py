@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 __all__ = (
+    "PreprocessInputs",
     "PreprocessSourceConfig",
     "PreprocessTargetConfig",
     "build_branches",
@@ -12,7 +13,7 @@ __all__ = (
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Self
 
 from kaparoo.utils import unwrap_or_factory
 
@@ -29,18 +30,21 @@ from scripts._common.dataset import (
     log_branch_policies,
     log_source_config,
 )
+from scripts._common.filtering import describe_filter_kernel, log_filter_config
+from scripts._common.hydra import apply_schema
 from scripts._common.phase import (
     PhaseSourceConfig,
     build_sequences,
     log_short_sequences,
 )
-from scripts.data._filtering import describe_filter_kernel, log_filter_config
+from scripts._common.settings import StageInputs
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
     from logging import Logger
 
     from kaparoo.filesystem.types import StrPath
+    from omegaconf import DictConfig
     from torch import Tensor
 
     from iivs_cardio.common.pipeline import SideBranch
@@ -114,6 +118,35 @@ class PreprocessTargetConfig:
 
     frames: FrameBranchConfig = field(default_factory=FrameBranchConfig)
     ranges: RangeBranchConfig = field(default_factory=RangeBranchConfig)
+
+
+@dataclass(frozen=True, slots=True)
+class PreprocessInputs(StageInputs["PreprocessSourceConfig"]):
+    """The whole of what this stage's `main` reads out of its configuration.
+
+    Attributes:
+        source: As `StageInputs`, which for this stage is phase as it comes off
+            the microscope.
+        select: As `StageInputs`.
+        kernel: As `StageInputs`.
+        compute: As `StageInputs`.
+        target: What to write, one block per branch.
+    """
+
+    target: PreprocessTargetConfig
+
+    @classmethod
+    def read(cls, config: DictConfig) -> Self:
+        """Read a composed job into the settings this stage runs on.
+
+        Raises:
+            TypeError: If `filter` describes no kernel.
+            ValidationError: If a value does not fit the field it was read for.
+        """
+        return cls(
+            **cls._shared(PreprocessSourceConfig, config),
+            target=apply_schema(PreprocessTargetConfig, config.target),
+        )
 
 
 def _validate_output(

@@ -3,6 +3,7 @@ from __future__ import annotations
 __all__ = (
     "EvaluationBranchConfig",
     "FlowBranchConfig",
+    "FlowInputs",
     "FlowSourceConfig",
     "FlowTargetConfig",
     "build_branches",
@@ -14,7 +15,7 @@ __all__ = (
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, Self
 
 from kaparoo.utils import unwrap_or_factory
 
@@ -22,6 +23,7 @@ from iivs_cardio.common.logging import log_indented
 from iivs_cardio.common.pipeline.branch import ensure_json_name
 from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig
 from iivs_cardio.optical_flow.data import FLOW_FLOAT_NPY
+from iivs_cardio.optical_flow.estimators import EstimatorConfig
 from iivs_cardio.optical_flow.pipeline import (
     EvaluationDocument,
     FlowStageFactory,
@@ -34,15 +36,18 @@ from scripts._common.dataset import (
     log_branch_policies,
     log_source_config,
 )
+from scripts._common.filtering import describe_filter_kernel, log_filter_config
+from scripts._common.hydra import apply_schema
 from scripts._common.phase import (
     PhaseSourceConfig,
     build_sequences,
     log_short_sequences,
 )
-from scripts.data._filtering import describe_filter_kernel, log_filter_config
+from scripts._common.settings import StageInputs
 from scripts.optical_flow._estimating import (
     describe_estimator_config,
     log_estimator_config,
+    parse_estimator_config,
 )
 from scripts.optical_flow._normalizing import (
     NormalizeConfig,
@@ -55,11 +60,11 @@ if TYPE_CHECKING:
     from logging import Logger
 
     from kaparoo.filesystem.types import StrPath
+    from omegaconf import DictConfig
     from torch import Tensor
 
     from iivs_cardio.common.pipeline import SideBranch
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
-    from iivs_cardio.optical_flow.estimators import EstimatorConfig
     from iivs_cardio.optical_flow.pipeline import FlowSource
     from scripts._common.dataset import SequenceSelectConfig
     from scripts.optical_flow._normalizing import Normalization
@@ -138,6 +143,47 @@ class FlowTargetConfig:
 
     flows: FlowBranchConfig = field(default_factory=FlowBranchConfig)
     evaluations: EvaluationBranchConfig = field(default_factory=EvaluationBranchConfig)
+
+
+@dataclass(frozen=True, slots=True)
+class FlowInputs(StageInputs["FlowSourceConfig"]):
+    """The whole of what this stage's `main` reads out of its configuration.
+
+    Two more than preprocessing takes, and they are the two halves of what a
+    frame has to become before an estimator will read it: the range it is
+    scaled from, and the estimator whose dtype it is scaled onto.
+
+    Attributes:
+        source: As `StageInputs`, which here is phase however it was written,
+            whether an acquisition or the cache preprocessing left.
+        select: As `StageInputs`.
+        kernel: As `StageInputs`, and a kernel that does nothing wherever the
+            source was filtered already.
+        compute: As `StageInputs`.
+        normalize: Where the range the frames are scaled from comes from.
+        estimator: The estimator the flows are computed with.
+        target: What to write, one block per branch.
+    """
+
+    normalize: NormalizeConfig
+    estimator: EstimatorConfig
+    target: FlowTargetConfig
+
+    @classmethod
+    def read(cls, config: DictConfig) -> Self:
+        """Read a composed job into the settings this stage runs on.
+
+        Raises:
+            TypeError: If `filter` describes no kernel, or `estimator` no
+                estimator.
+            ValidationError: If a value does not fit the field it was read for.
+        """
+        return cls(
+            **cls._shared(FlowSourceConfig, config),
+            normalize=apply_schema(NormalizeConfig, config.normalize),
+            estimator=parse_estimator_config(config.get("estimator")),
+            target=apply_schema(FlowTargetConfig, config.target),
+        )
 
 
 def _evaluation_file(target_config: FlowTargetConfig) -> str:

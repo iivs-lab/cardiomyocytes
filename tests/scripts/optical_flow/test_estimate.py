@@ -10,10 +10,16 @@ from hydra.core.hydra_config import HydraConfig
 from hydra.core.singleton import Singleton
 from omegaconf import OmegaConf
 
+from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig
+from iivs_cardio.optical_flow.estimators import DeepFlowConfig
 from scripts._common.dataset import SequenceSelectConfig
 from scripts._common.phase import LAST_SEARCH
 from scripts.optical_flow._normalizing import NormalizeConfig
-from scripts.optical_flow._process import FlowSourceConfig, FlowTargetConfig
+from scripts.optical_flow._process import (
+    FlowInputs,
+    FlowSourceConfig,
+    FlowTargetConfig,
+)
 from scripts.optical_flow.estimate import CONFIG_NAME, CONFIG_PATH, main
 from tests.scripts.optical_flow.helpers import SEQUENCES, phase_tree, range_document
 
@@ -140,3 +146,36 @@ def test_a_sweep_is_refused_before_it_writes_the_one_tree(tmp_path):
         main.__wrapped__(composed)
 
     assert not (tmp_path / "job" / "TL_00").exists()
+
+
+def test_a_composed_job_is_read_into_one_value():
+    composed = _composed(
+        "source.root=/data",
+        "estimator=deepflow",
+        "normalize.level=given",
+        "normalize.source=[0,1]",
+        "select.exclude=[TL_00,TL_01]",
+    )
+
+    inputs = FlowInputs.read(composed)
+
+    assert inputs.source.root == "/data"
+    assert isinstance(inputs.estimator, DeepFlowConfig)
+    assert isinstance(inputs.kernel, IdentityConfig)
+    assert inputs.normalize.level == "given"
+    assert inputs.normalize.source == [0.0, 1.0]
+    assert inputs.target.evaluations.save
+
+
+def test_what_was_read_holds_plain_python_rather_than_configuration():
+    # Nothing past `main` should have to know where its settings came from, so
+    # a container reaching the run would carry hydra's own rules into it.
+    inputs = FlowInputs.read(_composed("source.root=/data", "select.exclude=[TL_00]"))
+
+    assert type(inputs.select.exclude) is list
+    assert type(inputs.source.frames.start) is int
+
+
+def test_a_job_with_no_estimator_is_refused_where_it_is_read():
+    with pytest.raises(TypeError, match="`estimator` is not set"):
+        FlowInputs.read(_composed("source.root=/data", "~estimator"))

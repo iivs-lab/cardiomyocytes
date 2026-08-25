@@ -25,8 +25,8 @@ from iivs_cardio.data.transforms.filtering.kernel import MedianConfig
 from iivs_cardio.data.writer import RECORD_FILE
 from scripts._common.compute import ComputeConfig, IncompleteRunError, run_all
 from scripts._common.dataset import LISTING_LIMIT, SequenceSelectConfig
+from scripts._common.filtering import parse_filter_config
 from scripts._common.phase import build_sequences, search_sources
-from scripts.data._filtering import parse_filter_config
 from scripts.data._process import (
     FrameBranchConfig,
     PreprocessSourceConfig,

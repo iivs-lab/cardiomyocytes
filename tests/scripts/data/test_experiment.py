@@ -8,8 +8,8 @@ from hydra.core.hydra_config import HydraConfig
 from hydra.types import RunMode
 from omegaconf import OmegaConf
 
+from scripts._common.filtering import parse_filter_config
 from scripts._common.hydra import ensure_sweep_runs
-from scripts.data._filtering import parse_filter_config
 from scripts.data.preprocess import CONFIG_NAME, CONFIG_PATH
 
 EXPERIMENTS = tuple(

@@ -10,9 +10,14 @@ from hydra.core.hydra_config import HydraConfig
 from hydra.core.singleton import Singleton
 from omegaconf import OmegaConf
 
+from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig
 from scripts._common.compute import ComputeConfig
 from scripts._common.dataset import SequenceSelectConfig
-from scripts.data._process import PreprocessSourceConfig, PreprocessTargetConfig
+from scripts.data._process import (
+    PreprocessInputs,
+    PreprocessSourceConfig,
+    PreprocessTargetConfig,
+)
 from scripts.data.preprocess import CONFIG_NAME, CONFIG_PATH, main
 
 if TYPE_CHECKING:
@@ -129,3 +134,24 @@ def test_a_sweep_is_refused_before_it_writes_the_one_tree(phase_tree, tmp_path):
         main.__wrapped__(composed)
 
     assert not (tmp_path / "TL_00").exists()
+
+
+def test_a_composed_job_is_read_into_one_value():
+    composed = _composed(
+        "source.root=/data", "filter=identity", "target.frames.save=true"
+    )
+
+    inputs = PreprocessInputs.read(composed)
+
+    assert inputs.source.root == "/data"
+    assert isinstance(inputs.kernel, IdentityConfig)
+    assert inputs.target.frames.save
+    assert inputs.compute.workers == 0
+
+
+def test_a_job_with_no_filter_still_names_a_kernel():
+    # Unlike the estimator there is a kernel that does nothing, so dropping the
+    # group is a run that filters nothing rather than one that cannot run.
+    inputs = PreprocessInputs.read(_composed("source.root=/data", "~filter"))
+
+    assert isinstance(inputs.kernel, IdentityConfig)

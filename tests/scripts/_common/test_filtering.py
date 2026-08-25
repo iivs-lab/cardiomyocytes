@@ -8,7 +8,7 @@ from hydra import compose, initialize_config_dir
 from omegaconf import OmegaConf
 
 from iivs_cardio.data.transforms.filtering.kernel import IdentityKernel, MedianKernel
-from scripts.data._filtering import describe_filter_kernel, parse_filter_config
+from scripts._common.filtering import describe_filter_kernel, parse_filter_config
 from scripts.data.preprocess import CONFIG_NAME, CONFIG_PATH
 
 
