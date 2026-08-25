@@ -704,6 +704,23 @@ median 필터는 이 오염에 대한 정확한 대응이고, 창 안 절반 미
 (1)에서 물려받는 것과 (2)에서만 다른 것. 평가가 소비자가 아니라 조인이라는 사실 하나가
 메인 스트림의 모양까지 정한다.
 
+### 구현됨 — 문서 기계를 뽑았고, 곁가지 둘이 모두 섰다
+
+
+- `DocumentBranch[S, P, D, M]`(`common/pipeline/document.py`)을 `RangeDocument`에서
+  뽑았다. `Coverage`와 문서 라이터가 함께 왔고, `data`에 기대는 것이 하나도 없어
+  `common`에 산다 — 라이터 때문에 `data`에 남은 `FrameBranch`와 갈리는 지점이다.
+- 추상은 계획의 셋이 아니라 **넷**이다. `_expected(names)`가 늘었다. 파트가 몇 개의
+  이름을 대야 하는가는 값이 아니라 **단이 정하는 것**이고, 프레임 곁가지가 답하는 것과
+  같은 질문이다. §「재사용 판정이 1:1을 전제한다」가 여기로 접혔다.
+- `PartMeter[P]`도 뽑았다. `SequenceRangeMeter`와 `SequenceEvaluator`는 파트를 어디에
+  쓰는지, 오류로 닫으면 아무것도 안 쓴다는 것, 설정을 수치 위에 얹는 것, `revert`가
+  파트를 되가져온다는 것까지 같았다. 자식은 「내가 접히는 것」 하나만 말한다.
+- `EvaluationDocument`(`optical_flow/pipeline/document.py`)와 `FlowTree`로 (2)의
+  곁가지 둘이 섰다. 남은 것은 정규화와 배선이다.
+- `to_range`는 `to_dataset`이 되고 `save_range_document`는 `save_document`가 됐다.
+  범위에 대한 이름이 아니게 됐다.
+
 ### 결정 — 곁가지 둘은 (1)의 것을 물려받는다. 이음매는 각각 하나다
 
 
@@ -762,15 +779,16 @@ KoalaFrameWriter(dest, save_flow_npy, stem="flow", ext="npy", overwrite=..., rec
 `_source_of`·`save`·`report`·`__enter__`·`__exit__`·`found`·`_replacing`은 파트 파일과
 스테이징만 다룬다. **`Coverage`는 이름만 세므로 그대로 쓴다.**
 
-`PartDocument[S, D]`를 뽑고 셋만 추상으로 남긴다.
+`DocumentBranch[S, P, D, M]`을 뽑고 넷만 추상으로 남긴다.
 
 ```
-_make_meter(source)      한 시퀀스를 재는 훅
-_parse(document) -> S    파트 하나를 읽어 들이는 것
-_fold(parts) -> D | None 전체로 접는 것
+_make_meter(source) -> M   한 시퀀스를 재는 훅
+_parse(document) -> P      파트 하나를 읽어 들이는 것
+_fold(parts) -> D          전체로 접는 것
+_expected(names)           그 시퀀스가 파트에 대야 하는 이름들
 ```
 
-`RangeDocument`와 `FlowMetricsDocument`가 그 자식이 된다.
+`RangeDocument`와 `EvaluationDocument`가 그 자식이 된다.
 
 #### 값 타입은 공유하지 않는다 — 접는 방식이 다르다
 
@@ -779,15 +797,15 @@ _fold(parts) -> D | None 전체로 접는 것
 평균으로 접어야 하고 **평균은 그렇지 않다.**
 
 **이 데이터셋에서 실제로 문제가 된다.** 600프레임 시퀀스와 1200프레임 시퀀스가 섞여 있으므로
-시퀀스 평균들을 다시 평균내면 짧은 쪽이 두 배로 세어진다. `DatasetMetrics`는 프레임 수를
+시퀀스 평균들을 다시 평균내면 짧은 쪽이 두 배로 세어진다. `DatasetEvaluation`은 프레임 수를
 들고 **가중 평균**을 내야 한다.
 
 PSNR은 이미 결정돼 있다. `_metrics`의 주석이 「per sample로 재고 나서 평균낸다, 배치 전체의
 오차 하나에 log를 씌우는 pooled 형태는 다른 양이다」라고 못박았으므로, 문서의 데이터셋 수치도
 **프레임 수로 가중한 프레임 평균**이다.
 
-그러니 `ValueRange` 계열을 억지로 일반화하지 않는다. `FrameMetrics`·`SequenceMetrics`·
-`DatasetMetrics`를 따로 두되 **모양은 같게** 한다(`Frame<X>` → `Sequence<X>` → `Dataset<X>`).
+그러니 `ValueRange` 계열을 억지로 일반화하지 않는다. `FrameEvaluation`·`SequenceEvaluation`·
+`DatasetEvaluation`을 따로 두되 **모양은 같게** 한다(`Frame<X>` → `Sequence<X>` → `Dataset<X>`).
 공유하는 것은 문서 기계이지 값이 아니다.
 
 #### 두 곁가지가 함께 밟는 것 — 재사용 판정이 1:1을 전제한다
@@ -913,7 +931,7 @@ ground truth를 만들지도 않는다. 곁가지가 이미 `step.value`로 들�
 
 ### 결정 — 세는 것이 둘이다. `pairs`는 문맥이고, 가중치는 지표마다의 `scored`다
 
-**`FrameMetrics`는 `ValueRange`와 모양이 다르다.** 후자는 한 양의 두 끝이고, 전자는 이름 붙은
+**`FrameEvaluation`은 `ValueRange`와 모양이 다르다.** 후자는 한 양의 두 끝이고, 전자는 이름 붙은
 수 여럿이다(`ssim`·`psnr`·`mse`·`mae`에 gain과 FB가 붙는다). 값 타입을 공유하지 않는 결정이
 여기서도 맞다.
 
