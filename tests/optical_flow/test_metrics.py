@@ -5,7 +5,7 @@ import pytest
 import torch
 
 from iivs_cardio.common.warp import backward_warp
-from iivs_cardio.optical_flow.evaluation import WarpConsistency, warp_consistency
+from iivs_cardio.optical_flow.metrics import WarpConsistency, warp_consistency
 
 METRICS = {"ssim", "psnr", "mse", "mae"}
 

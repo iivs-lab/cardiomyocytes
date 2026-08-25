@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-__all__ = ("WarpConsistency", "warp_consistency")
+__all__ = (
+    "WarpConsistency",
+    "flow_magnitude",
+    "forward_backward_error",
+    "identity_ssim",
+    "warp_consistency",
+)
 
 from typing import cast
 
@@ -122,6 +128,107 @@ def warp_consistency(
     """
     warped = backward_warp(frame2, flow, padding_mode=padding_mode)
     return _metrics(warped, frame1, data_range, reduce=reduce)
+
+
+@jaxtyped(typechecker=beartype)
+def identity_ssim(
+    frame1: FrameType,
+    frame2: FrameType,
+    *,
+    data_range: float | None = None,
+    reduce: bool = True,
+) -> Tensor:
+    """SSIM of a zero flow: the floor every real flow's score is read against.
+
+    Inter-frame motion here is sub-pixel, so two consecutive frames are already
+    nearly alike and a flow of exactly zero scores around 0.95. Raw SSIM
+    therefore says almost nothing, and what a search compares is the gain above
+    this.
+
+    No warp is done. Sampling at `grid + 0` gives the frame back unchanged, so
+    the floor is `frame2` scored against `frame1` as they stand.
+
+    Args:
+        frame1: `(*dim, H, W)` frame(s) to score against, any real dtype.
+        frame2: `(*dim, H, W)` frame(s) that a flow would have been warped from.
+        data_range: SSIM value range; inferred from the frame dtype when
+            omitted, required for float frames.
+        reduce: average over the batch to a 0-d scalar. `False` keeps one score
+            per pair, shaped `(*dim)`.
+
+    Returns:
+        The floor, which is `1` where the two frames are identical. A duplicated
+        frame reaches that exactly, so a caller folding these has a value that
+        no gain can be earned above rather than one that is merely high.
+    """
+    return _metrics(frame2, frame1, data_range, reduce=reduce)["ssim"]
+
+
+@jaxtyped(typechecker=beartype)
+def forward_backward_error(
+    forward: FlowType,
+    backward: FlowType,
+    *,
+    padding_mode: PaddingMode = "border",
+    reduce: bool = True,
+) -> Tensor:
+    """Mean `|f_fwd(x) + f_bwd(x + f_fwd(x))|` in pixels; `0` for a consistent flow.
+
+    Following a correspondence forward and then back should return where it
+    started, and the residual says how far it does not. This is what a flow that
+    won its photometric score by fitting noise fails: the noise it latched onto
+    is not a correspondence, so following it back lands somewhere else.
+
+    It cannot be read alone either. **A zero flow scores a perfect `0`**, having
+    nothing to be inconsistent about, so this and the gain over
+    `identity_ssim` are read together or neither is worth reading.
+
+    `backward_warp` samples at `grid + offset`, so warping the backward field by
+    the forward one evaluates it exactly where the forward field claims the
+    pixel went. The forward field is broadcast over the backward field's own two
+    channels, which warp together.
+
+    Args:
+        forward: `(*dim, 2, H, W)` float32 flow `frame1 -> frame2`.
+        backward: `(*dim, 2, H, W)` float32 flow `frame2 -> frame1`, which is
+            the same pair the other way round rather than a neighbouring pair.
+        padding_mode: `grid_sample` out-of-bounds policy for the warp.
+        reduce: average over the batch to a 0-d scalar. `False` keeps one error
+            per pair, shaped `(*dim)`.
+
+    Returns:
+        The error in pixels, which is the unit the flow itself is in.
+    """
+    lead = forward.shape[:-3]
+    spread = forward.unsqueeze(-4).expand(*lead, 2, *forward.shape[-3:])
+    residual = forward + backward_warp(backward, spread, padding_mode=padding_mode)
+
+    return _reduce_field(residual, reduce=reduce)
+
+
+@jaxtyped(typechecker=beartype)
+def flow_magnitude(flow: FlowType, *, reduce: bool = True) -> Tensor:
+    """Mean `|flow|` in pixels, which is how much motion was found.
+
+    On its own this says only that something moved. What it is for is the
+    spread of it across a sequence: a beating cell's displacement rises and
+    falls, and a filter reaching too far through time flattens that while
+    leaving the photometric score intact.
+
+    Args:
+        flow: `(*dim, 2, H, W)` float32 flow.
+        reduce: average over the batch to a 0-d scalar. `False` keeps one
+            magnitude per pair, shaped `(*dim)`.
+    """
+    return _reduce_field(flow, reduce=reduce)
+
+
+def _reduce_field(field: Tensor, *, reduce: bool) -> Tensor:
+    """Mean length of a `(*dim, 2, H, W)` vector field, per pair or over all."""
+    lengths = field.square().sum(dim=-3).sqrt()
+    per_pair = lengths.mean(dim=(-2, -1))
+
+    return per_pair.mean() if reduce else per_pair
 
 
 class WarpConsistency(nn.Module):
