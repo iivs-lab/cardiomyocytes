@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
+
 __all__ = (
     "LAST_SEARCH",
     "PhaseSourceConfig",
     "SearchResult",
     "build_sequences",
+    "log_short_sequences",
     "search_sources",
 )
 
@@ -17,13 +20,19 @@ from iivs.dhm.data.phase import PhaseFileFolder, PhaseUnit, search_phase_bin_fol
 from kaparoo.filesystem import contains, is_spec_file, select, stringify_path
 from kaparoo.utils import quantify
 
-from iivs_cardio.common.pipeline import ensure_policy
+from iivs_cardio.common.pipeline import Named, ensure_policy
 from iivs_cardio.data.phase import PhaseFilteredSequence
-from scripts._common.dataset import SHORT_SEQUENCE_POLICIES, SourceConfig
+from scripts._common.dataset import (
+    LISTING_LIMIT,
+    SHORT_SEQUENCE_POLICIES,
+    SourceConfig,
+)
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
-    from scripts._common.dataset import SequenceSelectConfig
+    from scripts._common.dataset import FrameSelectConfig, SequenceSelectConfig
 
 
 # One folder per sequence taken, against the contents of the dataset they came from.
@@ -267,3 +276,47 @@ def build_sequences(
         )
 
     return [build_sequence(source) for source in sources], contents
+
+
+def log_short_sequences(
+    frame_config: FrameSelectConfig,
+    *,
+    sequences: Sequence[Named],
+    contents: Mapping[str, Sequence[str]],
+    name: str,
+) -> None:
+    """Name the sequences that could not supply the count that was asked for.
+
+    Said after the search rather than with the rest of the configuration, since
+    it is what the dataset turned out to hold and not what the run was told to
+    do. `"error"` never reaches here: the search refuses there.
+
+    Args:
+        frame_config: The frame selection, for the count to fall short of.
+        sequences: The sequences the run took.
+        contents: Every sequence the source holds, against the frames each
+            would be read over.
+        name: The run's name, which the warning is filed under.
+    """
+    count = frame_config.count
+    if count is None:
+        return
+
+    short = []
+    for sequence in sequences:
+        held = len(contents[sequence.name])
+        if held < count:
+            short.append(f"{sequence.name} ({held})")
+
+    if not short:
+        return
+
+    logger = logging.getLogger(name)
+
+    listed = ", ".join(short[:LISTING_LIMIT])
+    if (rest := len(short) - LISTING_LIMIT) > 0:
+        listed = f"{listed}, and {rest} more"
+
+    counted = quantify(len(short), "sequence")
+
+    logger.warning("%s gave fewer than %d: %s", counted, count, listed)

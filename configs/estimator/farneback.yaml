@@ -1,0 +1,6 @@
+# Farneback's polynomial expansion, which cv2 implements for CPU and CUDA.
+#
+# Every field the dataclass declares can be overridden on the command line:
+#
+#   estimator=farneback estimator.win_size=21
+_target_: iivs_cardio.optical_flow.estimators.opencv.farneback.FarnebackConfig

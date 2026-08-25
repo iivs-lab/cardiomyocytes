@@ -1,5 +1,6 @@
 __all__ = (
     "FLOW_CHANNELS",
+    "FLOW_FLOAT_NPY",
     "FLOW_NDIM",
     "OpticalFlowFolder",
     "load_flow_npy",
@@ -10,6 +11,7 @@ __all__ = (
 
 from iivs_cardio.optical_flow.data.folder import (
     FLOW_CHANNELS,
+    FLOW_FLOAT_NPY,
     FLOW_NDIM,
     OpticalFlowFolder,
     load_flow_npy,

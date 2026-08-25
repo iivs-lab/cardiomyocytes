@@ -1,0 +1,3 @@
+# DeepFlow, which cv2 ships for CPU only: `SUPPORTED_DEVICES` says so, and a
+# run asking for CUDA is refused before any frame is read.
+_target_: iivs_cardio.optical_flow.estimators.opencv.deepflow.DeepFlowConfig

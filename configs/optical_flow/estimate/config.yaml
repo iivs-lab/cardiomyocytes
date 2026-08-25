@@ -1,0 +1,58 @@
+# @package _global_
+
+defaults:
+  - _self_
+  # No filtering by default: the expected source is the cache preprocessing
+  # left, whose frames are filtered already. Reading an acquisition instead
+  # means naming the filter here too, with
+  #   filter=<option>
+  - /filter@filter: identity
+  # The estimator, defaulting to Farneback. Swap it with
+  #   estimator=<option>
+  - /estimator@estimator: farneback
+  - /compute@compute: cpu
+
+run_root: ???
+
+source:
+  root: ??? # the phase tree, whether an acquisition or a filtered cache
+  subpath: null # Phase/Float/Bin
+  frames:
+    start: 0
+    step: 1
+    count: null # source frames; N of them answer N-1 flows
+    if_short: take
+
+select:
+  include: null
+  exclude: null
+
+normalize:
+  level: dataset # given | sequence | dataset
+  range_file: null # the document a measuring run left; unused by `given`
+  source: null # [min, max], which only `given` carries
+  target: null # [min, max]; null takes the span of the estimator's own dtype
+
+target:
+  flows:
+    save: false
+    subpath: null # Flow/Float/Npy
+    record_file: source
+    if_present: error
+    if_unsourced: keep
+  evaluations:
+    save: true
+    file: flow_evaluation
+    if_present: error
+    if_unsourced: keep
+
+hydra:
+  run:
+    dir: ${run_root}
+  sweep:
+    dir: ${run_root}
+    subdir: ${hydra.job.num}
+  job_logging:
+    formatters:
+      simple:
+        format: "[%(asctime)s][%(name)s][%(levelname)-8s] - %(message)s"

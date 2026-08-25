@@ -2,6 +2,7 @@ from __future__ import annotations
 
 __all__ = (
     "FLOW_CHANNELS",
+    "FLOW_FLOAT_NPY",
     "FLOW_NDIM",
     "OpticalFlowFolder",
     "flow_frame_writer",
@@ -12,7 +13,7 @@ __all__ = (
 )
 
 from functools import cached_property, partial
-from typing import TYPE_CHECKING, ClassVar, override
+from typing import TYPE_CHECKING, ClassVar, Final, override
 
 import numpy as np
 from iivs.common.data import ArrayFileList, validate_float32_array, write_npy
@@ -34,6 +35,10 @@ if TYPE_CHECKING:
 
 FLOW_NDIM = 3
 """Axis count of a stored flow field: `(2, H, W)`."""
+
+# Where a flow tree keeps a sequence's frames, in Koala's own
+# <modality>/<precision>/<format> form.
+FLOW_FLOAT_NPY: Final = "Flow/Float/Npy"
 
 FLOW_CHANNELS = 2
 """Size of the leading (channel) axis: `0` = dx, `1` = dy."""

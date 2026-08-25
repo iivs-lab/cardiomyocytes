@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, ClassVar
 
-from kaparoo.utils import quantify, unwrap_or_factory
+from kaparoo.utils import unwrap_or_factory
 
 from iivs_cardio.common.logging import log_indented
 from iivs_cardio.common.pipeline.branch import (
@@ -23,14 +23,17 @@ from iivs_cardio.common.pipeline.branch import (
 from iivs_cardio.data.pipeline import FrameTree, RangeDocument, SequenceStageFactory
 from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig
 from scripts._common.dataset import (
-    LISTING_LIMIT,
     BranchConfig,
     TreeBranchConfig,
     ensure_output_clear,
     log_branch_policies,
     log_source_config,
 )
-from scripts._common.phase import PhaseSourceConfig, build_sequences
+from scripts._common.phase import (
+    PhaseSourceConfig,
+    build_sequences,
+    log_short_sequences,
+)
 from scripts.data._filtering import describe_filter_kernel, log_filter_config
 
 if TYPE_CHECKING:
@@ -43,7 +46,7 @@ if TYPE_CHECKING:
     from iivs_cardio.common.pipeline import SideBranch
     from iivs_cardio.data.phase import PhaseFilteredSequence
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
-    from scripts._common.dataset import FrameSelectConfig, SequenceSelectConfig
+    from scripts._common.dataset import SequenceSelectConfig
 
 
 # ========================== #
@@ -233,43 +236,6 @@ def log_configs(
             logger.warning("the cache renumbers the frames it keeps: %s", fix)
 
 
-def _log_short_sequences(
-    frame_config: FrameSelectConfig,
-    *,
-    sequences: Sequence[PhaseFilteredSequence],
-    contents: Mapping[str, Sequence[str]],
-    name: str,
-) -> None:
-    """Name the sequences that could not supply the count that was asked for.
-
-    Said after the search rather than with the rest of the configuration,
-    since it is what the dataset turned out to hold and not what the run was
-    told to do. `"error"` never reaches here: the search refuses there.
-    """
-    count = frame_config.count
-    if count is None:
-        return
-
-    short = []
-    for sequence in sequences:
-        held = len(contents[sequence.name])
-        if held < count:
-            short.append(f"{sequence.name} ({held})")
-
-    if not short:
-        return
-
-    logger = logging.getLogger(name)
-
-    listed = ", ".join(short[:LISTING_LIMIT])
-    if (rest := len(short) - LISTING_LIMIT) > 0:
-        listed = f"{listed}, and {rest} more"
-
-    counted = quantify(len(short), "sequence")
-
-    logger.warning("%s gave fewer than %d: %s", counted, count, listed)
-
-
 # ========================== #
 #          Building          #
 # ========================== #
@@ -409,7 +375,7 @@ def build_preprocess_stages(
 
     sequences, contents = build_sequences(source_config, sequence_config, kernel_config)
 
-    _log_short_sequences(
+    log_short_sequences(
         source_config.frames,
         sequences=sequences,
         contents=contents,
