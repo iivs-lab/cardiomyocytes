@@ -3,7 +3,7 @@ from __future__ import annotations
 __all__ = ("OpenCVConfig", "OpenCVEstimator")
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, ClassVar, override
 
 import cv2
 import torch
@@ -46,7 +46,11 @@ class OpenCVConfig(EstimatorConfig, ABC):
     Attributes:
         SUPPORTED_DEVICES: As `EstimatorConfig`, narrowed by a subclass whose
             algorithm does not run everywhere.
+        FRAME_DTYPE: As `EstimatorConfig`: cv2's dense algorithms read an 8-bit
+            single-channel image, whatever the algorithm.
     """
+
+    FRAME_DTYPE: ClassVar[torch.dtype] = torch.uint8
 
     @abstractmethod
     def _algorithm(self, device: Device) -> OpenCVAlgorithm:

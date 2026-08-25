@@ -275,6 +275,22 @@ def test_supported_devices():
     assert frozenset({"cpu"}) == DeepFlowConfig.SUPPORTED_DEVICES
 
 
+@pytest.mark.parametrize("flow_cls", CPU_METHODS)
+def test_the_declared_frame_dtype_is_the_one_the_estimator_takes(flow_cls):
+    # What a normalizer upstream scales onto. Nothing can read it off an
+    # estimator that does not exist yet, so a declaration drifting from what
+    # cv2 accepts would surface as a shape error inside the library rather than
+    # where the normalizer was configured.
+    of = flow_cls().build("cpu")
+    taken = torch.zeros((32, 32), dtype=flow_cls.FRAME_DTYPE)
+    other = torch.zeros((32, 32), dtype=torch.int16)
+
+    assert of.calc(taken, taken).shape == (2, 32, 32)
+
+    with pytest.raises(Exception, match=r"i16\[32,32\]"):
+        of.calc(other, other)
+
+
 def test_custom_params_reach_the_algorithm():
     # Asked of cv2 rather than of a config the estimator kept: what matters is
     # that the settings arrived at the thing that computes, and an estimator

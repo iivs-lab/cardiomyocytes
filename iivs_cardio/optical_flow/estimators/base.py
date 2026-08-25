@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, ClassVar
 from iivs_cardio.common.device import DEVICE_KINDS, Device
 
 if TYPE_CHECKING:
+    import torch
     from torch import Tensor
 
     from iivs_cardio.common.device import DeviceKind, DeviceLike
@@ -87,12 +88,21 @@ class EstimatorConfig(ABC):
     estimator: an algorithm with no implementation for one is a fact about the
     algorithm, not about the machinery that streams frames through it.
 
+    What frames the built estimator takes is declared here for the same
+    reason: nothing upstream can read the dtype off an estimator that does not
+    exist yet, and a normalizer has to scale onto it before one is built.
+
     Attributes:
         SUPPORTED_DEVICES: The device kinds this algorithm has an
             implementation for. Defaults to every kind.
+        FRAME_DTYPE: The dtype the built estimator takes its frames in, which
+            is what a normalizer upstream scales onto. Declared without a
+            default, since a wrong one would be found in a shape error deep in
+            a library rather than here.
     """
 
     SUPPORTED_DEVICES: ClassVar[frozenset[DeviceKind]] = DEVICE_KINDS
+    FRAME_DTYPE: ClassVar[torch.dtype]
 
     @abstractmethod
     def build(self, device: DeviceLike = "cpu") -> OpticalFlowEstimator:
