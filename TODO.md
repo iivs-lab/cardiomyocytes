@@ -1097,6 +1097,34 @@ A와 B는 `save_flows` 하나로 갈린다 — (1)의 `save_frames`/`save_ranges
 
 C가 필요한 이유는 비용이다. 448,800 프레임에 흐름을 다시 계산하는 것보다 읽는 쪽이 훨씬 싸다.
 
+##### 구현됨 — A·B의 스크립트와 config가 섰다
+
+
+`scripts/optical_flow/estimate.py` + `configs/optical_flow/estimate/config.yaml`.
+(1)의 `preprocess`와 같은 모양이다 — 스키마 다섯, 스윕 가드, 로그 폴더, 드라이버.
+
+- **`estimator` config 그룹**을 만들었다(`configs/estimator/`). `filter`가 커널을 고르는
+  것과 같은 방식으로 `estimator=farneback|dualtvl1|deepflow`.
+- **(2)의 filter 기본값은 `identity`다.** 기대하는 소스가 (1)이 남긴 캐시이고 그 프레임은
+  이미 필터를 통과했으므로, 기본값으로 두 번 거는 것은 아무도 요청하지 않은 오답이다.
+- **`normalize`는 검색 전에 정해진다.** 설정 중 유일하게 디스크를 읽어야 말할 수 있는
+  부분이라 그렇다. 그리고 **기록에 남는 것은 범위 그 자체이고 문서의 경로가 아니다** —
+  같은 경로에 다시 쓰인 문서가 있을 수 있으므로(`R15`와 같은 함정), 경로만 남기면 다른
+  수치로 스케일한 실행이 이 실행으로 읽힌다. `level: sequence`면 **시퀀스마다 한 줄씩**
+  전부 남긴다. §「주입된 범위」가 요구한 것을 `FrameBranch`를 건드리지 않고 만족시킨다.
+- **공용으로 올린 것**: `PhaseSourceConfig`·`log_short_sequences`(→ `_common/phase.py`),
+  `BranchConfig`·`TreeBranchConfig`·`log_branch_policies`·`ensure_output_clear`
+  (→ `_common/dataset.py`). §「`TreeConfig`를 (2)·(3)이 쓰게 하려면」의 첫 항목이 닫혔다.
+- `FLOW_FLOAT_NPY`를 `optical_flow/data/folder.py`에 두었다. 파일 이름이 이미 거기 있다.
+
+**아직 없는 것 둘.**
+
+- **픽셀 크기와 프레임 간격.** §「`settings`가 담아야 하는 것 넷」의 셋째가 아직이다.
+  픽셀 크기는 헤더에 있지만 시퀀스마다이고, `FrameBranch.get_hook`의 record가 전역
+  `settings` 하나만 나르므로 자리가 없다. 프레임 간격은 config 필드가 새로 필요하다
+  (`source.frames.step` × 취득 주파수). (3)의 입력을 정할 때 함께 한다.
+- **모드 C.** 여전히 사이드카에 막혀 있다.
+
 #### config
 
 
