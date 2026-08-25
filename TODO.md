@@ -1218,6 +1218,34 @@ source.root=$OUT/filtered       filter=identity                (1)이 남긴 캐
 
 곁가지 코드는 A·B·C에서 같다. 바뀌는 것은 배선뿐이다.
 
+#### 구현됨 — A·B의 스테이지 그래프와 잡
+
+
+```
+SequenceStage(위상)  →  NormalizedFrameStage (창 2)  →  FlowStage (창 1)
+                              ↑                            곁가지: FlowTree, EvaluationDocument
+```
+
+- `NormalizedFrameStage`가 별도 단인 이유는 소비자가 둘이기 때문이다. flow 스테이지가
+  계산에 쓰고, 평가 곁가지가 **그 프레임 그대로** 채점한다. `_compute` 안에서 정규화하면
+  지역 변수라 곁가지가 닿지 못한다. 창 2는 곁가지의 읽기가 flow 스테이지의 읽기 직후에
+  오기 때문이고, 창 1이면 `i`를 놓아 **조용히** 다시 스케일한다.
+- `FlowStage._compute`가 **비유한 flow를 거절한다.** §「flow의 비유한 값은 지표를 통과해도
+  안 잡힌다」의 결론을 그 자리에 넣었다.
+- **추정기는 `FlowSource`가 든다.** `EvaluationDocument`에서 뺐다 — 추정기는 장치에
+  묶이는데 잡은 시퀀스마다 다른 장치를 쓸 수 있으므로 실행 하나에 하나로 고정할 수 없다.
+  잡이 **장치마다 하나** 만들어 스테이지와 곁가지에 같은 객체를 준다.
+- `StageJob`을 `SequenceStageFactory`에서 뽑았다. 잡이 하는 일 중 필터링에 대한 것은
+  둘뿐이라(그래프를 만드는 것, 블록 머리글) 그 둘만 추상으로 남았고 `FlowStageFactory`가
+  나머지를 물려받는다.
+- 정규화기는 `Mapping[str, FrameNormalizer]`로 받는다. `level`이 `dataset`·`given`이면 한
+  객체를 모든 이름에 매고, `sequence`면 시퀀스마다 다른 것을 맨다. **`level`은 스크립트
+  층에 남고 잡은 그것을 모른다.**
+
+**남은 것은 스크립트·config 층이다** — `scripts/optical_flow/`, `TreeConfig`·`SourceConfig`·
+`search_sources`·`build_sequences`를 `scripts.data` 위로 올리는 것, 그리고 범위 문서를 읽어
+`normalizers`를 만드는 자리.
+
 **A·B**: `normalize`가 `FlowStage`의 소스이면서 곁가지가 든 것이다. 저장 곁가지를 켜고 끄는 것이
 A와 B의 차이 전부다.
 
