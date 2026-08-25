@@ -1,29 +1,21 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
 
-from iivs_cardio.common.pipeline import SequenceStage, Step
+from iivs_cardio.common.pipeline import Step
 from iivs_cardio.optical_flow.estimators import FarnebackConfig
-from iivs_cardio.optical_flow.pipeline import EvaluationDocument
+from iivs_cardio.optical_flow.pipeline import EvaluationDocument, FlowSource
 from tests.optical_flow.pipeline.helpers import frame_stage
 
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from iivs_cardio.optical_flow.estimators import OpticalFlowEstimator
+
 SETTINGS = {"estimator": "farneback", "filter": "identity"}
-
-
-@dataclass
-class _Source:
-    """A sequence as the document meets it: a name and the frames it was read
-    over."""
-
-    name: str
-    frames: SequenceStage
 
 
 def _names(count: int) -> tuple[str, ...]:
@@ -34,7 +26,7 @@ def _contents(*counts: int) -> dict[str, tuple[str, ...]]:
     return {f"plate/TL_{i:02d}": _names(count) for i, count in enumerate(counts)}
 
 
-def _score(document: EvaluationDocument, source: _Source) -> bool:
+def _score(document: EvaluationDocument, source: FlowSource) -> bool:
     """Score one sequence the way a flow stage would, or say it was reused."""
     meter = document.get_hook(source)
     if meter is None:
@@ -51,13 +43,19 @@ def _score(document: EvaluationDocument, source: _Source) -> bool:
     return True
 
 
-def _run(path: Path, counts: dict[str, tuple[str, ...]], **kwargs) -> list[str]:
+def _run(
+    path: Path,
+    counts: dict[str, tuple[str, ...]],
+    estimator: OpticalFlowEstimator | None = None,
+    **kwargs,
+) -> list[str]:
     """Run a whole dataset through one document, naming what it measured."""
     measured = []
 
     with EvaluationDocument(path, "nexel", counts, settings=SETTINGS, **kwargs) as doc:
         for name, frames in counts.items():
-            if _score(doc, _Source(name, frame_stage(len(frames)))):
+            source = FlowSource(name, frame_stage(len(frames)), estimator)
+            if _score(doc, source):
                 measured.append(name)
 
     return measured
@@ -104,7 +102,7 @@ def test_a_part_left_under_other_settings_is_measured_again(tmp_path):
     with EvaluationDocument(
         path, "nexel", contents, settings={"filter": "median"}, if_present="reuse"
     ) as doc:
-        stale = doc.get_hook(_Source("plate/TL_00", frame_stage(4)))
+        stale = doc.get_hook(FlowSource("plate/TL_00", frame_stage(4)))
 
     assert stale is not None
 
@@ -119,15 +117,16 @@ def test_a_sequence_that_grew_since_its_part_was_written_is_measured_again(tmp_p
     with EvaluationDocument(
         path, "nexel", _contents(6), settings=SETTINGS, if_present="reuse"
     ) as doc:
-        stale = doc.get_hook(_Source("plate/TL_00", frame_stage(6)))
+        stale = doc.get_hook(FlowSource("plate/TL_00", frame_stage(6)))
 
     assert stale is not None
 
 
-def test_the_estimator_reaches_the_meters_the_document_hands_out(tmp_path):
-    # Without one the forward-backward axis is not measured at all, so a
-    # document that dropped it on the way through would read as absent rather
-    # than as an error.
+def test_the_estimator_a_sequence_carries_reaches_the_meter_made_for_it(tmp_path):
+    # It rides on the sequence rather than on the document because it is bound
+    # to a device, and a run may work its sequences on more than one. Without
+    # one the forward-backward axis is not measured, which reads as absent
+    # rather than as an error.
     of = FarnebackConfig().build("cpu")
     contents = _contents(4)
 
@@ -146,7 +145,7 @@ def test_a_sequence_nothing_measured_is_named_rather_than_folded(tmp_path):
     path = tmp_path / "evaluation"
 
     with EvaluationDocument(path, "nexel", contents, settings=SETTINGS) as doc:
-        _score(doc, _Source("plate/TL_00", frame_stage(4)))
+        _score(doc, FlowSource("plate/TL_00", frame_stage(4)))
 
     written = json.loads(path.with_suffix(".json").read_text("utf-8"))
 
@@ -160,7 +159,7 @@ def test_the_report_names_the_axis_the_document_exists_for(tmp_path):
     )
 
     with document as doc:
-        _score(doc, _Source("plate/TL_00", frame_stage(4)))
+        _score(doc, FlowSource("plate/TL_00", frame_stage(4)))
 
     said = document.report()
 

@@ -27,14 +27,18 @@ if TYPE_CHECKING:
 class Evaluated(Named, Protocol):
     """Whatever an evaluation document needs of a sequence.
 
-    Its name, to file the part under, and the frames its flows were computed
-    from, which no step carries and nothing here could rebuild: reading them a
-    second time would normalise them a second time, and two definitions of the
-    same thing agree only by coincidence.
+    Its name, to file the part under; the frames its flows were computed from,
+    which no step carries and nothing here could rebuild, since reading them a
+    second time would scale them a second time and two definitions of one thing
+    agree only by coincidence; and the estimator those flows came from, which
+    is bound to a device and so cannot be settled once for a whole run.
     """
 
     @property
     def frames(self) -> Stage[Tensor, Path]: ...
+
+    @property
+    def estimator(self) -> OpticalFlowEstimator | None: ...
 
 
 class EvaluationDocument(
@@ -48,17 +52,15 @@ class EvaluationDocument(
         contents: As `DocumentBranch`, holding the frames each sequence was
             read over rather than the flows: what a sequence owes is worked out
             from them, so the same contents describes both branches of a stage.
-        estimator: The estimator the reverse flow is taken from, which doubles
-            what a pair costs. Defaults to `None`, which leaves the
-            forward-backward axis unmeasured, as a run reading flows from a
-            cache has to.
         settings: As `DocumentBranch`.
         selected: As `DocumentBranch`.
         if_present: As `DocumentBranch`.
         if_unsourced: As `DocumentBranch`.
         data_range: The value range SSIM and PSNR are scored against; taken
             from the frame dtype when omitted, which a float frame has none to
-            give.
+            give. The reverse flow each meter measures comes from the
+            estimator its own sequence carries, since that is what is bound to
+            the device the sequence ran on.
         padding_mode: `grid_sample` out-of-bounds policy for every warp.
 
     Attributes:
@@ -81,7 +83,6 @@ class EvaluationDocument(
         path: StrPath,
         source: str,
         contents: Mapping[str, Sequence[str]],
-        estimator: OpticalFlowEstimator | None = None,
         settings: Mapping[str, object] | None = None,
         *,
         selected: Sequence[str] | None = None,
@@ -100,7 +101,6 @@ class EvaluationDocument(
             if_unsourced=if_unsourced,
         )
 
-        self._estimator = estimator
         self._data_range = data_range
         self._padding_mode = padding_mode
 
@@ -110,7 +110,7 @@ class EvaluationDocument(
             self.parts_root,
             source.name,
             source.frames,
-            self._estimator,
+            source.estimator,
             self.settings,
             overwrite=self._replacing,
             data_range=self._data_range,
