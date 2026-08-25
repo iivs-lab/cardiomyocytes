@@ -892,10 +892,9 @@ forward의 `sources`에 없어 그래프 밖에 서게 된다.
 
 무엇을 재고, 프레임에서 시퀀스로 데이터셋으로 어떻게 접는가.
 
-### 평가 곁가지는 축 셋을 한 번에 낸다
+### 평가 곁가지가 한 번에 내는 것 — gain과 FB error
 
-
-`warp_consistency` 하나만 보면 탐색이 대리 지표를 악용한다. 셋이 서로를 막는다.
+`warp_consistency` 하나만 보면 탐색이 대리 지표를 악용한다. 둘이 서로를 막는다.
 
 **gain — identity baseline 위로 얼마나 올라갔는가.** `flow = 0`으로 같은 지표를 재는 것이
 바닥이다. 실제 프레임 간 운동이 서브픽셀(~0.3-0.4 px)이라 **zero flow가 이미 SSIM ~0.95**를
@@ -906,7 +905,11 @@ forward의 `sources`에 없어 그래프 밖에 서게 된다.
 gain만 보면 자유도가 큰 flow가 **잡음을 맞춰서** 이긴다 — 기록된 실측으로 gain을 두 배로 만드는
 파라미터가 FB 일관성을 **8-20배** 악화시킨다. 거꾸로 FB만 보면 **zero flow가 만점(0.0000)**이다.
 
-**셋째 축은 ground-truth EPE**인데 합성 워프 벤치마크가 있어야 열린다(§ 아래 항목).
+**이 둘은 §「한 축이 아니라 세 축으로 점수를 매길 것」의 *consistency* 하나에 해당한다.**
+gain은 축이 아니라 그 항목이 혼자 믿지 말라고 지목한 광도 대리 지표 자체다. 남은 두 축 중
+*bias*(ground-truth EPE)는 합성 워프 벤치마크가 있어야 열리지만, ***박동 진폭*은 지금 바로
+낼 수 있다** — 쌍별 평균 `|flow|`의 std/mean이라 flow 하나면 되고, 추정기를 더 부르지도
+ground truth를 만들지도 않는다. 곁가지가 이미 `step.value`로 들고 있는 것이다.
 
 ### 결정 — 세는 것이 둘이다. `pairs`는 문맥이고, 가중치는 지표마다의 `scored`다
 
@@ -1302,6 +1305,10 @@ float 3채널이다. 그러면 평가의 `data_range`가 dtype에서 안 나오�
   광도 수치 하나는 목적함수가 어긋난 것이다 — 결과물은 박동 프로파일과 힘이지 재구성된
   프레임이 아니다.
 
+  **셋 중 둘은 이미 닿는다.** *consistency*는 §「FB error는 스테이지를 늘리지 않는다」로
+  설계가 끝났고, *박동 진폭*은 flow 하나로 계산되므로 곁가지가 들고 있는 것만으로 낼 수 있다.
+  막힌 것은 *bias* 하나이고, 아래 ground-truth 벤치마크가 그 선행이다.
+
 - **프레임 쌍마다 고르지 말 것. 시퀀스별 선택도 믿기 전에 검증할 것.** 측정된 공변량에서
   파라미터를 유도하는 것(프레임 간격에서 시간 반지름)은 원칙적이고 외삽되지만, 점수가 가장
   높은 설정을 고르는 것은 선택 편향이다. 쌍별 선택이 최악이다 — 이 지표들이 취약한 바로 그
@@ -1332,16 +1339,11 @@ float 3채널이다. 그러면 평가의 `data_range`가 dtype에서 안 나오�
   저장: flow는 `(2, H, W)` float32로 프레임당 6.48 MB — **위상의 두 배** — 이고 CUDA에서
   1000프레임당 ~4초에 재생성된다. 필터 캐시와 같은 조건부 규칙이다.
 
-- **`evaluation.py`에 identity baseline과 forward-backward error를 올릴 것.** 둘 다
-  `benchmark_opencv.py`에 프로토타입만 있었는데 **그 파일은 이미 지워졌다**(`278bb80`,
-  「Drop the two optical flow scripts CI was failing on」). 옮기기 전에 사라졌으므로
+- **`evaluation.py`에 identity baseline과 forward-backward error를 올릴 것.** 설계는
+  §곁가지·§평가 문서에서 끝났고 남은 것은 구현이다. 둘 다 `benchmark_opencv.py`에 프로토타입만
+  있었는데 **그 파일은 이미 지워졌다**(`278bb80`, 「Drop the two optical flow scripts CI was
+  failing on」). 옮기기 전에 사라졌으므로
   `git show 278bb80^:scripts/optical_flow/benchmark_opencv.py`에서 되살릴 것.
-
-  서브픽셀 운동에서는 **zero flow가 이미 SSIM ~0.94**를 받으므로 SSIM 이득만 보면 잡음을
-  맞추는 flow에 상을 준다. 어느 쪽도 혼자서는 안전하지 않다 — zero flow는
-  이득이 없지만 자기 일관성은 완벽하다 — 그러니 API가 **둘을 함께 보고하는 것을 쉬운 길**로
-  만들어야 한다. FB error는 역방향 flow가 필요하므로 `warp_consistency`의 단일 flow
-  시그니처를 재사용할 수 없다.
 
 - **실제 프레임에서 ground-truth flow 벤치마크를 만들 것.** 실제 DHM 프레임을 알려진 매끄러운
   서브픽셀 변위장(~0.3 px, 측정된 규모)으로 워핑하고 endpoint error로 추정기를 채점한다.
