@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-__all__ = ("FrameTree",)
+__all__ = ("FrameBranch", "FrameTree")
 
 import json
 import shutil
+from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Self, override
 
 from kaparoo.filesystem import contains, prune_upward, search_dirs, search_files
 from kaparoo.filesystem.types import StrPath
@@ -17,6 +18,7 @@ from kaparoo.utils.optional import unwrap_or_default
 from iivs_cardio.common.pipeline.branch import (
     PRESENT_POLICIES,
     STAGING,
+    Named,
     PresentPolicy,
     UnsourcedPolicy,
     as_read_back,
@@ -37,12 +39,21 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class FrameTree:
+class FrameBranch[S: Named, T](ABC):
     """The side branch that writes each sequence back out under a new root.
 
     A written sequence keeps the name and the layout it had in the source, so
-    the result can be read by whatever reads the source. Each writer takes the
-    pixel size, height scale and unit from the sequence it was made for.
+    the result can be read by whatever reads the source.
+
+    A subclass says two things and inherits the rest: how to make the writer
+    for one sequence, and how many frames this stage owes that sequence. The
+    second is not always as many as the source holds, and a stage that gives
+    back fewer would otherwise never reuse anything it wrote.
+
+    Type Parameters:
+        S: The thing a writer is made for, which is one sequence of a dataset,
+            named the way the tree files it.
+        T: The type of one frame, as the writer is handed it.
 
     The tree has a lifetime as well as its writers, because two things outlive
     any one of them. A writer clears up after itself only while it is alive, so
@@ -126,9 +137,7 @@ class FrameTree:
         """
         return self.if_present != "error"
 
-    def get_hook(
-        self, source: PhaseFilteredSequence
-    ) -> KoalaFrameWriter[Tensor] | None:
+    def get_hook(self, source: S) -> KoalaFrameWriter[T] | None:
         """Return the writer for `source`, or `None` to keep what is there.
 
         Whether a folder still stands for this run was settled when the tree
@@ -148,22 +157,47 @@ class FrameTree:
         if source.name in self._reused:
             return None
 
-        origin = source.origin
-        header = origin.header
-
         record = None
         if self.settings is not None:
             record = {"settings": dict(self.settings), "source": source.name}
 
-        return phase_frame_writer(
-            Path(self.root, source.name, self.subpath),
-            pixel_size=header.pixel_size,
-            height_scale=header.height_scale,
-            unit=unwrap_or_default(origin.target_unit, header.unit),
-            overwrite=self._replacing,
-            record=record,
-            record_file=self.record_file,
-        )
+        dest = Path(self.root, source.name, self.subpath)
+
+        return self._make_writer(dest, source, overwrite=self._replacing, record=record)
+
+    @abstractmethod
+    def _make_writer(
+        self,
+        dest: Path,
+        source: S,
+        *,
+        overwrite: bool,
+        record: Mapping[str, object] | None,
+    ) -> KoalaFrameWriter[T]:
+        """Return the writer that puts `source`'s frames under `dest`.
+
+        Args:
+            dest: The folder the frames go to, which is where the source sits
+                under this tree's own root.
+            source: The sequence the frames come from, for whatever the format
+                takes from it that a frame alone does not carry.
+            overwrite: Whether a folder already there may be replaced.
+            record: The block to file beside the frames, or `None` for none.
+        """
+
+    @abstractmethod
+    def _expected(self, names: Sequence[str]) -> Sequence[str]:
+        """Return the sources of the frames this stage owes for `names`.
+
+        A stage that answers one frame per source returns what it was given. One
+        that reads a pair to answer once returns fewer, and saying so is what
+        lets a written folder be recognised: the record holds one name per frame
+        written, so comparing it against the source's own would refuse every
+        folder a stage like that ever wrote.
+
+        Args:
+            names: The frames the source holds, in order.
+        """
 
     def list_sequences(self) -> list[str]:
         """Return every sequence this tree already holds frames for, sorted.
@@ -212,8 +246,9 @@ class FrameTree:
         if record.get("settings") != self._recorded:
             return False
 
+        owed = tuple(self._expected(self.contents[name]))
         frames = record.get("frames")
-        if not isinstance(frames, list) or tuple(frames) != tuple(self.contents[name]):
+        if not isinstance(frames, list) or tuple(frames) != owed:
             return False
 
         return self._count_frames(folder) == len(frames)
@@ -355,3 +390,50 @@ class FrameTree:
 
         if self.if_unsourced == "delete":
             self.drop_unsourced()
+
+
+class FrameTree(FrameBranch["PhaseFilteredSequence", "Tensor"]):
+    """The frame tree of a phase stage, which answers one frame per source.
+
+    Each writer takes the pixel size, height scale and unit from the sequence it
+    was made for, since a phase file carries them and a frame alone does not.
+
+    Attributes:
+        root: As `FrameBranch`.
+        subpath: As `FrameBranch`.
+        contents: As `FrameBranch`.
+        settings: As `FrameBranch`.
+        selected: As `FrameBranch`.
+        record_file: As `FrameBranch`.
+        if_present: As `FrameBranch`.
+        if_unsourced: As `FrameBranch`.
+    """
+
+    __slots__ = ()
+
+    @override
+    def _make_writer(
+        self,
+        dest: Path,
+        source: PhaseFilteredSequence,
+        *,
+        overwrite: bool,
+        record: Mapping[str, object] | None,
+    ) -> KoalaFrameWriter[Tensor]:
+        origin = source.origin
+        header = origin.header
+
+        return phase_frame_writer(
+            dest,
+            pixel_size=header.pixel_size,
+            height_scale=header.height_scale,
+            unit=unwrap_or_default(origin.target_unit, header.unit),
+            overwrite=overwrite,
+            record=record,
+            record_file=self.record_file,
+        )
+
+    @override
+    def _expected(self, names: Sequence[str]) -> Sequence[str]:
+        """Every source frame, filtering being one frame in and one frame out."""
+        return names

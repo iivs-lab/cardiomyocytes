@@ -5,7 +5,6 @@ __all__ = (
     "Coverage",
     "DatasetRange",
     "FrameRange",
-    "Named",
     "RangeDocument",
     "SequenceRange",
     "SequenceRangeMeter",
@@ -17,7 +16,7 @@ import json
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from math import isfinite
-from typing import TYPE_CHECKING, Any, Protocol, Self, override
+from typing import TYPE_CHECKING, Any, Self, override
 
 from kaparoo.filesystem import (
     StagedFile,
@@ -44,7 +43,11 @@ if TYPE_CHECKING:
     from torch import Tensor
 
     from iivs_cardio.common.pipeline import Step
-    from iivs_cardio.common.pipeline.branch import PresentPolicy, UnsourcedPolicy
+    from iivs_cardio.common.pipeline.branch import (
+        Named,
+        PresentPolicy,
+        UnsourcedPolicy,
+    )
 
 
 def _entry[T](
@@ -568,13 +571,6 @@ def save_range_document(
 # ========================== #
 #           Branch           #
 # ========================== #
-
-
-class Named(Protocol):
-    """Whatever a range document needs of a sequence: what to file it under."""
-
-    @property
-    def name(self) -> str: ...
 
 
 class RangeDocument:

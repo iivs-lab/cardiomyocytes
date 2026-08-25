@@ -2,9 +2,9 @@ __all__ = (
     "CompositeRange",
     "Coverage",
     "DatasetRange",
+    "FrameBranch",
     "FrameRange",
     "FrameTree",
-    "Named",
     "RangeDocument",
     "SequenceRange",
     "SequenceRangeMeter",
@@ -13,13 +13,12 @@ __all__ = (
     "save_range_document",
 )
 
-from iivs_cardio.data.pipeline.frames import FrameTree
+from iivs_cardio.data.pipeline.frames import FrameBranch, FrameTree
 from iivs_cardio.data.pipeline.ranges import (
     CompositeRange,
     Coverage,
     DatasetRange,
     FrameRange,
-    Named,
     RangeDocument,
     SequenceRange,
     SequenceRangeMeter,
