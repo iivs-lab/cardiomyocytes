@@ -7,15 +7,18 @@ from pathlib import Path
 import pytest
 import torch
 
-from iivs_cardio.common.pipeline import SequenceStage, Step
-from iivs_cardio.data.pipeline.ranges import (
+from iivs_cardio.common.pipeline import (
     Coverage,
+    SequenceStage,
+    Step,
+    save_document,
+)
+from iivs_cardio.data.pipeline.ranges import (
     DatasetRange,
     FrameRange,
     RangeDocument,
     SequenceRange,
     SequenceRangeMeter,
-    save_range_document,
 )
 
 
@@ -581,7 +584,7 @@ def test_a_part_filed_under_the_wrong_sequence_is_refused_by_name(tmp_path):
     with pytest.raises(ValueError, match=r"part 'b' holds 'a'"):
         RangeDocument(
             tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
-        ).to_range()
+        ).to_dataset()
 
 
 def test_a_document_that_could_not_be_written_reports_nothing(tmp_path):
@@ -821,7 +824,7 @@ def test_the_skipped_list_keeps_the_contents_s_own_order(tmp_path):
     with document:
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
 
-    coverage = document.get_coverage(document.to_range())
+    coverage = document.get_coverage(document.to_dataset())
 
     assert coverage is not None
     assert coverage.skipped == ("c", "b")
@@ -927,7 +930,7 @@ def test_a_document_written_without_coverage_leaves_the_block_out(tmp_path):
     # the union of theirs and has to be recomputed rather than carried over.
     dataset = DatasetRange("plate_A", (_sequence("TL_00", (0.0, 1.0)),))
 
-    save_range_document(tmp_path / "merged", dataset, settings={"filter": "identity"})
+    save_document(tmp_path / "merged", dataset, settings={"filter": "identity"})
 
     document = json.loads((tmp_path / "merged.json").read_text(encoding="utf-8"))
     assert list(document) == ["settings", "dataset"]
@@ -957,7 +960,7 @@ def test_a_sequence_named_with_a_dot_still_files_and_reads_back(tmp_path, source
     assert [part.relative_to(document.parts_root).as_posix() for part in parts] == [
         f"{source}.json"
     ]
-    assert [sequence.source for sequence in document.to_range().sequences] == [source]
+    assert [sequence.source for sequence in document.to_dataset().sequences] == [source]
     assert _saved(tmp_path)["coverage"]["skipped"] == []
 
 
@@ -981,7 +984,7 @@ def test_a_document_is_written_as_json_a_strict_reader_accepts(tmp_path):
     dataset = DatasetRange("plate_A", (_sequence("TL_00", (0.0, 1.0)),))
 
     with pytest.raises(ValueError, match=r"Out of range float"):
-        save_range_document(path, dataset, settings={"threshold": float("nan")})
+        save_document(path, dataset, settings={"threshold": float("nan")})
 
     assert not path.exists()
 
@@ -1001,7 +1004,7 @@ def test_an_unreadable_part_says_which_one_it_was(tmp_path):
     (document.parts_root / "b.json").write_text("{not json", encoding="utf-8")
 
     with pytest.raises(ValueError, match=r"unreadable part 'b'.*run it again"):
-        document.to_range()
+        document.to_dataset()
 
 
 def test_one_unreadable_part_does_not_take_the_whole_document(tmp_path):
@@ -1040,7 +1043,7 @@ def test_a_part_holding_a_backwards_range_is_named_too(tmp_path):
     (document.parts_root / "a.json").write_text(broken, encoding="utf-8")
 
     with pytest.raises(ValueError, match=r"unreadable part 'a'.*inverted range"):
-        document.to_range()
+        document.to_dataset()
 
 
 def test_a_meter_takes_its_part_back_when_another_branch_fails(tmp_path):
@@ -1272,7 +1275,7 @@ def test_a_part_that_is_not_a_mapping_at_all_is_refused(tmp_path):
     (document.parts_root / "a.json").write_text("[1, 2]", encoding="utf-8")
 
     with pytest.raises(ValueError, match=r"unreadable part 'a'.*list at the top"):
-        document.to_range()
+        document.to_dataset()
 
 
 def test_a_part_that_cannot_be_read_is_measured_again_rather_than_reused(tmp_path):
