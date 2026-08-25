@@ -1123,7 +1123,7 @@ C가 필요한 이유는 비용이다. 448,800 프레임에 흐름을 다시 계
   픽셀 크기는 헤더에 있지만 시퀀스마다이고, `FrameBranch.get_hook`의 record가 전역
   `settings` 하나만 나르므로 자리가 없다. 프레임 간격은 config 필드가 새로 필요하다
   (`source.frames.step` × 취득 주파수). (3)의 입력을 정할 때 함께 한다.
-- **모드 C.** 여전히 사이드카에 막혀 있다.
+- **모드 C.** 막고 있던 둘은 열렸다. 남은 것은 §「모드 C에 남은 것」에 적었다.
 
 #### config
 
@@ -1286,11 +1286,52 @@ C에서는 `normalize`가 `flow.sources`에 없으므로 **그래프 밖**이다
 손으로 배선된다. **가짜 소스로 선언해 그래프를 하나로 만들지 말 것** — `sources`의 계약이 「이
 스테이지가 그 위에 지어졌다」인데 C에서는 거짓이 된다.
 
-**C는 둘에 막혀 있다.** §「캐시 폴더는 자기가 어디서부터 시작하는지 말하지 않는다」의 사이드카가
-없으면 `flow[0]`이 위상 0·1번에서 나왔다는 것을 확인할 방법이 없어 **어긋난 짝을 조용히
-채점한다.** 그리고 캐시된 flow를 채점하려면 그것을 만들 때와 같은 인코딩이 필요하므로 흐름
-캐시의 record가 **주입된 범위를 들고 있어야** 하고, C는 현재 config가 아니라 그 record를 읽어야
-한다.
+#### 막고 있던 둘은 열렸다
+
+
+한때 「C는 둘에 막혀 있다」고 적었으나 **둘 다 이미 캐시의 `source.json`에 있다.**
+
+- **어디서부터 시작하는지.** record의 `frames`가 **인덱스별 원본 프레임 이름**을 든다.
+  §「캐시 폴더는 자기가 어디서부터 시작하는지 말하지 않는다」가 요구한 사이드카가 그것이고,
+  `FrameBranch`의 재사용 판정용으로 이미 쓰이고 있었을 뿐이다. `start=1 step=2`로 돌린
+  실측: 파일은 `00000_flow.npy` 하나인데 record는 `["00001_phase.bin"]`이라고 말한다.
+- **주입된 범위.** record의 `settings.normalize`가
+  `{"level": "dataset", "range": [0.0, 4.0], "target": [0.0, 255.0]}`을 든다.
+  `level: sequence`면 시퀀스마다 한 줄씩. §「스크립트·config 층」에서 넣었다.
+
+#### 그래서 C에 남은 것
+
+
+- **`CachedFlowSequence`.** `OpticalFlowFolder`는 이미 `DataSequence`다(`get_item`·
+  `get_meta`·`__len__`). 모자란 것 둘: ndarray를 Tensor로 바꾸는 것과, **`get_meta`가
+  `00000_flow.npy`를 준다**는 것. 두 번째가 중요하다 — `SequenceEvaluator`가 `path.name`을
+  파트에 적으므로 그대로 두면 C의 문서는 프레임을 `00000_flow.npy`로 부르고 A/B는
+  `00000_phase.bin`으로 불러 **두 문서를 나란히 놓을 수 없다.** record의 `frames`를 들고
+  그것을 돌려줘야 하며, 이것이 사이드카를 실제로 쓰는 자리다.
+- **`flow` config 블록.** `FlowCacheConfig(SourceConfig)`, `DEFAULT_SUBPATH =
+  FLOW_FLOAT_NPY`. `flow.root`가 null이면 A/B, 아니면 C.
+- **`CachedFlowStageFactory`.** `StageJob`의 자식 하나. `FlowStage` 대신
+  `SequenceStage(CachedFlowSequence)`를 만들고, `NormalizedFrameStage`는 소스가 아니라 옆에
+  서서 `FlowSource.frames`로만 곁가지에 간다. `estimator=None`이라 FB error 축은 빠진다.
+- **전제 조건 검사**, 프레임 한 장 읽기 전에 시퀀스마다: record의 `frames`가 이번 실행이
+  owe하는 `names[:-1]`과 같은가(어긋난 짝), `.npy` 개수가 `len(frames)`와 같은가(반쯤 지워진
+  폴더), record의 `filter`가 이번 실행의 필터와 같은가. 그리고 C에서 `target.flows.save`는
+  거절한다.
+
+#### 열린 것 — `normalize`를 읽을 것인가 대조할 것인가
+
+
+`filter`는 선택지가 없다. `describe_filter_kernel`의 역방향(dict → `KernelConfig`)이 없으므로
+**대조밖에** 안 된다. `normalize`는 record가 `[min, max]`와 `target`을 그대로 들고 있어
+`FrameNormalizer(source, target, dtype)`로 **복원된다.**
+
+**(가) record에서 읽고 C에서는 `normalize` 블록을 거절한다** — 어긋날 수가 없고 `range_file`을
+다시 가리킬 필요도 없다. `save_flows`를 거절하는 것과 같은 모양이다.
+**(나) config로 만들고 record와 대조해 어긋나면 거절한다** — 설정이 한 가지 읽는 방식을
+유지하지만, 같은 문서를 다시 가리켜야 하고 그 문서가 그새 다시 쓰였을 수 있다.
+
+(가)를 권한다. 비대칭이 생기지만 근거가 분명하다 — **복원할 수 있는 것은 읽고, 복원할 수
+없는 것만 대조한다.**
 
 ## 추정기
 
@@ -1368,11 +1409,13 @@ float 3채널이다. 그러면 평가의 `data_range`가 dtype에서 안 나오�
   force  00000=F2       원본 2번
   ```
 
-  **셋 다 `00000`으로 시작하는데 셋이 다른 것을 가리키고, 그 사실이 어느 폴더에도 없다.**
-  (3)이 (2)의 캐시를 읽으면 자기 `00000`이 원본 1번이라는 것을 알 방법이 없고, 위상 캐시와
-  흐름 캐시를 함께 읽는 지표는 `i`번끼리 짝지어 조용히 어긋난다. E8의 사이드카(캐시 인덱스별
-  원본 프레임 이름)가 이 표다. **(1)에서는 편의였고 (2)·(3)에서는 체인의 전제**이므로, (2)
-  착수 전에 구현할 것.
+  **셋 다 `00000`으로 시작하는데 셋이 다른 것을 가리킨다.** 위상 캐시와 흐름 캐시를 함께
+  읽는 지표가 `i`번끼리 짝지으면 조용히 어긋난다.
+
+  **표는 이미 있다.** 각 캐시 폴더의 record가 `frames`로 **인덱스별 원본 프레임 이름**을
+  든다(`FrameBranch`의 재사용 판정이 쓰는 그것). E8의 사이드카가 이것이므로 새로 만들 것이
+  없고, 남은 일은 **읽는 쪽이 실제로 그것을 쓰게 하는 것**이다 — §「모드 C에 남은 것」의
+  `CachedFlowSequence.get_meta`가 첫 사례다.
 
 - **너무 짧아 만들 것이 없는 시퀀스와 만들다 실패한 시퀀스가 같은 예외로 나온다.** 힘에 2프레임
   시퀀스를 넣으면 `no frame was written: nothing to commit`이 나고 드라이버가 그 시퀀스를
