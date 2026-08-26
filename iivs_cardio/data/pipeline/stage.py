@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("SequenceStageFactory",)
+__all__ = ("SequenceStageRun",)
 
 from typing import TYPE_CHECKING, override
 
@@ -17,8 +17,8 @@ if TYPE_CHECKING:
     from iivs_cardio.data.phase import PhaseFilteredSequence
 
 
-class SequenceStageFactory(StageRun["PhaseFilteredSequence"]):
-    """The job of filtering one dataset's sequences, one stage per sequence.
+class SequenceStageRun(StageRun["PhaseFilteredSequence"]):
+    """The run that filters one dataset's sequences, one stage per sequence.
 
     A sequence filters itself as it is read, so the stage is the sequence and
     the branches watch it directly.

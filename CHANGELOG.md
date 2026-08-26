@@ -66,7 +66,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   N done` and exited 0. Either subpath is refused outright if it could reach
   outside a sequence's own folder, since a `..` would walk past that comparison
   and land wherever it pointed. `FrameTree` carries what every sequence's writer
-  shares and `SequenceStageFactory` hands out a stage with its hooks already
+  shares and `SequenceStageRun` hands out a stage with its hooks already
   registered, so whatever owns a stage never wires that stage's side branches.
 - `preprocess` refuses `target.frames.save` in a `--multirun`. Each job writes a
   tree of its own at 1.45 TB apiece, which is not what a sweep is for: the
@@ -522,7 +522,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `frames`. Eight call sites had passed the default by hand from a constant in
   the phase reader, which is how `_process.py` came to know across six lines
   that this stage reads phase.
-- `PhaseStageFactory` is `SequenceStageFactory`, and `TargetConfig` is
+- `PhaseStageFactory` is `SequenceStageRun`, and `TargetConfig` is
   `PreprocessTargetConfig`. The first mentions phase in two annotations and
   nowhere else -- it holds sequences, asks each branch for a hook, runs them and
   logs -- and the second describes what one stage writes, so it takes that

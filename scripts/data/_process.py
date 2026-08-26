@@ -21,7 +21,7 @@ from iivs_cardio.common.logging import log_indented
 from iivs_cardio.common.pipeline.branch import (
     ensure_json_name,
 )
-from iivs_cardio.data.pipeline import FrameTree, RangeDocument, SequenceStageFactory
+from iivs_cardio.data.pipeline import FrameTree, RangeDocument, SequenceStageRun
 from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig
 from scripts._common.dataset import (
     BranchConfig,
@@ -367,7 +367,7 @@ def build_preprocess_stages(
     *,
     output_root: StrPath,
     name: str,
-) -> SequenceStageFactory:
+) -> SequenceStageRun:
     """Assemble everything a run needs from the configuration it was given.
 
     The configuration is logged before the sources are searched, so a run says
@@ -429,4 +429,4 @@ def build_preprocess_stages(
             selected=selected,
         )
 
-    return SequenceStageFactory(sequences, *branches, name=name)
+    return SequenceStageRun(sequences, *branches, name=name)

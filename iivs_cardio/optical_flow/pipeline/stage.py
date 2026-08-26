@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("FlowSource", "FlowStage", "FlowStageFactory", "NormalizedFrameStage")
+__all__ = ("FlowSource", "FlowStage", "FlowStageRun", "NormalizedFrameStage")
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -151,8 +151,8 @@ class FlowSource:
     estimator: OpticalFlowEstimator | None = None
 
 
-class FlowStageFactory(StageRun["PhaseFilteredSequence"]):
-    """The job of computing one dataset's flows, one stage graph per sequence.
+class FlowStageRun(StageRun["PhaseFilteredSequence"]):
+    """The run that computes one dataset's flows, one stage graph per sequence.
 
     Three stages deep: the sequence reads and filters a phase frame, the frames
     above it are scaled onto what the estimator takes, and the flows above those

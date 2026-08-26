@@ -6,7 +6,7 @@ __all__ = (
     "RangeDocument",
     "SequenceRange",
     "SequenceRangeMeter",
-    "SequenceStageFactory",
+    "SequenceStageRun",
     "ValueRange",
 )
 
@@ -20,4 +20,4 @@ from iivs_cardio.data.pipeline.ranges import (
     SequenceRangeMeter,
     ValueRange,
 )
-from iivs_cardio.data.pipeline.stage import SequenceStageFactory
+from iivs_cardio.data.pipeline.stage import SequenceStageRun

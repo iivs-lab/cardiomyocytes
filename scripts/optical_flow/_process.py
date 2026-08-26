@@ -26,7 +26,7 @@ from iivs_cardio.optical_flow.data import FLOW_FLOAT_NPY
 from iivs_cardio.optical_flow.estimators import EstimatorConfig
 from iivs_cardio.optical_flow.pipeline import (
     EvaluationDocument,
-    FlowStageFactory,
+    FlowStageRun,
     FlowTree,
 )
 from scripts._common.dataset import (
@@ -402,7 +402,7 @@ def build_flow_stages(
     *,
     output_root: StrPath,
     name: str,
-) -> FlowStageFactory:
+) -> FlowStageRun:
     """Assemble everything a run needs from the configuration it was given.
 
     The configuration is logged before the sources are searched, so a run says
@@ -478,7 +478,7 @@ def build_flow_stages(
             selected=selected,
         )
 
-    return FlowStageFactory(
+    return FlowStageRun(
         sequences,
         normalization.normalizers(contents),
         estimator_config,

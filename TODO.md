@@ -1264,8 +1264,8 @@ SequenceStage(위상)  →  NormalizedFrameStage (창 2)  →  FlowStage (창 1)
 - **추정기는 `FlowSource`가 든다.** `EvaluationDocument`에서 뺐다 — 추정기는 장치에
   묶이는데 잡은 시퀀스마다 다른 장치를 쓸 수 있으므로 실행 하나에 하나로 고정할 수 없다.
   잡이 **장치마다 하나** 만들어 스테이지와 곁가지에 같은 객체를 준다.
-- `StageRun`을 `SequenceStageFactory`에서 뽑았다. 잡이 하는 일 중 필터링에 대한 것은
-  둘뿐이라(그래프를 만드는 것, 블록 머리글) 그 둘만 추상으로 남았고 `FlowStageFactory`가
+- `StageRun`을 `SequenceStageRun`에서 뽑았다. 잡이 하는 일 중 필터링에 대한 것은
+  둘뿐이라(그래프를 만드는 것, 블록 머리글) 그 둘만 추상으로 남았고 `FlowStageRun`가
   나머지를 물려받는다.
 - 정규화기는 `Mapping[str, FrameNormalizer]`로 받는다. `level`이 `dataset`·`given`이면 한
   객체를 모든 이름에 매고, `sequence`면 시퀀스마다 다른 것을 맨다. **`level`은 스크립트
@@ -1311,7 +1311,7 @@ C에서는 `normalize`가 `flow.sources`에 없으므로 **그래프 밖**이다
   그것을 돌려줘야 하며, 이것이 사이드카를 실제로 쓰는 자리다.
 - **`flow` config 블록.** `FlowCacheConfig(SourceConfig)`, `DEFAULT_SUBPATH =
   FLOW_FLOAT_NPY`. `flow.root`가 null이면 A/B, 아니면 C.
-- **`CachedFlowStageFactory`.** `StageRun`의 자식 하나. `FlowStage` 대신
+- **`CachedFlowStageRun`.** `StageRun`의 자식 하나. `FlowStage` 대신
   `SequenceStage(CachedFlowSequence)`를 만들고, `NormalizedFrameStage`는 소스가 아니라 옆에
   서서 `FlowSource.frames`로만 곁가지에 간다. `estimator=None`이라 FB error 축은 빠진다.
 - **전제 조건 검사**, 프레임 한 장 읽기 전에 시퀀스마다: record의 `frames`가 이번 실행이

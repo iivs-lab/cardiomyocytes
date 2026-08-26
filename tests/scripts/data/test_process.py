@@ -21,7 +21,7 @@ from omegaconf import OmegaConf
 
 from iivs_cardio.common.device import Device
 from iivs_cardio.common.pipeline.frames import RECORD_FILE
-from iivs_cardio.data.pipeline import FrameTree, RangeDocument, SequenceStageFactory
+from iivs_cardio.data.pipeline import FrameTree, RangeDocument, SequenceStageRun
 from iivs_cardio.data.transforms.filtering.kernel import MedianConfig
 from scripts._common.compute import ComputeConfig, IncompleteRunError, run_all
 from scripts._common.dataset import LISTING_LIMIT, SequenceSelectConfig
@@ -1008,7 +1008,7 @@ def test_a_finished_sequence_lets_go_of_its_window(phase_tree, monkeypatch, bran
     sequences, _ = build_sequences(
         *source_configs(root=str(phase_tree)), parse_filter_config(None)
     )
-    stages = SequenceStageFactory(sequences, branch, name=STAGE)
+    stages = SequenceStageRun(sequences, branch, name=STAGE)
     released: list[str] = []
     monkeypatch.setattr(sequences[0], "release", lambda: released.append("let go"))
 
@@ -1054,7 +1054,7 @@ def _factory(phase_tree, *branches):
         *source_configs(root=str(phase_tree)), parse_filter_config(None)
     )
 
-    return SequenceStageFactory(sequences, *branches, name=STAGE)
+    return SequenceStageRun(sequences, *branches, name=STAGE)
 
 
 class _Unsourced:
@@ -1193,7 +1193,7 @@ def test_a_branch_with_nothing_to_say_adds_no_line(phase_tree, caplog):
     # nothing, and the block has to leave it out rather than log an empty line.
     # Both scopes are covered here: a hook reports per sequence, a branch once.
     def lines(said: str | None) -> list[str]:
-        stages = SequenceStageFactory(
+        stages = SequenceStageRun(
             build_sequences(
                 *source_configs(root=str(phase_tree)), parse_filter_config(None)
             )[0],

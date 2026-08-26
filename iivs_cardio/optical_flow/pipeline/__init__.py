@@ -4,7 +4,7 @@ __all__ = (
     "EvaluationDocument",
     "FlowSource",
     "FlowStage",
-    "FlowStageFactory",
+    "FlowStageRun",
     "FlowTree",
     "FrameEvaluation",
     "Measured",
@@ -30,6 +30,6 @@ from iivs_cardio.optical_flow.pipeline.frames import FlowTree
 from iivs_cardio.optical_flow.pipeline.stage import (
     FlowSource,
     FlowStage,
-    FlowStageFactory,
+    FlowStageRun,
     NormalizedFrameStage,
 )

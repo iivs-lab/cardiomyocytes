@@ -13,7 +13,7 @@ from iivs_cardio.optical_flow.estimators import EstimatorConfig, FarnebackConfig
 from iivs_cardio.optical_flow.pipeline import (
     FlowSource,
     FlowStage,
-    FlowStageFactory,
+    FlowStageRun,
     NormalizedFrameStage,
 )
 from tests.optical_flow.pipeline.helpers import SIZE, shifted, textured
@@ -237,10 +237,10 @@ def test_a_flow_that_is_not_finite_is_refused_by_the_frame_it_starts_from():
 # ========================== #
 
 
-def _job(*sequences: _Sequence, branches=(), config=None) -> FlowStageFactory:
+def _job(*sequences: _Sequence, branches=(), config=None) -> FlowStageRun:
     normalizers = {sequence.name: NORMALIZER for sequence in sequences}
 
-    return FlowStageFactory(
+    return FlowStageRun(
         sequences,  # type: ignore[invalid-argument-type]
         normalizers,
         config or FarnebackConfig(),
@@ -282,7 +282,7 @@ def test_a_branch_reads_the_same_frames_the_flows_were_computed_from():
     watching = _Watching()
     (sequence,) = _sequences(4)
 
-    job = FlowStageFactory(
+    job = FlowStageRun(
         (sequence,),  # type: ignore[invalid-argument-type]
         {sequence.name: counting},  # type: ignore[invalid-argument-type]
         FarnebackConfig(),
@@ -333,7 +333,7 @@ def test_a_sequence_with_no_normalizer_is_refused_by_name():
     (sequence,) = _sequences(4)
 
     with pytest.raises(ValueError, match="no normalizer for 'plate/TL_00'"):
-        FlowStageFactory(
+        FlowStageRun(
             (sequence,),  # type: ignore[invalid-argument-type]
             {},
             FarnebackConfig(),
