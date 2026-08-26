@@ -6,11 +6,11 @@ __all__ = (
     "Coverage",
     "DocumentBranch",
     "Folded",
-    "Held",
     "Hook",
     "Named",
     "Part",
     "PresentPolicy",
+    "Releasable",
     "SequenceStage",
     "SideBranch",
     "Sourced",
@@ -61,4 +61,4 @@ from iivs_cardio.common.pipeline.document import (
     Sourced,
     save_document,
 )
-from iivs_cardio.common.pipeline.run import Held, StageRun
+from iivs_cardio.common.pipeline.run import Releasable, StageRun

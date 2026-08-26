@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("Held", "StageRun")
+__all__ = ("Releasable", "StageRun")
 
 import logging
 from abc import ABC, abstractmethod
@@ -25,8 +25,8 @@ if TYPE_CHECKING:
     from iivs_cardio.common.pipeline.base import SideBranch, Stage
 
 
-class Held(Named, Protocol):
-    """Whatever a run needs of one item: a name, and a hold it can be told to drop.
+class Releasable(Named, Protocol):
+    """Something that can be told to let go of what it kept while it worked.
 
     Every item of a run is held for the whole of it, so anything an item keeps
     while it is being worked on would otherwise be kept to the end.
@@ -35,7 +35,7 @@ class Held(Named, Protocol):
     def release(self) -> None: ...
 
 
-class StageRun[S: Held](ABC):
+class StageRun[S: Releasable](ABC):
     """The items of one run, and how to carry out and report on each of them.
 
     The name is the caller's to give rather than the machinery's to assume: the
