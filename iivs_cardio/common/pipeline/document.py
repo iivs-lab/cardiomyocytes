@@ -257,6 +257,14 @@ class PartMeter[P: Part](ABC):
         self._overwrite = overwrite
         self._saved = False
 
+    def __repr__(self) -> str:
+        """Name the sequence this meter files under, not where it sits in memory.
+
+        The one line that says a part could not be taken back carries this, and
+        an address leaves whoever reads it with nothing to go and remove.
+        """
+        return f"{type(self).__name__}({self._source!r})"
+
     @abstractmethod
     def _fold(self) -> P:
         """Fold what has been measured so far into this sequence's part.
