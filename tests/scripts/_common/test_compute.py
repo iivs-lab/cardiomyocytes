@@ -39,8 +39,6 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class _Item:
-    """The least an item can be: a name, and a hold there is none of."""
-
     name: str
 
     def release(self) -> None: ...
@@ -51,9 +49,6 @@ class _Stages(StageRun[_Item]):
 
     Through files rather than an attribute, because the pool hands each worker
     its own copy: what a worker did to itself never comes home.
-
-    `run_stage` is replaced whole, so the stage graph and the block heading it
-    would otherwise build are never reached.
     """
 
     def __init__(
