@@ -37,19 +37,19 @@ _logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True, slots=True)
 class Step[T, E = None]:
-    """One index of a stage, together with what was computed there.
+    """One index, together with what was computed there.
 
-    Both `value` and `extra` are optional because a stage may have nothing to
-    give at an index: a quantity taken from a pair of frames has no answer at
-    the first one, and a stage that carries no side information leaves `extra`
-    unset. A hook that needs either should ask for it by name.
+    Both `value` and `extra` are optional because an index may have nothing to
+    give: a quantity taken from a pair of frames has no answer at the first one,
+    and side information is not always carried at all. A hook that needs either
+    should ask for it by name.
 
     Type Parameters:
-        T: The type of what the stage computes.
-        E: The type of the side information it carries, if any.
+        T: The type of what was computed.
+        E: The type of the side information carried beside it, if any.
 
     Attributes:
-        index: The index of the stage this step is.
+        index: The position this step stands for.
         value: The result computed there, or `None` where there was none.
         extra: The side information about the value, such as where it came
             from. Defaults to None.
