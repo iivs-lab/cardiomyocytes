@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, Self, override, runtime_checkable
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Sequence
 
     from kaparoo.data import DataSequence
 
@@ -214,7 +214,7 @@ class StageFactory(Protocol):
         """
         ...
 
-    def running(self) -> AbstractContextManager[Any]:
+    def running(self) -> AbstractContextManager[object]:
         """Return the bracket around the whole run.
 
         Returns:
@@ -387,7 +387,7 @@ class Stage[T, E = None](ABC):
             raise RuntimeError(msg)
 
         self._walked = True
-        opened: list[AbstractContextManager[Any]] = []
+        opened: list[AbstractContextManager[object]] = []
 
         try:
             for hook in self._all_hooks():
@@ -446,7 +446,7 @@ class SequenceStage[T, M](Stage[T, M]):
 
 
 def close_together(
-    opened: list[AbstractContextManager[Any]], error: BaseException | None
+    opened: Sequence[AbstractContextManager[object]], error: BaseException | None
 ) -> None:
     """Close everything in `opened`, in reverse, each told only about `error`.
 
@@ -458,6 +458,7 @@ def close_together(
 
     Args:
         opened: The context managers to close, in the order they were opened.
+            Read rather than emptied, so a caller keeps whatever it built.
         error: The exception the block they bracket ended with, or `None`
             if it finished.
 
@@ -467,7 +468,7 @@ def close_together(
             since a second means the destination itself has gone.
     """
     failure: BaseException | None = None
-    closed: list[AbstractContextManager[Any]] = []
+    closed: list[AbstractContextManager[object]] = []
 
     for hook in reversed(opened):
         try:

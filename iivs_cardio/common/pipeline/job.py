@@ -217,7 +217,7 @@ class StageJob[S: Held](ABC):
         by a level down. What committed still says so even when the next one
         could not, since a branch that committed nothing reports nothing anyway.
         """
-        opened: list[AbstractContextManager[Any]] = []
+        opened: list[AbstractContextManager[object]] = []
 
         try:
             for branch in self._branches:
