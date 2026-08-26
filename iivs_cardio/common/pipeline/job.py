@@ -11,7 +11,11 @@ from kaparoo.utils import quantify
 from kaparoo.utils.timer import Timer
 
 from iivs_cardio.common.logging import log_indented
-from iivs_cardio.common.pipeline.base import Holding, Reporting, close_together
+from iivs_cardio.common.pipeline.base import (
+    SupportsReport,
+    SupportsUnsourced,
+    close_together,
+)
 from iivs_cardio.common.pipeline.branch import Named
 
 if TYPE_CHECKING:
@@ -189,7 +193,7 @@ class StageJob[S: Held](ABC):
         named = {
             name
             for branch in self._branches
-            if isinstance(branch, Holding)
+            if isinstance(branch, SupportsUnsourced)
             for name in branch.list_unsourced()
         }
         if not named:
@@ -237,7 +241,7 @@ class StageJob[S: Held](ABC):
 def _reports(candidates: Iterable[object]) -> Iterator[str]:
     """Yield a line from each candidate that can report and has something."""
     for candidate in candidates:
-        if not isinstance(candidate, Reporting):
+        if not isinstance(candidate, SupportsReport):
             continue
 
         if (line := candidate.report()) is not None:

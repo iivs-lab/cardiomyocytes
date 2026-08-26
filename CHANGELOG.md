@@ -80,7 +80,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   postprocessing behind a hologram reconstruction, so the machinery cannot claim
   a name for itself. `run_all` reads that name instead of taking its own, which
   is what keeps a parent and its workers from filing one run under two.
-- `Reporting`, a side branch's one line for whoever is logging. A branch runs
+- `SupportsReport`, a side branch's one line for whoever is logging. A branch runs
   under whichever stage registered it and has no logger of its own to use, so it
   returns the sentence and the stage writes it: `wrote 5 frames`,
   `measured [0.80, 2.52] across 5 frames` per sequence, and
@@ -288,7 +288,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   in turn is not one commit, so the range document's part reached disk and the
   frame tree failed to move a moment later, leaving a part standing for a
   sequence with no frames -- and a part is what `coverage` counts as covered,
-  so no number in the finished document showed it. `Reverting` is the hook that
+  so no number in the finished document showed it. `SupportsRevert` is what
   can undo a clean close, `close_together` calls it on everything that closed
   before the failure, and `SequenceRangeMeter` removes the part it wrote. Only
   worth having where undoing is possible: a frame tree that replaced a folder

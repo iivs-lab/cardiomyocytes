@@ -7,13 +7,10 @@ __all__ = (
     "DocumentBranch",
     "Folded",
     "Held",
-    "Holding",
     "Hook",
     "Named",
     "Part",
     "PresentPolicy",
-    "Reporting",
-    "Reverting",
     "SequenceStage",
     "SideBranch",
     "Sourced",
@@ -21,6 +18,9 @@ __all__ = (
     "StageFactory",
     "StageJob",
     "Step",
+    "SupportsReport",
+    "SupportsRevert",
+    "SupportsUnsourced",
     "UnsourcedPolicy",
     "as_read_back",
     "close_together",
@@ -31,15 +31,15 @@ __all__ = (
 )
 
 from iivs_cardio.common.pipeline.base import (
-    Holding,
     Hook,
-    Reporting,
-    Reverting,
     SequenceStage,
     SideBranch,
     Stage,
     StageFactory,
     Step,
+    SupportsReport,
+    SupportsRevert,
+    SupportsUnsourced,
     close_together,
 )
 from iivs_cardio.common.pipeline.branch import (

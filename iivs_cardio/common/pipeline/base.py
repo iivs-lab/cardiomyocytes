@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 __all__ = (
-    "Holding",
     "Hook",
-    "Reporting",
-    "Reverting",
     "SequenceStage",
     "SideBranch",
     "Stage",
     "StageFactory",
     "Step",
+    "SupportsReport",
+    "SupportsRevert",
+    "SupportsUnsourced",
     "close_together",
 )
 
@@ -118,28 +118,28 @@ class SideBranch[S, T, E = None](Protocol):
 
 
 @runtime_checkable
-class Holding(Protocol):
-    """A branch that keeps an output of its own for each item it watched.
+class SupportsUnsourced(Protocol):
+    """Something that can name the outputs no item stands behind any more.
 
     A dataset grows and shrinks between runs, so an output may outlive the item
-    it was made for. Only the branch knows what one of its outputs looks like on
-    disk, which is why the question is asked here rather than of the run.
+    it was made for. Only what wrote an output knows what it looks like on disk,
+    which is why it is asked rather than the run.
     """
 
     def list_unsourced(self) -> list[str]:
         """Return the names of the outputs the source no longer holds.
 
         Returns:
-            The names, which are this branch's to remove or keep by its own
-            policy. The same absence is what a half mounted share and a
-            misspelt subpath produce, so naming them is all this can do.
+            The names. Removing or keeping them is a policy, and the same
+            absence is what a half mounted share and a misspelt subpath
+            produce, so naming them is all this can do.
         """
         ...
 
 
 @runtime_checkable
-class Reporting(Protocol):
-    """Something that can say in one line what it did."""
+class SupportsReport(Protocol):
+    """Something that can say in one line what it committed."""
 
     def report(self) -> str | None:
         """Return one line naming what this committed.
@@ -152,10 +152,10 @@ class Reporting(Protocol):
 
 
 @runtime_checkable
-class Reverting(Protocol):
-    """A hook that can take back what closing it cleanly put in place.
+class SupportsRevert(Protocol):
+    """Something that can take back what closing it cleanly put in place.
 
-    Closing one after another is not one commit, so a hook whose output reached
+    Closing one after another is not one commit, so one whose output reached
     disk may find the next could not, leaving it standing for work the item did
     not finish. Only worth implementing where taking it back is possible: one
     that replaced an output already there cannot put that one back.
@@ -164,8 +164,8 @@ class Reverting(Protocol):
     def revert(self) -> None:
         """Take back what closing this cleanly put in place.
 
-        Called only where another hook of the same item could not commit, and
-        only on hooks that closed without raising. Doing nothing is a valid
+        Called only where another closing over the same item could not commit,
+        and only on those that closed without raising. Doing nothing is a valid
         answer for one that committed nothing.
         """
         ...
@@ -484,7 +484,7 @@ def close_together(
         return
 
     for hook in closed:
-        if isinstance(hook, Reverting):
+        if isinstance(hook, SupportsRevert):
             try:
                 hook.revert()
             except Exception:
