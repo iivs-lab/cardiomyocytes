@@ -9,7 +9,7 @@ import pytest
 from kaparoo.filesystem import StagedDirectory
 
 from iivs_cardio.common.pipeline import Step
-from iivs_cardio.data.writer import RECORD_FILE, KoalaFrameWriter
+from iivs_cardio.common.pipeline.frames import RECORD_FILE, KoalaFrameWriter
 from iivs_cardio.optical_flow.data.folder import OpticalFlowFolder, save_flow_npy
 
 if TYPE_CHECKING:

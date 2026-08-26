@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING
 import pytest
 from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 
+from iivs_cardio.common.pipeline.frames import RECORD_FILE
 from iivs_cardio.data.pipeline import FrameTree
-from iivs_cardio.data.writer import RECORD_FILE
 
 if TYPE_CHECKING:
     from pathlib import Path

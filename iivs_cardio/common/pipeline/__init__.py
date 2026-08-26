@@ -1,12 +1,15 @@
 __all__ = (
     "JSON_EXT",
     "PRESENT_POLICIES",
+    "RECORD_FILE",
     "STAGING",
     "UNSOURCED_POLICIES",
     "Coverage",
     "DocumentBranch",
     "Folded",
+    "FrameBranch",
     "Hook",
+    "KoalaFrameWriter",
     "Named",
     "Part",
     "PresentPolicy",
@@ -58,5 +61,10 @@ from iivs_cardio.common.pipeline.document import (
     Part,
     Sourced,
     save_document,
+)
+from iivs_cardio.common.pipeline.frames import (
+    RECORD_FILE,
+    FrameBranch,
+    KoalaFrameWriter,
 )
 from iivs_cardio.common.pipeline.run import Releasable, StageRun

@@ -21,7 +21,7 @@ from iivs.dhm.data.koala import KoalaFrameFolder, save_koala_frames
 from kaparoo.filesystem import ensure_file_exists, ensure_file_extension
 from numpy.typing import NDArray  # runtime: subscripted in the class bases below
 
-from iivs_cardio.data.writer import RECORD_FILE, KoalaFrameWriter
+from iivs_cardio.common.pipeline.frames import RECORD_FILE, KoalaFrameWriter
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping

@@ -20,9 +20,9 @@ from iivs.dhm.data.phase import (
 from omegaconf import OmegaConf
 
 from iivs_cardio.common.device import Device
+from iivs_cardio.common.pipeline.frames import RECORD_FILE
 from iivs_cardio.data.pipeline import FrameTree, RangeDocument, SequenceStageFactory
 from iivs_cardio.data.transforms.filtering.kernel import MedianConfig
-from iivs_cardio.data.writer import RECORD_FILE
 from scripts._common.compute import ComputeConfig, IncompleteRunError, run_all
 from scripts._common.dataset import LISTING_LIMIT, SequenceSelectConfig
 from scripts._common.filtering import parse_filter_config

@@ -4,7 +4,7 @@ __all__ = ("FlowTree",)
 
 from typing import TYPE_CHECKING, override
 
-from iivs_cardio.data.pipeline import FrameBranch
+from iivs_cardio.common.pipeline.frames import FrameBranch
 from iivs_cardio.optical_flow.data.folder import flow_frame_writer
 
 if TYPE_CHECKING:
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from torch import Tensor
 
     from iivs_cardio.common.pipeline import Named
-    from iivs_cardio.data.writer import KoalaFrameWriter
+    from iivs_cardio.common.pipeline.frames import KoalaFrameWriter
 
 
 class FlowTree(FrameBranch["Named", "Tensor"]):

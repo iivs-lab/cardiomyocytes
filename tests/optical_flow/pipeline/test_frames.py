@@ -7,7 +7,7 @@ import pytest
 import torch
 
 from iivs_cardio.common.pipeline import Step
-from iivs_cardio.data.writer import RECORD_FILE
+from iivs_cardio.common.pipeline.frames import RECORD_FILE
 from iivs_cardio.optical_flow.data import OpticalFlowFolder
 from iivs_cardio.optical_flow.pipeline import FlowTree
 

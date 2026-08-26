@@ -13,8 +13,8 @@ from iivs.dhm.data.phase import (
 )
 from kaparoo.filesystem import stringify_path
 
+from iivs_cardio.common.pipeline.frames import RECORD_FILE, KoalaFrameWriter
 from iivs_cardio.data.transforms.filtering import FilteredSequence
-from iivs_cardio.data.writer import RECORD_FILE, KoalaFrameWriter
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
