@@ -24,7 +24,6 @@ from iivs_cardio.common.pipeline.branch import (
     as_read_back,
     ensure_json_name,
     ensure_policy,
-    find_unsourced,
 )
 from iivs_cardio.data.phase import phase_frame_writer
 from iivs_cardio.data.writer import RECORD_FILE
@@ -273,7 +272,7 @@ class FrameBranch[S: Named, T](ABC):
         A source that looks smaller than it is reads the same from here, so
         acting on the list is `if_unsourced`'s to decide and naming it is not.
         """
-        return find_unsourced(self.list_sequences(), self.contents)
+        return [name for name in self.list_sequences() if name not in self.contents]
 
     def drop_unsourced(self) -> list[str]:
         """Remove the folders of sequences the source has lost, and name them.

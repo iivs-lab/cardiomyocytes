@@ -11,7 +11,6 @@ from iivs_cardio.common.pipeline.branch import (
     UnsourcedPolicy,
     ensure_json_name,
     ensure_policy,
-    find_unsourced,
 )
 
 
@@ -82,9 +81,3 @@ def test_a_name_carrying_another_extension_is_refused():
     # than a name with a dot in it, and nothing here guesses which was meant.
     with pytest.raises(ValueError, match=r"unsupported extension 'b'"):
         ensure_json_name("a.b")
-
-
-def test_what_the_contents_does_not_hold_is_unsourced_whatever_the_order():
-    assert find_unsourced(["c", "a", "b"], {"b"}) == ["a", "c"]
-    assert find_unsourced([], {"b"}) == []
-    assert find_unsourced(["b"], {"b"}) == []

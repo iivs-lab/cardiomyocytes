@@ -11,7 +11,6 @@ __all__ = (
     "as_read_back",
     "ensure_json_name",
     "ensure_policy",
-    "find_unsourced",
 )
 
 import json
@@ -23,7 +22,7 @@ from kaparoo.filters import And, EndsWith, StartsWith
 from kaparoo.utils import ensure_one_of, literal_values
 
 if TYPE_CHECKING:
-    from collections.abc import Container, Iterable, Mapping, Sequence
+    from collections.abc import Mapping, Sequence
 
 type PresentPolicy = Literal["error", "overwrite", "reuse"]
 type UnsourcedPolicy = Literal["keep", "delete"]
@@ -114,21 +113,3 @@ def ensure_policy[T: str](value: str, allowed: Sequence[T], key: str) -> T:
         offered = ", ".join(repr(policy) for policy in allowed)
         msg = f"unsupported {key} {value!r}: expected {offered}"
         raise ValueError(msg) from None
-
-
-def find_unsourced(present: Iterable[str], contents: Container[str]) -> list[str]:
-    """Return the names on disk that the source no longer holds, sorted.
-
-    A name here belongs to a sequence the dataset has since dropped, and that
-    is all this can tell: a source that looks smaller than it is, because a
-    mount is half up or a subpath is misspelt, produces exactly the same list.
-    Deciding what to do with them is a policy, and saying they are there is not.
-
-    Args:
-        present: The names of the outputs there are.
-        contents: The names the source holds.
-
-    Returns:
-        The names in `present` that `contents` does not hold, sorted.
-    """
-    return sorted(name for name in present if name not in contents)

@@ -22,7 +22,6 @@ __all__ = (
     "close_together",
     "ensure_json_name",
     "ensure_policy",
-    "find_unsourced",
     "finite_range",
     "log_indented",
 )
@@ -48,6 +47,5 @@ from iivs_cardio.common.pipeline import (
     close_together,
     ensure_json_name,
     ensure_policy,
-    find_unsourced,
 )
 from iivs_cardio.common.range import all_finite, finite_range

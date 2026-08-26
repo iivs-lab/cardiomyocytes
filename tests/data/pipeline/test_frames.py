@@ -223,10 +223,13 @@ def test_a_tree_with_no_root_yet_holds_nothing(tmp_path):
 
 
 def test_a_folder_the_source_has_lost_is_named(tmp_path):
+    # Sorted, which the listing rather than this gives: the walk hands back
+    # the folders in order and dropping the sourced ones keeps them in it.
     _sequence(tmp_path, "kept")
+    _sequence(tmp_path, "went")
     _sequence(tmp_path, "gone")
 
-    assert _tree(tmp_path, "kept").list_unsourced() == ["gone"]
+    assert _tree(tmp_path, "kept").list_unsourced() == ["gone", "went"]
 
 
 def test_a_folder_the_source_has_lost_stays_unless_the_policy_says_otherwise(tmp_path):

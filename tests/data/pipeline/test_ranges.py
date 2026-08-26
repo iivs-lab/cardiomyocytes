@@ -1157,12 +1157,14 @@ def test_a_sequence_whose_frames_changed_is_measured_again(tmp_path):
 def test_a_part_the_source_has_lost_stays_out_of_the_document(tmp_path):
     # Folding it would widen the bounds with a sequence nobody can go and look
     # at. Left on disk, since a half mounted share makes the same absence.
-    with _reusing(tmp_path, "a", "gone") as first:
+    with _reusing(tmp_path, "a", "gone", "went") as first:
         _measured(first, tmp_path, "a", (0.0, 1.0))
         _measured(first, tmp_path, "gone", (-9.0, 9.0))
+        _measured(first, tmp_path, "went", (-9.0, 9.0))
 
     with _reusing(tmp_path, "a") as second:
-        assert second.list_unsourced() == ["gone"]
+        # Sorted, which `list_parts` rather than this gives.
+        assert second.list_unsourced() == ["gone", "went"]
 
     assert (tmp_path / "range.parts" / "gone.json").exists()
     assert _saved(tmp_path)["dataset"]["max_value"] == 1.0

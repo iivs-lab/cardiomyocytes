@@ -35,7 +35,6 @@ from iivs_cardio.common.pipeline.branch import (
     PresentPolicy,
     UnsourcedPolicy,
     as_read_back,
-    find_unsourced,
 )
 
 if TYPE_CHECKING:
@@ -803,7 +802,9 @@ class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
         share and a misspelt subpath produce, so what to do with them is the
         caller's policy and saying they are there is not.
         """
-        return find_unsourced(map(self._source_of, self.list_parts()), self.contents)
+        filed = map(self._source_of, self.list_parts())
+
+        return [name for name in filed if name not in self.contents]
 
     def drop_unsourced(self) -> list[str]:
         """Remove the parts of sequences the source has lost, and name them.

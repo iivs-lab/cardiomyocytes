@@ -25,7 +25,6 @@ __all__ = (
     "close_together",
     "ensure_json_name",
     "ensure_policy",
-    "find_unsourced",
     "save_document",
 )
 
@@ -51,7 +50,6 @@ from iivs_cardio.common.pipeline.branch import (
     as_read_back,
     ensure_json_name,
     ensure_policy,
-    find_unsourced,
 )
 from iivs_cardio.common.pipeline.document import (
     Coverage,
