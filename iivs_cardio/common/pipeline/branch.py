@@ -35,7 +35,7 @@ STAGING: Final = And((StartsWith("."), EndsWith(".tmp")))
 
 
 class Named(Protocol):
-    """Whatever a side branch needs of a sequence: what to file it under."""
+    """Something with a name, which is what an output or a log line is filed under."""
 
     @property
     def name(self) -> str: ...
