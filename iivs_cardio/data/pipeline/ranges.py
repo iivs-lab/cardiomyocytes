@@ -5,8 +5,8 @@ __all__ = (
     "DatasetRange",
     "FrameRange",
     "RangeDocument",
+    "RangeWriter",
     "SequenceRange",
-    "SequenceRangeMeter",
     "ValueRange",
 )
 
@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Self, override
 
 from kaparoo.utils import quantify
 
-from iivs_cardio.common.pipeline.document import DocumentBranch, PartMeter
+from iivs_cardio.common.pipeline.document import DocumentBranch, ResultWriter
 from iivs_cardio.common.range import finite_range
 
 if TYPE_CHECKING:
@@ -54,9 +54,9 @@ def _number(document: Mapping[str, Any], key: str) -> float:
 
     `bool` is an `int` to `isinstance`, so `true` would otherwise read as 1.0
     and a pair of them as a range running backwards. A non-finite bound is
-    refused here rather than folded: `min` and `max` carry a NaN through or
-    drop it depending on where it sits, so one that got in would fold to
-    whatever the order of the parts happened to be.
+    refused here rather than combined: `min` and `max` carry a NaN through or
+    drop it depending on where it sits, so one that got in would combine to
+    whatever the order of the results happened to be.
 
     Raises:
         ValueError: If the value is absent, not a number, or not finite.
@@ -92,8 +92,8 @@ class ValueRange(ABC):
     def __post_init__(self) -> None:
         """Refuse a range whose two ends are the wrong way round.
 
-        A folded range takes each end from the part that holds it, so it cannot
-        invert once its parts are this way up.
+        A combined range takes each end from the result that holds it, so it cannot
+        invert once its results are this way up.
 
         Raises:
             ValueError: If the lowest value is above the highest.
@@ -151,21 +151,21 @@ class FrameRange(ValueRange):
 
 @dataclass(frozen=True, slots=True)
 class CompositeRange(ValueRange, ABC):
-    """A range folded from smaller ones, keeping where each end came from.
+    """A range combined from smaller ones, keeping where each end came from.
 
-    The bounds are not given but taken from the parts, and each is remembered
-    with the part it came from, so a wide dataset range can be traced back to
+    The bounds are not given but taken from the results, and each is remembered
+    with the result it came from, so a wide dataset range can be traced back to
     the one sequence or frame that widened it.
 
     Attributes:
-        source: The thing the folded range was measured over.
-        min_value: The lowest value across every part.
-        max_value: The highest value across every part.
-        min_index: The position of the part holding the lowest value.
-        max_index: The position of the part holding the highest value.
+        source: The thing the combined range was measured over.
+        min_value: The lowest value across every result.
+        max_value: The highest value across every result.
+        min_index: The position of the result holding the lowest value.
+        max_index: The position of the result holding the highest value.
 
     Raises:
-        ValueError: If there are no parts, since a range over nothing has no
+        ValueError: If there are no results, since a range over nothing has no
             meaning to fall back on.
     """
 
@@ -176,34 +176,34 @@ class CompositeRange(ValueRange, ABC):
 
     @property
     @abstractmethod
-    def parts(self) -> Sequence[ValueRange]:
-        """The ranges this one is folded from, in the order they were taken."""
+    def results(self) -> Sequence[ValueRange]:
+        """The ranges this one is combined from, in the order they were taken."""
         raise NotImplementedError
 
     def __len__(self) -> int:
-        """The number of ranges folded here."""
-        return len(self.parts)
+        """The number of ranges combined here."""
+        return len(self.results)
 
     def __post_init__(self) -> None:
-        """Take the bounds from the parts, and note which part gave each."""
-        parts = self.parts
-        if not parts:
+        """Take the bounds from the results, and note which result gave each."""
+        results = self.results
+        if not results:
             msg = f"value range is undefined: {type(self).__name__} holds nothing"
             raise ValueError(msg)
 
-        indices = range(len(parts))
-        min_index = min(indices, key=lambda i: parts[i].min_value)
-        max_index = max(indices, key=lambda i: parts[i].max_value)
+        indices = range(len(results))
+        min_index = min(indices, key=lambda i: results[i].min_value)
+        max_index = max(indices, key=lambda i: results[i].max_value)
 
-        object.__setattr__(self, "min_value", parts[min_index].min_value)
-        object.__setattr__(self, "max_value", parts[max_index].max_value)
+        object.__setattr__(self, "min_value", results[min_index].min_value)
+        object.__setattr__(self, "max_value", results[max_index].max_value)
         object.__setattr__(self, "min_index", min_index)
         object.__setattr__(self, "max_index", max_index)
 
 
 @dataclass(frozen=True, slots=True)
 class SequenceRange(CompositeRange):
-    """The range of one sequence, folded from the frames it was measured over.
+    """The range of one sequence, combined from the frames it was measured over.
 
     Position is the key, not the name. Each frame is filed under the source it
     was read from, while a cache the same run writes numbers its frames from
@@ -225,8 +225,8 @@ class SequenceRange(CompositeRange):
 
     @property
     @override
-    def parts(self) -> tuple[FrameRange, ...]:
-        """The frame ranges this sequence is folded from."""
+    def results(self) -> tuple[FrameRange, ...]:
+        """The frame ranges this sequence is combined from."""
         return self.frames
 
     @classmethod
@@ -245,7 +245,7 @@ class SequenceRange(CompositeRange):
 
 @dataclass(frozen=True, slots=True)
 class DatasetRange(CompositeRange):
-    """The range of a whole dataset, folded from the sequences it covers.
+    """The range of a whole dataset, combined from the sequences it covers.
 
     Attributes:
         source: The dataset root the run read, which is what tells two
@@ -254,15 +254,15 @@ class DatasetRange(CompositeRange):
         max_value: The highest value across every sequence.
         min_index: The position of the sequence holding the lowest value.
         max_index: The position of the sequence holding the highest value.
-        sequences: The range of each sequence, in the order they were folded.
+        sequences: The range of each sequence, in the order they were combined.
     """
 
     sequences: tuple[SequenceRange, ...]
 
     @property
     @override
-    def parts(self) -> tuple[SequenceRange, ...]:
-        """The sequence ranges this dataset is folded from."""
+    def results(self) -> tuple[SequenceRange, ...]:
+        """The sequence ranges this dataset is combined from."""
         return self.sequences
 
     @classmethod
@@ -284,18 +284,18 @@ class DatasetRange(CompositeRange):
 # ========================== #
 
 
-class SequenceRangeMeter(PartMeter[SequenceRange]):
+class RangeWriter(ResultWriter[SequenceRange]):
     """Measure the range of every frame of one sequence, then write the result.
 
     This is the hook a range document hands to a sequence. It records a range
     per frame as the frames go by, and on a clean close writes them beside the
-    document as that sequence's part.
+    document as that sequence's result.
 
     Args:
-        root: As `PartMeter`.
-        source: As `PartMeter`.
-        settings: As `PartMeter`.
-        overwrite: As `PartMeter`.
+        root: As `ResultWriter`.
+        source: As `ResultWriter`.
+        settings: As `ResultWriter`.
+        overwrite: As `ResultWriter`.
     """
 
     def __init__(
@@ -312,7 +312,7 @@ class SequenceRangeMeter(PartMeter[SequenceRange]):
         self._cached: SequenceRange | None = None
 
     def __call__(self, step: Step[Tensor, Path]) -> None:
-        """Measure `step`, so the meter can be registered as a hook directly."""
+        """Measure `step`, so the writer can be registered as a hook directly."""
         self.measure(step)
 
     def measure(self, step: Step[Tensor, Path]) -> None:
@@ -333,7 +333,7 @@ class SequenceRangeMeter(PartMeter[SequenceRange]):
         self._frames.append(FrameRange(path.name, *found))
 
     def to_range(self) -> SequenceRange:
-        """Fold what has been measured so far into one range for the sequence.
+        """Combine what has been measured so far into one range for the sequence.
 
         Raises:
             ValueError: If no frame has been measured yet.
@@ -343,7 +343,7 @@ class SequenceRangeMeter(PartMeter[SequenceRange]):
         return self._cached
 
     @override
-    def _fold(self) -> SequenceRange:
+    def _result(self) -> SequenceRange:
         return self.to_range()
 
     def report(self) -> str | None:
@@ -360,15 +360,13 @@ class SequenceRangeMeter(PartMeter[SequenceRange]):
 # ========================== #
 
 
-class RangeDocument(
-    DocumentBranch["Named", SequenceRange, DatasetRange, SequenceRangeMeter]
-):
+class RangeDocument(DocumentBranch["Named", SequenceRange, DatasetRange, RangeWriter]):
     """The document a phase stage writes, gathering every sequence's range.
 
     Attributes:
-        PARTS_SUFFIX: As `DocumentBranch`.
+        RESULTS_SUFFIX: As `DocumentBranch`.
         path: As `DocumentBranch`.
-        parts_root: As `DocumentBranch`.
+        results_root: As `DocumentBranch`.
         source: As `DocumentBranch`.
         contents: As `DocumentBranch`.
         settings: As `DocumentBranch`.
@@ -378,9 +376,9 @@ class RangeDocument(
     """
 
     @override
-    def _make_meter(self, source: Named) -> SequenceRangeMeter:
-        return SequenceRangeMeter(
-            self.parts_root, source.name, self.settings, overwrite=self._replacing
+    def _make_writer(self, source: Named) -> RangeWriter:
+        return RangeWriter(
+            self.results_root, source.name, self.settings, overwrite=self._replacing
         )
 
     @override
@@ -388,8 +386,8 @@ class RangeDocument(
         return SequenceRange.from_dict(document)
 
     @override
-    def _fold(self, parts: tuple[SequenceRange, ...]) -> DatasetRange:
-        return DatasetRange(self.source, parts)
+    def _combine(self, results: tuple[SequenceRange, ...]) -> DatasetRange:
+        return DatasetRange(self.source, results)
 
     @override
     def _expected(self, names: Sequence[str]) -> Sequence[str]:

@@ -223,7 +223,7 @@ class KoalaFrameWriter[T]:
 
 
 @dataclass(frozen=True, slots=True)
-class FrameBranch[S: Named, T](ABC):
+class FrameBranch[N: Named, T](ABC):
     """The side branch that writes each sequence back out under a new root.
 
     A written sequence keeps the name and the layout it had in the source, so
@@ -235,7 +235,7 @@ class FrameBranch[S: Named, T](ABC):
     back fewer would otherwise never reuse anything it wrote.
 
     Type Parameters:
-        S: The sequence a writer is made for, named the way the tree files it.
+        N: The sequence a writer is made for, named the way the tree files it.
         T: The type of one frame, as the writer is handed it.
 
     Attributes:
@@ -307,7 +307,7 @@ class FrameBranch[S: Named, T](ABC):
         """
         return self.if_present != "error"
 
-    def get_hook(self, source: S) -> KoalaFrameWriter[T] | None:
+    def get_hook(self, source: N) -> KoalaFrameWriter[T] | None:
         """Return the writer for `source`, or `None` to keep what is there.
 
         Whether a folder still stands for this run was settled when the tree
@@ -337,7 +337,7 @@ class FrameBranch[S: Named, T](ABC):
     def _make_writer(
         self,
         dest: Path,
-        source: S,
+        source: N,
         *,
         overwrite: bool,
         record: Mapping[str, object] | None,

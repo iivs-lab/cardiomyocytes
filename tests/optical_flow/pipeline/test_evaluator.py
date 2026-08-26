@@ -9,7 +9,7 @@ import torch
 
 from iivs_cardio.common.pipeline import Step
 from iivs_cardio.optical_flow.estimators import FarnebackConfig
-from iivs_cardio.optical_flow.pipeline import SequenceEvaluation, SequenceEvaluator
+from iivs_cardio.optical_flow.pipeline import EvaluationWriter, SequenceEvaluation
 from tests.optical_flow.pipeline.helpers import SIZE, frame_stage
 
 if TYPE_CHECKING:
@@ -23,7 +23,7 @@ NAME = "plate/TL_00"
 def _run(tmp_path: Path, frames: SequenceStage, *, estimator=None, **kwargs):
     """Score a whole sequence, as a flow stage's hook would."""
     of = FarnebackConfig().build("cpu")
-    evaluator = SequenceEvaluator(tmp_path, NAME, frames, estimator=estimator, **kwargs)
+    evaluator = EvaluationWriter(tmp_path, NAME, frames, estimator=estimator, **kwargs)
 
     with evaluator:
         for index in range(len(frames) - 1):
@@ -36,11 +36,11 @@ def _run(tmp_path: Path, frames: SequenceStage, *, estimator=None, **kwargs):
 
 
 def test_a_sequence_of_n_frames_is_scored_n_minus_one_times(tmp_path):
-    folded = _run(tmp_path, frame_stage(5)).to_evaluation()
+    combined = _run(tmp_path, frame_stage(5)).to_evaluation()
 
-    assert folded.source == NAME
-    assert folded.pairs == 4
-    assert folded.metrics["ssim"].scored == 4
+    assert combined.source == NAME
+    assert combined.pairs == 4
+    assert combined.metrics["ssim"].scored == 4
 
 
 def test_a_score_names_the_frame_its_flow_starts_from(tmp_path):
@@ -54,7 +54,7 @@ def test_a_score_names_the_frame_its_flow_starts_from(tmp_path):
 
 
 def test_a_part_carries_the_pairs_it_was_folded_from(tmp_path):
-    # What lets a chunked run be folded again from its parts, and what a reader
+    # What lets a chunked run be combined again from its results, and what a reader
     # goes to when a mean is not the whole story.
     _run(tmp_path, frame_stage(4))
 
@@ -68,26 +68,26 @@ def test_a_part_carries_the_pairs_it_was_folded_from(tmp_path):
 
 
 def test_a_real_flow_gains_on_the_floor_it_is_read_against(tmp_path):
-    folded = _run(tmp_path, frame_stage(4)).to_evaluation()
+    combined = _run(tmp_path, frame_stage(4)).to_evaluation()
 
-    gain = folded.metrics["ssim"].mean - folded.metrics["ssim_floor"].mean
+    gain = combined.metrics["ssim"].mean - combined.metrics["ssim_floor"].mean
     assert gain > 0.0
-    assert folded.metrics["magnitude"].mean > 0.0
+    assert combined.metrics["magnitude"].mean > 0.0
 
 
 def test_without_an_estimator_the_reverse_axis_is_not_measured(tmp_path):
-    folded = _run(tmp_path, frame_stage(4)).to_evaluation()
+    combined = _run(tmp_path, frame_stage(4)).to_evaluation()
 
-    assert folded.metrics["fb_error"].scored == 0
-    assert folded.dropped("fb_error") == 3
+    assert combined.metrics["fb_error"].scored == 0
+    assert combined.dropped("fb_error") == 3
 
 
 def test_with_an_estimator_the_flow_is_asked_to_come_back(tmp_path):
     of = FarnebackConfig().build("cpu")
-    folded = _run(tmp_path, frame_stage(4), estimator=of).to_evaluation()
+    combined = _run(tmp_path, frame_stage(4), estimator=of).to_evaluation()
 
-    assert folded.metrics["fb_error"].scored == 3
-    assert 0.0 < folded.metrics["fb_error"].mean < 1.0
+    assert combined.metrics["fb_error"].scored == 3
+    assert 0.0 < combined.metrics["fb_error"].mean < 1.0
 
 
 def test_a_duplicated_frame_is_counted_rather_than_rounded_away(tmp_path):
@@ -98,7 +98,7 @@ def test_a_duplicated_frame_is_counted_rather_than_rounded_away(tmp_path):
     # Farneback answers 4.6e-02, so which estimator ran decides whether the
     # sequence reaches this at all.)
     frames = frame_stage(4, duplicate=2)
-    evaluator = SequenceEvaluator(tmp_path, NAME, frames)
+    evaluator = EvaluationWriter(tmp_path, NAME, frames)
     of = FarnebackConfig().build("cpu")
 
     with evaluator:
@@ -109,12 +109,12 @@ def test_a_duplicated_frame_is_counted_rather_than_rounded_away(tmp_path):
             flow = torch.zeros((2, SIZE, SIZE)) if exact else of.calc(first, second)
             evaluator(Step(index, flow, frames[index].extra))
 
-    folded = evaluator.to_evaluation()
+    combined = evaluator.to_evaluation()
 
-    assert folded.pairs == 3
-    assert folded.dropped("psnr") == 1
-    assert folded.dropped("ssim") == 0
-    assert folded.dropped("mse") == 0
+    assert combined.pairs == 3
+    assert combined.dropped("psnr") == 1
+    assert combined.dropped("ssim") == 0
+    assert combined.dropped("mse") == 0
 
 
 def test_the_part_is_written_on_a_clean_close(tmp_path):
@@ -128,9 +128,9 @@ def test_the_part_is_written_on_a_clean_close(tmp_path):
 
 
 def test_a_sequence_that_ended_badly_leaves_no_part(tmp_path):
-    # A part on disk stands for a sequence that finished.
+    # A result on disk stands for a sequence that finished.
     frames = frame_stage(4)
-    evaluator = SequenceEvaluator(tmp_path, NAME, frames)
+    evaluator = EvaluationWriter(tmp_path, NAME, frames)
 
     died = RuntimeError("the worker died")
     with pytest.raises(RuntimeError), evaluator:
@@ -152,7 +152,7 @@ def test_a_frame_stage_that_is_not_the_one_it_was_computed_from_is_caught(tmp_pa
     # Asking for `i + 1` past the end says the stage is a different length, so
     # it is not the stage these flows came from.
     frames = frame_stage(3)
-    evaluator = SequenceEvaluator(tmp_path, NAME, frames)
+    evaluator = EvaluationWriter(tmp_path, NAME, frames)
     flow = torch.zeros((2, SIZE, SIZE))
 
     with pytest.raises(IndexError):
@@ -160,12 +160,12 @@ def test_a_frame_stage_that_is_not_the_one_it_was_computed_from_is_caught(tmp_pa
 
 
 def test_nothing_scored_reports_nothing(tmp_path):
-    assert SequenceEvaluator(tmp_path, NAME, frame_stage(3)).report() is None
+    assert EvaluationWriter(tmp_path, NAME, frame_stage(3)).report() is None
 
 
 def test_a_sequence_that_answered_no_pair_is_refused_rather_than_filed(tmp_path):
-    # A part standing for it would count as covered while saying nothing.
-    evaluator = SequenceEvaluator(tmp_path, NAME, frame_stage(3))
+    # A result standing for it would count as covered while saying nothing.
+    evaluator = EvaluationWriter(tmp_path, NAME, frame_stage(3))
 
     with pytest.raises(ValueError, match="answered no pair"):
         evaluator.to_evaluation()

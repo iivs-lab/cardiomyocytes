@@ -2,10 +2,10 @@ from __future__ import annotations
 
 __all__ = (
     "Coverage",
+    "DatasetResult",
     "DocumentBranch",
-    "Folded",
-    "Part",
-    "PartMeter",
+    "ResultWriter",
+    "SequenceResult",
     "Sourced",
     "save_document",
 )
@@ -52,11 +52,11 @@ class Sourced(Protocol):
     def source(self) -> str: ...
 
 
-class Part(Sourced, Protocol):
-    """Whatever a document needs of one sequence's part.
+class SequenceResult(Sourced, Protocol):
+    """Whatever a document needs of one sequence's result.
 
-    Its own source, so a part filed under one name and holding another can be
-    caught, and the frames it covers, so a part written before the source
+    Its own source, so a result filed under one name and holding another can be
+    caught, and the frames it covers, so a result written before the source
     changed can be told from one that still describes it.
     """
 
@@ -66,8 +66,8 @@ class Part(Sourced, Protocol):
     def to_dict(self) -> dict[str, Any]: ...
 
 
-class Folded(Protocol):
-    """Whatever a document needs of a fold: the sequences that went into it."""
+class DatasetResult(Protocol):
+    """Whatever a document needs of a dataset: the sequences that went into it."""
 
     @property
     def sequences(self) -> Sequence[Sourced]: ...
@@ -85,25 +85,25 @@ class Coverage:
     """How much of the dataset a document accounts for, and how it got there.
 
     Measured against the whole dataset rather than against what one run was
-    given, since a document may fold parts an earlier run left: counting
+    given, since a document may combine results an earlier run left: counting
     against the selection would say `31 of 31` while the numbers came from 121.
     Every sequence the source holds is in exactly one of `covered`, `skipped`
     and `unselected`.
 
     The two names it misses are kept apart because they call for different
-    things. One was given to the run and left no part, which is what a retry is
+    things. One was given to the run and left no result, which is what a retry is
     built from; the other was never given, which is what `include` and
     `exclude` do and needs nothing.
 
     Attributes:
         found: How many sequences the source holds.
         selected: How many of those the run was given to cover.
-        covered: How many the document has a part for.
-        reused: How many of those came from a part the run did not measure.
+        covered: How many the document has a result for.
+        reused: How many of those came from a result the run did not measure.
             Defaults to none of them.
-        skipped: The selected names the document has no part for. Defaults to
+        skipped: The selected names the document has no result for. Defaults to
             no names.
-        unselected: The names the run was not given and has no part for.
+        unselected: The names the run was not given and has no result for.
             Defaults to no names.
 
     Raises:
@@ -149,26 +149,26 @@ class Coverage:
 
 def save_document(
     path: StrPath,
-    dataset: Folded | None,
+    dataset: DatasetResult | None,
     *,
     settings: Mapping[str, object] | None = None,
     coverage: Coverage | None = None,
     overwrite: bool = False,
 ) -> Path:
-    """Write one document, with what was folded and how it was made.
+    """Write one document, with what was combined and how it was made.
 
     `coverage` comes before `dataset` so that whoever opens the file to read the
     numbers meets the statement of what they cover first.
 
     Args:
         path: The file to write, given `.json` if it has no extension.
-        dataset: The fold the document is written to carry, or `None` when
-            nothing was folded. A fold over nothing has no numbers to invent, so
+        dataset: The combine the document is written to carry, or `None` when
+            nothing was combined. Combining nothing has no numbers to invent, so
             the document then carries what it covers and no more.
         settings: The block a later run would compare to decide whether this
             document still describes it, such as the filter and the frame step.
             Defaults to `None`, which records nothing.
-        coverage: The statement of how much of the dataset the fold accounts
+        coverage: The statement of how much of the dataset the combine accounts
             for. Defaults to `None`, which leaves the document silent on it.
         overwrite: Whether an existing document may be replaced. Defaults to
             `False`.
@@ -206,34 +206,34 @@ def save_document(
 # ========================== #
 
 
-class PartMeter[P: Part](ABC):
+class ResultWriter[S: SequenceResult](ABC):
     """Measure one sequence as its frames go by, then write down the result.
 
     This is the hook a document hands to a sequence. Writing is how the result
     gets home: a sequence may be measured in a worker process of its own, and
     nothing it keeps in memory comes back.
 
-    A close that follows an error writes nothing, so a part on disk always
+    A close that follows an error writes nothing, so a result on disk always
     stands for a sequence that finished. Another hook of the same sequence
     failing to commit is that same thing seen a moment later, and `revert` is
-    how the part goes with it.
+    how the result goes with it.
 
     A subclass says one thing and inherits the rest: what the frames it watched
-    fold into.
+    combine into.
 
     Type Parameters:
-        P: What this sequence's part holds.
+        S: What this sequence's result holds.
 
     Args:
-        root: The folder the part is written into, created if it is not there.
+        root: The folder the result is written into, created if it is not there.
         source: The name the sequence has, used both in the record and as the
             name of the file it is written to.
-        settings: The settings that shaped the numbers, written into the part so
+        settings: The settings that shaped the numbers, written into the result so
             it can be told from one an earlier run left under different ones.
-            The document carries the same block, and a part outliving the
+            The document carries the same block, and a result outliving the
             document is the case that needs its own copy. Defaults to `None`,
             which records nothing and so can never be reused.
-        overwrite: Whether a part already filed under `source` may be replaced.
+        overwrite: Whether a result already filed under `source` may be replaced.
             Its own run clears the folder on the way in, so one that is there
             belongs to something else: two sequences whose names came out the
             same, most likely, which is a mistake rather than a second attempt.
@@ -260,11 +260,11 @@ class PartMeter[P: Part](ABC):
         return f"{type(self).__name__}({self._source!r})"
 
     @abstractmethod
-    def _fold(self) -> P:
-        """Fold what has been measured so far into this sequence's part.
+    def _result(self) -> S:
+        """Combine what has been measured so far into this sequence's result.
 
         Raises:
-            ValueError: If nothing has been measured, since a part standing for
+            ValueError: If nothing has been measured, since a result standing for
                 a sequence that said nothing would count as covered.
         """
 
@@ -277,11 +277,11 @@ class PartMeter[P: Part](ABC):
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        """Write the sequence's part, unless the sequence ended in an error.
+        """Write the sequence's result, unless the sequence ended in an error.
 
         Raises:
-            FileExistsError: If a part is already filed under this name and
-                this meter was not told it may replace it.
+            FileExistsError: If a result is already filed under this name and
+                this writer was not told it may replace it.
         """
         if exc_type is not None:
             return
@@ -289,7 +289,7 @@ class PartMeter[P: Part](ABC):
         document: dict[str, object] = {}
         if self._settings is not None:
             document["settings"] = dict(self._settings)
-        document |= self._fold().to_dict()
+        document |= self._result().to_dict()
 
         with StagedFile(
             self._path,
@@ -302,9 +302,9 @@ class PartMeter[P: Part](ABC):
         self._saved = True
 
     def revert(self) -> None:
-        """Take back the part, if this meter got as far as writing one.
+        """Take back the result, if this writer got as far as writing one.
 
-        A part on disk stands for a sequence that finished, and one whose other
+        A result on disk stands for a sequence that finished, and one whose other
         outputs could not be committed did not. Taking it back is what puts the
         sequence back among the skipped rather than leaving the document
         counting it as covered while its frames are nowhere.
@@ -321,29 +321,29 @@ class PartMeter[P: Part](ABC):
 # ========================== #
 
 
-class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
-    """The side branch that gathers a dataset's parts into one document.
+class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](ABC):
+    """The side branch that gathers a dataset's results into one document.
 
-    It hands each sequence a meter, and each meter leaves its own part in a
-    folder beside the document. Closing it folds the parts that belong to the
+    It hands each sequence a writer, and each writer leaves its own result in a
+    folder beside the document. Closing it combines the results that belong to the
     dataset and writes the document, together with a statement of how much of
-    that dataset those parts account for.
+    that dataset those results account for.
 
-    Since the parts are read off disk rather than passed back, it does not
+    Since the results are read off disk rather than passed back, it does not
     matter which process measured them.
 
-    A subclass says four things and inherits the rest: what meter to hand a
-    sequence, how to read one part back, how to fold them, and how many values
+    A subclass says four things and inherits the rest: what writer to hand a
+    sequence, how to read one result back, how to combine them, and how many values
     this stage owes a sequence. The last is not always as many as the source
-    holds, and a stage that gives back fewer would otherwise never reuse a part
+    holds, and a stage that gives back fewer would otherwise never reuse a result
     it wrote.
 
     Type Parameters:
-        S: The thing a meter is made for, which is one sequence of a dataset,
+        N: The thing a writer is made for, which is one sequence of a dataset,
             named the way the document files it.
-        P: What one sequence's part holds, once read back.
-        D: What the parts fold into.
-        M: The meter itself, as the branch hands it out.
+        S: What one sequence's result holds, once read back.
+        D: What the results combine into.
+        W: The writer itself, as the branch hands it out.
 
     Args:
         path: The file to write the document to, given `.json` if it has none.
@@ -351,21 +351,21 @@ class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
             told apart before anyone merges them.
         contents: Every sequence the source holds, each mapped to the frames it
             would be measured over. The whole dataset rather than the run's own
-            selection, since a document may fold parts an earlier run left and
+            selection, since a document may combine results an earlier run left and
             coverage counted against the selection would call that complete.
         settings: The block a later run would compare against this one. Defaults
             to `None`, which records nothing and so can never be reused.
         selected: The sequences of the contents this run was given to cover.
             Repeats count once. Defaults to `None`, which takes all of them.
-        if_present: The policy for a sequence that already has a part here.
+        if_present: The policy for a sequence that already has a result here.
             Defaults to `"error"`.
-        if_unsourced: The policy for a part whose sequence the source has lost.
+        if_unsourced: The policy for a result whose sequence the source has lost.
             Defaults to `"keep"`.
 
     Attributes:
-        PARTS_SUFFIX: What the folder of parts beside the document is called.
+        RESULTS_SUFFIX: What the folder of results beside the document is called.
         path: The document itself, extension included.
-        parts_root: The folder the parts are written into.
+        results_root: The folder the results are written into.
         source: As given.
         contents: As given, each sequence's frames kept as a tuple.
         settings: As given.
@@ -379,7 +379,7 @@ class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
             does not hold.
     """
 
-    PARTS_SUFFIX = ".parts"
+    RESULTS_SUFFIX = ".results"
 
     def __init__(
         self,
@@ -397,7 +397,7 @@ class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
             raise ValueError(msg)
 
         self.path = ensure_file_extension(path, JSON_EXT, add=True)
-        self.parts_root = self.path.with_suffix(self.PARTS_SUFFIX)
+        self.results_root = self.path.with_suffix(self.RESULTS_SUFFIX)
 
         self.source = source
         self.contents = {name: tuple(frames) for name, frames in contents.items()}
@@ -419,31 +419,31 @@ class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
         self._written: Path | None = None
 
     @abstractmethod
-    def _make_meter(self, source: S) -> M:
-        """Return the meter that will measure `source` and leave its own part.
+    def _make_writer(self, source: N) -> W:
+        """Return the writer that will measure `source` and leave its own result.
 
         Called only for a sequence this run has to measure, so nothing here has
         to ask again whether it does.
 
         Args:
-            source: The sequence the meter is to be made for.
+            source: The sequence the writer is to be made for.
         """
 
     @abstractmethod
-    def _parse(self, document: Mapping[str, Any]) -> P:
-        """Return what one part holds, read back off disk.
+    def _parse(self, document: Mapping[str, Any]) -> S:
+        """Return what one result holds, read back off disk.
 
         Raises:
             ValueError: If the document is not one this branch wrote.
         """
 
     @abstractmethod
-    def _fold(self, parts: tuple[P, ...]) -> D:
-        """Fold the parts of this dataset into the value the document carries.
+    def _combine(self, results: tuple[S, ...]) -> D:
+        """Combine the results of this dataset into the value the document carries.
 
         Args:
-            parts: What each sequence left, ordered by the sequence it belongs
-                to and never empty: a fold over nothing is answered before it
+            results: What each sequence left, ordered by the sequence it belongs
+                to and never empty: combining nothing is answered before it
                 gets here.
         """
 
@@ -453,7 +453,7 @@ class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
 
         The same question the frame branch of a stage answers, and for the same
         reason: a stage reading a pair to answer once owes one fewer than it was
-        given, and its parts would otherwise never be found to still describe
+        given, and its results would otherwise never be found to still describe
         the run that wrote them.
 
         Args:
@@ -467,81 +467,81 @@ class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
 
     @property
     def _replacing(self) -> bool:
-        """Whether a document or part already there may be written over."""
+        """Whether a document or result already there may be written over."""
         return self.if_present != "error"
 
-    def get_hook(self, source: S) -> M | None:
-        """Return the meter that will measure `source`, or `None` to reuse.
+    def get_hook(self, source: N) -> W | None:
+        """Return the writer that will measure `source`, or `None` to reuse.
 
-        Whether a part still stands for this run was settled when the document
+        Whether a result still stands for this run was settled when the document
         opened, where the whole dataset was in view; this only looks the answer
         up. A sequence nothing has to measure costs no frames at all, which is
         what reuse is for.
 
         Returns:
-            The meter, filed under the sequence's name, or `None` when a part
+            The writer, filed under the sequence's name, or `None` when a result
             already there was found to still describe this run.
         """
         if source.name in self._reused:
             return None
 
-        return self._make_meter(source)
+        return self._make_writer(source)
 
-    def list_parts(self) -> list[Path]:
-        """Return every part on disk, ordered by the sequence it belongs to."""
-        parts = search_files(
-            self.parts_root,
+    def list_results(self) -> list[Path]:
+        """Return every result on disk, ordered by the sequence it belongs to."""
+        results = search_files(
+            self.results_root,
             name_filter=EndsWith(JSON_EXT),
             ordered=False,
         )
 
-        return sorted(parts, key=self._source_of)
+        return sorted(results, key=self._source_of)
 
     def _list_staging(self) -> list[Path]:
-        """Return the staging files an interrupted run left among the parts.
+        """Return the staging files an interrupted run left among the results.
 
-        A part is written beside its destination under a hidden name ending in
+        A result is written beside its destination under a hidden name ending in
         `.tmp` and moved into place on a clean close, so anything of that shape
         still here belongs to a run that never got to close. Nothing else
-        collects them: they are hidden from `list_parts`, and the only other
+        collects them: they are hidden from `list_results`, and the only other
         hand on them dies with the process that staged them.
         """
-        return search_files(self.parts_root, name_filter=STAGING)
+        return search_files(self.results_root, name_filter=STAGING)
 
-    def _drop(self, parts: Iterable[Path]) -> None:
-        """Remove `parts`, and the folders their removal leaves empty."""
+    def _drop(self, results: Iterable[Path]) -> None:
+        """Remove `results`, and the folders their removal leaves empty."""
         emptied = set()
 
-        for part in parts:
-            emptied.add(part.parent)
-            part.unlink()
+        for result in results:
+            emptied.add(result.parent)
+            result.unlink()
 
         for folder in emptied:
-            prune_upward(folder, self.parts_root)
+            prune_upward(folder, self.results_root)
 
-    def _still_describes(self, document: Mapping[str, Any], part: P) -> bool:
-        """Whether a part on disk stands for what this run would measure.
+    def _still_describes(self, document: Mapping[str, Any], result: S) -> bool:
+        """Whether a result on disk stands for what this run would measure.
 
         Two things can have moved since it was written, and neither shows in
-        the part's own name: the settings that shaped its numbers, and which
-        frames the source holds by name. A part failing either is stale rather
+        the result's own name: the settings that shaped its numbers, and which
+        frames the source holds by name. A result failing either is stale rather
         than broken, so it is passed over rather than refused.
 
         Args:
-            document: The part as it was read, for the settings it records.
-            part: What that part holds. Its source is one the contents holds,
+            document: The result as it was read, for the settings it records.
+            result: What that result holds. Its source is one the contents holds,
                 which `_read_valid` has established by the time it asks.
         """
         if document.get("settings") != self._recorded:
             return False
 
-        listed = self._expected(self.contents[part.source])
+        listed = self._expected(self.contents[result.source])
 
-        return tuple(frame.source for frame in part.frames) == tuple(listed)
+        return tuple(frame.source for frame in result.frames) == tuple(listed)
 
-    def _read_part(self, part: Path) -> dict[str, Any]:
-        """Read one part off disk, refusing anything that is not a mapping."""
-        with part.open(encoding="utf-8") as file:
+    def _read_result(self, result: Path) -> dict[str, Any]:
+        """Read one result off disk, refusing anything that is not a mapping."""
+        with result.open(encoding="utf-8") as file:
             document = json.load(file)
 
         if not isinstance(document, dict):
@@ -550,95 +550,95 @@ class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
 
         return document
 
-    def _source_of(self, part: Path) -> str:
-        """Return the sequence a part belongs to, read off where it sits."""
-        return stringify_path(part.with_suffix(""), after=self.parts_root)
+    def _source_of(self, result: Path) -> str:
+        """Return the sequence a result belongs to, read off where it sits."""
+        return stringify_path(result.with_suffix(""), after=self.results_root)
 
-    def _read_valid(self, *, strict: bool) -> Iterator[tuple[Path, P]]:
-        """Yield each part that still stands for this run, with what it holds.
+    def _read_valid(self, *, strict: bool) -> Iterator[tuple[Path, S]]:
+        """Yield each result that still stands for this run, with what it holds.
 
-        The one place a part is judged, so opening and closing cannot come to
-        different answers. A part reused on the way in that the fold then
+        The one place a result is judged, so opening and closing cannot come to
+        different answers. A result reused on the way in that the combine then
         passed over would leave a sequence nothing measured and nothing counted.
 
         Args:
-            strict: Whether a part that cannot be read, or that is filed under
+            strict: Whether a result that cannot be read, or that is filed under
                 a sequence other than the one it holds, stops the run. Judging
-                is not reading, so opening passes over such a part and only the
-                fold refuses it.
+                is not reading, so opening passes over such a result and only the
+                combine refuses it.
 
         Yields:
-            Each part and what it holds, in the order `list_parts` gives.
+            Each result and what it holds, in the order `list_results` gives.
 
         Raises:
-            ValueError: Under `strict`, if a part cannot be read or is filed
-                under the wrong sequence. The part is named, since the folder
+            ValueError: Under `strict`, if a result cannot be read or is filed
+                under the wrong sequence. The result is named, since the folder
                 holds one file per sequence and only the name says which to go
                 and look at.
         """
-        for part in self.list_parts():
-            name = self._source_of(part)
+        for result in self.list_results():
+            name = self._source_of(result)
             if name not in self.contents:
                 continue
 
             try:
-                document = self._read_part(part)
+                document = self._read_result(result)
                 held = self._parse(document)
             except (OSError, ValueError) as error:
                 if not strict:
                     continue
-                msg = f"unreadable part {name!r}: {error}. Remove it, or run it again"
+                msg = f"unreadable result {name!r}: {error}. Remove it, or run it again"
                 raise ValueError(msg) from error
 
             if name != held.source:
                 if not strict:
                     continue
-                msg = f"part {name!r} holds {held.source!r}: run {name!r} again"
+                msg = f"result {name!r} holds {held.source!r}: run {name!r} again"
                 raise ValueError(msg)
 
             if self._still_describes(document, held):
-                yield part, held
+                yield result, held
 
     def to_dataset(self, *, strict: bool = True) -> D | None:
-        """Fold every part on disk into the one value the document carries.
+        """Combine every result on disk into the one value the document carries.
 
-        Only the parts of sequences the source still holds, and only those a run
+        Only the results of sequences the source still holds, and only those a run
         with these settings could have written. One left by a run whose dataset
         was larger describes a sequence that is not there, and one left under a
-        different filter describes numbers this run would not produce; folding
+        different filter describes numbers this run would not produce; combining
         either would move the answer by something nothing here accounts for.
         Both stay on disk, since a source that looks smaller than it is makes
         exactly the same absence as one that shrank.
 
-        A part is filed under the sequence it belongs to and says so again
-        inside, and the two must agree. Nothing else compares them, so a part
+        A result is filed under the sequence it belongs to and says so again
+        inside, and the two must agree. Nothing else compares them, so a result
         that disagrees would be sorted under one name and counted under
         another, which no number in the finished document would show.
 
         Args:
-            strict: Whether a part that cannot be read stops the fold. `False`
-                passes over it, which leaves its sequence out of the fold and
+            strict: Whether a result that cannot be read stops the combine. `False`
+                passes over it, which leaves its sequence out of the dataset and
                 so among the coverage's `skipped`, where a retry will find it.
                 Defaults to `True`.
 
         Returns:
-            The fold, or `None` when no part is there. A run whose sequences
-            all failed has nothing to fold, and that is what `coverage` is for:
+            The combine, or `None` when no result is there. A run whose sequences
+            all failed has nothing to combine, and that is what `coverage` is for:
             the document says it covers none of them rather than not being
             written at all.
 
         Raises:
-            ValueError: Under `strict`, if one of the parts cannot be read, or
+            ValueError: Under `strict`, if one of the results cannot be read, or
                 one is filed under a sequence other than the one it holds. A
-                part that cannot be read is named, since the folder holds one
+                result that cannot be read is named, since the folder holds one
                 file per sequence and only the name says which to go and look
                 at.
         """
-        folded = tuple(held for _, held in self._read_valid(strict=strict))
-        if not folded:
+        results = tuple(held for _, held in self._read_valid(strict=strict))
+        if not results:
             return None
 
-        return self._fold(folded)
+        return self._combine(results)
 
     def get_coverage(self, dataset: D | None) -> Coverage:
         """Measure `dataset` against the whole dataset this document describes.
@@ -652,35 +652,35 @@ class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
         to it. Counting one from the contents and another from disk let the two
         disagree.
         """
-        folded = set() if dataset is None else {s.source for s in dataset.sequences}
+        combined = set() if dataset is None else {s.source for s in dataset.sequences}
         given = set(self.selected)
 
-        missing = [name for name in self.contents if name not in folded]
+        missing = [name for name in self.contents if name not in combined]
 
         selected = len(self.selected)
-        covered = sum(name in folded for name in self.contents)
-        reused = sum(name in folded for name in self._reused)
-        skipped = tuple(name for name in self.selected if name not in folded)
+        covered = sum(name in combined for name in self.contents)
+        reused = sum(name in combined for name in self._reused)
+        skipped = tuple(name for name in self.selected if name not in combined)
         unselected = tuple(name for name in missing if name not in given)
 
         return Coverage(self.found, selected, covered, reused, skipped, unselected)
 
     def save(self, *, strict: bool = True) -> Path:
-        """Fold the parts and write the document, coverage included.
+        """Combine the results and write the document, coverage included.
 
-        What was folded is remembered once the file is on disk and not before,
+        What was combined is remembered once the file is on disk and not before,
         so a write that failed leaves this branch with nothing to report rather
         than a line about a document that is not there.
 
         Args:
-            strict: Whether a part that cannot be read stops the fold, as for
+            strict: Whether a result that cannot be read stops the combine, as for
                 `to_dataset`. Defaults to `True`.
 
         Returns:
             The path actually written, extension included.
 
         Raises:
-            ValueError: Under `strict`, if one of the parts cannot be read.
+            ValueError: Under `strict`, if one of the results cannot be read.
             FileExistsError: If the document is already there and this one was
                 not told it may replace it.
         """
@@ -702,10 +702,10 @@ class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
         """Return one line naming what was written, or `None` before it was.
 
         The line counts against the dataset rather than against what this run
-        was given, so a document folded over part of one cannot be mistaken for
-        one folded over all of it. What is missing is split the way `coverage`
+        was given, so a document combined over result of one cannot be mistaken for
+        one combined over all of it. What is missing is split the way `coverage`
         splits it, since a sequence that failed and one nobody asked for call
-        for different things. A document that covered none has nothing folded
+        for different things. A document that covered none has nothing combined
         to name and says only what it covers.
         """
         if self._written is None:
@@ -738,29 +738,29 @@ class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
         In that order, since what follows is not undoable: the document is
         written once every sequence has run, so a run that may not replace it
         would otherwise pay for the whole dataset and be refused at the end,
-        having already dropped the parts an earlier run left behind.
+        having already dropped the results an earlier run left behind.
 
         What an earlier run staged and never committed always goes, since
         nothing else is in a position to collect it. What it committed depends
-        on the policy: `"reuse"` keeps every part still describing this run and
+        on the policy: `"reuse"` keeps every result still describing this run and
         leaves the rest where they are, `"overwrite"` clears the folder so that
-        everything folded at the end is this run's own, and `"error"` refuses.
+        everything combined at the end is this run's own, and `"error"` refuses.
 
-        `"error"` refuses here rather than leaving it to the meter that meets
-        the part, the way the frame tree does with a folder: a meter meets them
+        `"error"` refuses here rather than leaving it to the writer that meets
+        the result, the way the frame tree does with a folder: a writer meets them
         one at a time, so a run whose hundredth sequence is already measured
         pays for ninety-nine of them first. Refusing is also what a run killed
-        outright leaves behind, since its parts are committed and its document
+        outright leaves behind, since its results are committed and its document
         is not, and clearing them would spend its whole measurement again
         without saying so.
 
         Judging happens here, with the whole dataset in view and in one process.
         A worker holds a copy of this branch and nothing it learns comes home,
-        so a part judged there could not be counted.
+        so a result judged there could not be counted.
 
         Raises:
             FileExistsError: If the document is already there, or a sequence
-                already has a part here, and this one was not told it may
+                already has a result here, and this one was not told it may
                 replace them.
             RuntimeError: If this document has been opened before.
         """
@@ -771,16 +771,16 @@ class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
         self._entered = True
         reserve_path(self.path, exist_ok=self._replacing, make_parents=True)
 
-        ensure_dir_exists(self.parts_root, make=True)
+        ensure_dir_exists(self.results_root, make=True)
 
         self._drop(self._list_staging())
 
         if self.if_present == "reuse":
-            kept = (part for part, _ in self._read_valid(strict=False))
+            kept = (result for result, _ in self._read_valid(strict=False))
             self._reused = frozenset(map(self._source_of, kept))
-        elif present := self.list_parts():
+        elif present := self.list_results():
             if self.if_present == "error":
-                left = quantify(len(present), "part")
+                left = quantify(len(present), "result")
                 first = self._source_of(present[0])
                 fix = "set `if_present` to 'reuse' or 'overwrite'"
                 msg = f"{left} already here, from {first!r}: {fix}"
@@ -791,33 +791,33 @@ class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
         return self
 
     def list_unsourced(self) -> list[str]:
-        """Return the sequences a part is filed under that the source has lost.
+        """Return the sequences a result is filed under that the source has lost.
 
         Named rather than acted on: the same absence is what a half mounted
         share and a misspelt subpath produce, so what to do with them is the
         caller's policy and saying they are there is not.
         """
-        filed = map(self._source_of, self.list_parts())
+        filed = map(self._source_of, self.list_results())
 
         return [name for name in filed if name not in self.contents]
 
     def drop_unsourced(self) -> list[str]:
-        """Remove the parts of sequences the source has lost, and name them.
+        """Remove the results of sequences the source has lost, and name them.
 
         The folders a removal empties go with it, the same way opening prunes
         the ones it emptied: a sequence dropped from a nested dataset would
         otherwise leave the path down to it standing.
 
         Returns:
-            The sequences whose parts were removed, in the order they were
+            The sequences whose results were removed, in the order they were
             filed under.
         """
         dropped = []
 
         for name in self.list_unsourced():
-            part = self.parts_root / f"{name}{JSON_EXT}"
-            part.unlink()
-            prune_upward(part.parent, self.parts_root)
+            result = self.results_root / f"{name}{JSON_EXT}"
+            result.unlink()
+            prune_upward(result.parent, self.results_root)
             dropped.append(name)
 
         return dropped
@@ -831,20 +831,20 @@ class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
         """Write the document, whether or not the run reached the end.
 
         A run that gave up part way still measured what it measured, and the
-        parts it left are of sequences that finished. Writing them is what
+        results it left are of sequences that finished. Writing them is what
         `coverage` is for: the document says which of the dataset it accounts
         for and names the rest, where refusing to write leaves the healthy
         results on disk with nothing to read them by.
 
-        A part that cannot be read is the one thing that could take the whole
-        document with it, since the fold refuses such a part rather than
+        A result that cannot be read is the one thing that could take the whole
+        document with it, since the combine refuses such a result rather than
         passing it over. It is written from what does read instead, which
-        leaves that sequence out of the fold and so among the coverage's
+        leaves that sequence out of the dataset and so among the coverage's
         `skipped`, where a retry will find it, and the refusal is raised once
         the document is on disk rather than instead of it.
 
         Parts of sequences the source has lost go afterwards where the policy
-        says so. The fold passes over them either way, so removing them is
+        says so. The combine passes over them either way, so removing them is
         tidying rather than part of the answer, and one that cannot be removed
         must not cost the document.
 
@@ -852,8 +852,8 @@ class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
         driver, which is what decides the run's verdict.
 
         Raises:
-            ValueError: If one of the parts cannot be read, after the document
-                folded from the rest has been written.
+            ValueError: If one of the results cannot be read, after the document
+                combined from the rest has been written.
         """
         try:
             self.save()

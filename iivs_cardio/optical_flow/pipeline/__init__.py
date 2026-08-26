@@ -2,6 +2,7 @@ __all__ = (
     "DatasetEvaluation",
     "Evaluated",
     "EvaluationDocument",
+    "EvaluationWriter",
     "FlowSource",
     "FlowStage",
     "FlowStageRun",
@@ -10,7 +11,6 @@ __all__ = (
     "Measured",
     "NormalizedFrameStage",
     "SequenceEvaluation",
-    "SequenceEvaluator",
     "Spread",
 )
 
@@ -25,7 +25,7 @@ from iivs_cardio.optical_flow.pipeline.evaluation import (
     SequenceEvaluation,
     Spread,
 )
-from iivs_cardio.optical_flow.pipeline.evaluator import SequenceEvaluator
+from iivs_cardio.optical_flow.pipeline.evaluator import EvaluationWriter
 from iivs_cardio.optical_flow.pipeline.frames import FlowTree
 from iivs_cardio.optical_flow.pipeline.stage import (
     FlowSource,

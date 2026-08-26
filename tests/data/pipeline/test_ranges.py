@@ -17,8 +17,8 @@ from iivs_cardio.data.pipeline.ranges import (
     DatasetRange,
     FrameRange,
     RangeDocument,
+    RangeWriter,
     SequenceRange,
-    SequenceRangeMeter,
 )
 
 
@@ -26,7 +26,7 @@ def _contents(*names: str, frames: int = 1) -> dict[str, tuple[str, ...]]:
     """Every sequence the source holds, against the frames each would measure.
 
     `_Frames` names its frames the way a phase folder does, so the contents a
-    document is given lines up with what a meter records under each part.
+    document is given lines up with what a writer records under each result.
     """
     listed = tuple(f"{index:05d}_phase.bin" for index in range(frames))
 
@@ -41,12 +41,12 @@ def _sequence(source: str, *bounds: tuple[float, float]) -> SequenceRange:
     return SequenceRange(source, frames)
 
 
-# --------------------------------- the fold ------------------------------- #
+# --------------------------------- the combine ------------------------------- #
 
 
 def test_the_bounds_come_from_whichever_parts_hold_them():
     # The two extremes sit in different frames, and neither is the first, so a
-    # fold that ignored the parts could not land on this pair by accident.
+    # combine that ignored the results could not land on this pair by accident.
     sequence = _sequence("TL_00", (1.0, 2.0), (-4.0, 3.0), (0.0, 9.0), (0.5, 1.5))
 
     assert (sequence.min_value, sequence.max_value) == (-4.0, 9.0)
@@ -55,7 +55,7 @@ def test_the_bounds_come_from_whichever_parts_hold_them():
 
 def test_a_bound_is_read_from_its_own_side():
     # The frame holding the lowest minimum is not the one holding the highest
-    # maximum, so reading both off a single "widest" part would be wrong.
+    # maximum, so reading both off a single "widest" result would be wrong.
     sequence = _sequence("TL_00", (-8.0, -7.0), (5.0, 6.0))
 
     assert (sequence.min_value, sequence.max_value) == (-8.0, 6.0)
@@ -71,7 +71,7 @@ def test_a_tie_is_reported_against_the_earliest_part():
 
 
 def test_the_dataset_bound_indexes_a_sequence_rather_than_a_frame():
-    # Each level folds only its own parts, so a dataset index names a sequence.
+    # Each level combines only its own results, so a dataset index names a sequence.
     # The extremes are in the last sequence, whose own extremes are frames 1
     # and 0, numbers that must not leak upwards.
     dataset = DatasetRange(
@@ -109,7 +109,7 @@ def test_a_level_holding_nothing_is_refused_by_name(build, named):
 def test_every_level_leads_with_the_source_it_names():
     # The source is what a reader scans for, and it leads at every level without
     # the document being reordered on the way out: `CompositeRange` declaring
-    # it ahead of the four folded numbers is what buys that.
+    # it ahead of the four combined numbers is what buys that.
     dataset = DatasetRange("plate_A", (_sequence("TL_00", (0.0, 1.0)),))
 
     document = dataset.to_dict()
@@ -165,28 +165,28 @@ class _Frames:
         return Path(f"{index:05d}_phase.bin")
 
 
-def _meter(tmp_path, source: str = "seq", settings=None) -> SequenceRangeMeter:
-    return SequenceRangeMeter(tmp_path / "range.parts", source, settings)
+def _meter(tmp_path, source: str = "seq", settings=None) -> RangeWriter:
+    return RangeWriter(tmp_path / "range.results", source, settings)
 
 
 def _range(*bounds: tuple[float, float]) -> _Frames:
     return _Frames(*(torch.tensor([[low, high]]) for low, high in bounds))
 
 
-def _scan(meter: SequenceRangeMeter, *bounds: tuple[float, float]) -> None:
+def _scan(writer: RangeWriter, *bounds: tuple[float, float]) -> None:
     """Range one sequence the way a stage would: register, run, call nothing."""
-    SequenceStage(_range(*bounds)).register_hooks(meter).run()
+    SequenceStage(_range(*bounds)).register_hooks(writer).run()
 
 
-# ---------------------------------- the meter ----------------------------------
+# ---------------------------------- the writer ----------------------------------
 
 
 def test_a_meter_ranges_every_frame_under_the_file_it_came_from(tmp_path):
-    meter = _meter(tmp_path)
+    writer = _meter(tmp_path)
 
-    _scan(meter, (0.0, 2.0), (-1.0, 1.0))
+    _scan(writer, (0.0, 2.0), (-1.0, 1.0))
 
-    ranged = meter.to_range()
+    ranged = writer.to_range()
     assert (ranged.min_value, ranged.max_value) == (-1.0, 2.0)
     assert [frame.source for frame in ranged.frames] == [
         "00000_phase.bin",
@@ -195,51 +195,51 @@ def test_a_meter_ranges_every_frame_under_the_file_it_came_from(tmp_path):
 
 
 def test_a_meter_refuses_a_frame_with_no_finite_value(tmp_path):
-    meter = _meter(tmp_path, "TL_00")
+    writer = _meter(tmp_path, "TL_00")
     frames = _Frames(torch.tensor([[float("nan")]]))
 
     with pytest.raises(
         ValueError, match=r"no finite value in 00000_phase.bin \(sequence: TL_00\)"
     ):
-        SequenceStage(frames).register_hooks(meter).run()
+        SequenceStage(frames).register_hooks(writer).run()
 
 
 def test_a_finished_meter_leaves_its_part_behind(tmp_path):
     # What carries the answer out of a worker: `shared_objects` travels one way.
-    meter = _meter(tmp_path)
+    writer = _meter(tmp_path)
 
-    _scan(meter, (-1.0, 2.0))
+    _scan(writer, (-1.0, 2.0))
 
-    part = tmp_path / "range.parts" / "seq.json"
-    written = json.loads(part.read_text(encoding="utf-8"))
+    result = tmp_path / "range.results" / "seq.json"
+    written = json.loads(result.read_text(encoding="utf-8"))
 
-    assert written == json.loads(json.dumps(meter.to_range().to_dict()))
+    assert written == json.loads(json.dumps(writer.to_range().to_dict()))
 
 
 def test_a_name_that_is_a_path_lands_where_the_path_says(tmp_path):
-    # Mirrored rather than flattened, so the parts read like the frame tree
+    # Mirrored rather than flattened, so the results read like the frame tree
     # written beside them instead of like a pile of encoded keys.
     _scan(_meter(tmp_path, "plate_A/2026-03-11/TL_00"), (0.0, 1.0))
 
-    part = tmp_path / "range.parts" / "plate_A" / "2026-03-11" / "TL_00.json"
-    assert part.exists()
-    assert json.loads(part.read_text(encoding="utf-8"))["source"] == (
+    result = tmp_path / "range.results" / "plate_A" / "2026-03-11" / "TL_00.json"
+    assert result.exists()
+    assert json.loads(result.read_text(encoding="utf-8"))["source"] == (
         "plate_A/2026-03-11/TL_00"
     )
 
 
 def test_a_meter_reports_the_bounds_it_reached(tmp_path):
-    meter = _meter(tmp_path)
+    writer = _meter(tmp_path)
 
-    assert meter.report() is None  # nothing seen, so nothing to say
+    assert writer.report() is None  # nothing seen, so nothing to say
 
-    _scan(meter, (0.0, 2.0), (-1.5, 1.0))
+    _scan(writer, (0.0, 2.0), (-1.5, 1.0))
 
-    assert meter.report() == "measured [-1.5, 2] across 2 frames"
+    assert writer.report() == "measured [-1.5, 2] across 2 frames"
 
 
 def test_a_traversal_that_died_leaves_nothing(tmp_path):
-    # The frames it saw are a prefix, and a prefix folded into the dataset's
+    # The frames it saw are a prefix, and a prefix combined into the dataset's
     # bounds is a hole where nobody would see it.
     def explode(step: Step[torch.Tensor, Path]) -> None:
         msg = "the run gave up"
@@ -251,7 +251,7 @@ def test_a_traversal_that_died_leaves_nothing(tmp_path):
     with pytest.raises(RuntimeError, match="the run gave up"):
         stage.run()
 
-    assert not list((tmp_path / "range.parts").rglob("*.json"))
+    assert not list((tmp_path / "range.results").rglob("*.json"))
 
 
 def test_a_meter_that_saw_nothing_is_refused_by_name(tmp_path):
@@ -273,7 +273,7 @@ def test_the_parts_folder_sits_beside_the_document(tmp_path):
         tmp_path / "phase_range", contents=_contents("a"), source="plate_A"
     )
 
-    assert named.parts_root == bare.parts_root == tmp_path / "phase_range.parts"
+    assert named.results_root == bare.results_root == tmp_path / "phase_range.results"
 
 
 def test_a_document_asks_a_sequence_only_what_it_is_called(tmp_path):
@@ -283,13 +283,13 @@ def test_a_document_asks_a_sequence_only_what_it_is_called(tmp_path):
     class _Named:
         name: str
 
-    meter = RangeDocument(
+    writer = RangeDocument(
         tmp_path / "range", contents=_contents("plate/TL_00"), source="plate_A"
     ).get_hook(_Named("plate/TL_00"))
-    with meter:
-        meter(Step(0, torch.tensor([[0.0, 1.0]]), Path("00000_phase.bin")))
+    with writer:
+        writer(Step(0, torch.tensor([[0.0, 1.0]]), Path("00000_phase.bin")))
 
-    assert (tmp_path / "range.parts" / "plate" / "TL_00.json").exists()
+    assert (tmp_path / "range.results" / "plate" / "TL_00.json").exists()
 
 
 def test_a_document_folds_the_parts_in_name_order(tmp_path):
@@ -344,7 +344,7 @@ def test_a_document_that_gathered_nothing_says_so_rather_than_not_being_written(
 
 
 def test_a_run_that_died_still_folds_the_parts_that_finished(tmp_path):
-    # The healthy parts were on disk and nothing read them: a worker dying took
+    # The healthy results were on disk and nothing read them: a worker dying took
     # the document with it, so a run that measured 90 of 121 left no record of
     # the 90. What it covers is `coverage`'s to say, not a reason to write
     # nothing.
@@ -361,7 +361,7 @@ def test_a_run_that_died_still_folds_the_parts_that_finished(tmp_path):
 
     document = _saved(tmp_path)
 
-    assert (tmp_path / "range.parts" / "a.json").exists()
+    assert (tmp_path / "range.results" / "a.json").exists()
     assert document["dataset"]["sequences"][0]["source"] == "a"
     assert document["coverage"]["covered"] == 1
     assert document["coverage"]["skipped"] == ["b"]
@@ -372,7 +372,7 @@ def test_a_document_reports_only_once_it_has_saved(tmp_path):
         tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
     )
 
-    assert document.report() is None  # a worker's copy never folds anything
+    assert document.report() is None  # a worker's copy never combines anything
 
     with document:
         _scan(_meter(tmp_path, "a"), (0.0, 5.0))
@@ -383,7 +383,7 @@ def test_a_document_reports_only_once_it_has_saved(tmp_path):
 
 def test_entering_drops_what_an_earlier_run_left(tmp_path):
     # `output_directory` is pinned rather than timestamped, so a re-run lands in
-    # the same folder, and a stale part would fold in as if it were this run's.
+    # the same folder, and a stale result would combine in as if it were this run's.
     with RangeDocument(
         tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
     ):
@@ -407,7 +407,7 @@ def test_entering_leaves_an_empty_folder_it_did_not_empty(tmp_path):
     # present, which is about folders this clearing emptied. One that was
     # already empty is somebody else's, a place held for a plate still being
     # copied most likely, and taking it is not this run's to do.
-    mine = tmp_path / "range.parts" / "mine"
+    mine = tmp_path / "range.results" / "mine"
     mine.mkdir(parents=True)
 
     with RangeDocument(tmp_path / "range", contents=_contents("a"), source="plate_A"):
@@ -417,21 +417,21 @@ def test_entering_leaves_an_empty_folder_it_did_not_empty(tmp_path):
 
 
 def test_a_meter_will_not_replace_a_part_it_did_not_write(tmp_path):
-    # Its own run empties the folder on the way in, so a part sitting under this
+    # Its own run empties the folder on the way in, so a result sitting under this
     # name belongs to something else: two sequences whose names came out the
     # same, most likely. Replacing it silently lost one of the two.
-    meter = _meter(tmp_path, "a")
-    (tmp_path / "range.parts" / "a.json").write_text("{}", encoding="utf-8")
+    writer = _meter(tmp_path, "a")
+    (tmp_path / "range.results" / "a.json").write_text("{}", encoding="utf-8")
 
     with pytest.raises(FileExistsError):
-        _scan(meter, (0.0, 1.0))
+        _scan(writer, (0.0, 1.0))
 
-    assert (tmp_path / "range.parts" / "a.json").read_text(encoding="utf-8") == "{}"
+    assert (tmp_path / "range.results" / "a.json").read_text(encoding="utf-8") == "{}"
 
 
 def test_a_document_is_opened_once(tmp_path):
     # Opening is what makes the folder this run's, and it clears the folder to
-    # do it, so a second one would drop the parts the first has gathered.
+    # do it, so a second one would drop the results the first has gathered.
     document = RangeDocument(
         tmp_path / "range", contents=_contents("a"), source="plate_A"
     )
@@ -442,13 +442,13 @@ def test_a_document_is_opened_once(tmp_path):
         with pytest.raises(RuntimeError, match=r"opened already"):
             document.__enter__()
 
-    assert (tmp_path / "range.parts" / "a.json").exists()
+    assert (tmp_path / "range.results" / "a.json").exists()
 
 
 def test_a_document_it_may_not_replace_is_refused_before_anything_is_dropped(tmp_path):
     # Clearing cannot be undone and the document is only written once every
     # sequence has run, so refusing at the end meant paying for the whole
-    # dataset, hours of it, and dropping the earlier run's parts on the way in.
+    # dataset, hours of it, and dropping the earlier run's results on the way in.
     # The place is taken first, which costs nothing and settles it at once.
     with RangeDocument(
         tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
@@ -456,7 +456,7 @@ def test_a_document_it_may_not_replace_is_refused_before_anything_is_dropped(tmp
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
         _scan(_meter(tmp_path, "b"), (0.0, 5.0))
 
-    parts = sorted(p.name for p in (tmp_path / "range.parts").iterdir())
+    results = sorted(p.name for p in (tmp_path / "range.results").iterdir())
 
     with (
         pytest.raises(FileExistsError),
@@ -464,19 +464,19 @@ def test_a_document_it_may_not_replace_is_refused_before_anything_is_dropped(tmp
     ):
         pytest.fail("the run started over a document it may not replace")
 
-    assert sorted(p.name for p in (tmp_path / "range.parts").iterdir()) == parts
+    assert sorted(p.name for p in (tmp_path / "range.results").iterdir()) == results
     assert json.loads((tmp_path / "range.json").read_text(encoding="utf-8"))["coverage"]
 
 
 def test_entering_collects_what_an_interrupted_run_only_staged(tmp_path):
-    # A part is staged beside its destination under a hidden `.tmp` name and
+    # A result is staged beside its destination under a hidden `.tmp` name and
     # moved into place on a clean close, so a worker killed part way leaves one
-    # there. `list_parts` cannot see it, the only other hand on it died with
+    # there. `list_results` cannot see it, the only other hand on it died with
     # that process, and the folder it sits in cannot be cleared while it is
     # there, so it accumulates, one per interrupted run.
-    staged = tmp_path / "range.parts" / "plate_A" / ".TL_00.json.ctgx5mjr.tmp"
+    staged = tmp_path / "range.results" / "plate_A" / ".TL_00.json.ctgx5mjr.tmp"
     staged.parent.mkdir(parents=True)
-    staged.write_text("half a part", encoding="utf-8")
+    staged.write_text("half a result", encoding="utf-8")
 
     with RangeDocument(
         tmp_path / "range", contents=_contents("plate_A/TL_00"), source="plate_A"
@@ -487,7 +487,7 @@ def test_entering_collects_what_an_interrupted_run_only_staged(tmp_path):
 
 
 def test_entering_drops_the_folders_that_layout_left_too(tmp_path):
-    # A mirrored part nests, so clearing the files alone would keep every folder
+    # A mirrored result nests, so clearing the files alone would keep every folder
     # the source ever had, and a plate dropped from the dataset would go on
     # looking present to anyone reading the tree.
     with RangeDocument(
@@ -503,24 +503,24 @@ def test_entering_drops_the_folders_that_layout_left_too(tmp_path):
     ):
         _scan(_meter(tmp_path, "plate_B/TL_00"), (0.0, 1.0))
 
-    assert not (tmp_path / "range.parts" / "plate_A").exists()
-    assert (tmp_path / "range.parts" / "plate_B" / "TL_00.json").exists()
+    assert not (tmp_path / "range.results" / "plate_A").exists()
+    assert (tmp_path / "range.results" / "plate_B" / "TL_00.json").exists()
 
 
 def test_entering_leaves_alone_what_it_did_not_write(tmp_path):
-    # Clearing prunes the folders its own parts emptied, not the folder itself:
-    # `parts` is derived from a configured path, and a wholesale wipe would take
+    # Clearing prunes the folders its own results emptied, not the folder itself:
+    # `results` is derived from a configured path, and a wholesale wipe would take
     # whatever a caller pointed it at.
-    parts = tmp_path / "range.parts"
-    (parts / "plate_A").mkdir(parents=True)
-    (parts / "plate_A" / "notes.txt").write_text("mine", encoding="utf-8")
+    results = tmp_path / "range.results"
+    (results / "plate_A").mkdir(parents=True)
+    (results / "plate_A" / "notes.txt").write_text("mine", encoding="utf-8")
 
     with RangeDocument(
         tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
     ):
         _scan(_meter(tmp_path, "plate_B/TL_00"), (0.0, 1.0))
 
-    assert (parts / "plate_A" / "notes.txt").read_text(encoding="utf-8") == "mine"
+    assert (results / "plate_A" / "notes.txt").read_text(encoding="utf-8") == "mine"
 
 
 # --------------------------------- coverage ------------------------------- #
@@ -548,7 +548,7 @@ def test_a_document_told_its_contents_says_what_it_covered(tmp_path):
 
 
 def test_a_document_names_the_sequences_that_left_nothing(tmp_path):
-    # Bounds folded over a subset are not the dataset's, and a consumer setting
+    # Bounds combined over a subset are not the dataset's, and a consumer setting
     # a normalization policy from them would read a hole as data.
     with RangeDocument(
         tmp_path / "range", contents=_contents("a", "b", "c"), source="plate_A"
@@ -566,8 +566,8 @@ def test_a_document_names_the_sequences_that_left_nothing(tmp_path):
 
 
 def test_a_part_filed_under_the_wrong_sequence_is_refused_by_name(tmp_path):
-    # The path says which sequence a part belongs to and the body says it again;
-    # nothing compared them, so a part sorted under one name and counted under
+    # The path says which sequence a result belongs to and the body says it again;
+    # nothing compared them, so a result sorted under one name and counted under
     # another produced "covered everything, skipped one": a document that
     # contradicts itself in a way no number in it points at.
     with RangeDocument(
@@ -576,19 +576,19 @@ def test_a_part_filed_under_the_wrong_sequence_is_refused_by_name(tmp_path):
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
         _scan(_meter(tmp_path, "b"), (0.0, 5.0))
 
-    part = tmp_path / "range.parts" / "b.json"
-    document = json.loads(part.read_text(encoding="utf-8"))
+    result = tmp_path / "range.results" / "b.json"
+    document = json.loads(result.read_text(encoding="utf-8"))
     document["source"] = "a"
-    part.write_text(json.dumps(document), encoding="utf-8")
+    result.write_text(json.dumps(document), encoding="utf-8")
 
-    with pytest.raises(ValueError, match=r"part 'b' holds 'a'"):
+    with pytest.raises(ValueError, match=r"result 'b' holds 'a'"):
         RangeDocument(
             tmp_path / "range", contents=_contents("a", "b"), source="plate_A"
         ).to_dataset()
 
 
 def test_a_document_that_could_not_be_written_reports_nothing(tmp_path):
-    # What was folded was remembered before the file reached disk, so a refused
+    # What was combined was remembered before the file reached disk, so a refused
     # write still said "wrote range.json from 1 sequence: [...]", a line about
     # a document that is not there, and about bounds nobody can read back.
     document = RangeDocument(
@@ -697,8 +697,8 @@ def test_a_document_with_no_sequence_to_cover_is_refused(tmp_path):
 
 
 def test_a_selection_naming_one_sequence_twice_counts_it_once(tmp_path):
-    # `covered` reads the parts back as a set, and a name can leave only one
-    # part, so a repeated name would hold `covered` below `selected` for a run
+    # `covered` reads the results back as a set, and a name can leave only one
+    # result, so a repeated name would hold `covered` below `selected` for a run
     # that measured everything, and report the sequence as skipped besides.
     with RangeDocument(
         tmp_path / "range",
@@ -816,7 +816,7 @@ def test_a_document_that_covered_none_names_no_bounds(tmp_path):
 
 
 def test_the_skipped_list_keeps_the_contents_s_own_order(tmp_path):
-    # Not the folded order and not sorted: the contents is what a caller reads the
+    # Not the combined order and not sorted: the contents is what a caller reads the
     # list back against, and it is the order the run was going to take.
     document = RangeDocument(
         tmp_path / "range", contents=_contents("c", "a", "b"), source="plate_A"
@@ -866,7 +866,7 @@ def test_a_range_survives_the_round_trip_it_was_written_for():
 def test_a_malformed_document_is_refused_by_the_entry_it_stumbled_on(
     kind, document, named
 ):
-    # A part is read back by the same code that wrote it, so the realistic cause
+    # A result is read back by the same code that wrote it, so the realistic cause
     # is a hand edit or a version skew: either way the message has to say which
     # entry, since the file is what the reader will go and look at.
     with pytest.raises(ValueError, match=rf"malformed range document: '{named}'"):
@@ -896,8 +896,8 @@ def test_a_boolean_bound_is_refused_rather_than_read_as_one_or_zero(named, value
     ),
 )
 def test_a_non_finite_bound_is_refused_where_it_is_read(named, value):
-    # `min` and `max` carry a NaN through or drop it depending on which part
-    # holds it, so a document with one folds to whatever order its parts were
+    # `min` and `max` carry a NaN through or drop it depending on which result
+    # holds it, so a document with one combines to whatever order its results were
     # in. Refused at the read, since nothing this project writes holds one.
     document = {"source": "a", "min_value": 0.0, "max_value": 1.0, named: value}
 
@@ -946,27 +946,27 @@ def test_a_sequence_named_with_a_dot_still_files_and_reads_back(tmp_path, source
         name: str
 
     # A time-lapse folder may carry a dot: a date, a magnification, a repeat
-    # marker. The tail after it is part of the name, not an extension the part
+    # marker. The tail after it is part of the name, not an extension the result
     # file has to justify.
     document = RangeDocument(
         tmp_path / "range", contents=_contents(source), source="plate_A"
     )
     with document:
-        meter = document.get_hook(_Named(source))
-        with meter:
-            meter(Step(0, torch.tensor([[0.5, 2.0]]), Path("00000_phase.bin")))
+        writer = document.get_hook(_Named(source))
+        with writer:
+            writer(Step(0, torch.tensor([[0.5, 2.0]]), Path("00000_phase.bin")))
 
-    parts = document.list_parts()
-    assert [part.relative_to(document.parts_root).as_posix() for part in parts] == [
-        f"{source}.json"
-    ]
+    results = document.list_results()
+    assert [
+        result.relative_to(document.results_root).as_posix() for result in results
+    ] == [f"{source}.json"]
     assert [sequence.source for sequence in document.to_dataset().sequences] == [source]
     assert _saved(tmp_path)["coverage"]["skipped"] == []
 
 
 def test_a_fold_is_the_same_whichever_order_the_parts_arrive_in():
     # The order dependence a NaN used to introduce, pinned from the other side:
-    # the same parts in any order fold to the same bounds.
+    # the same results in any order combine to the same bounds.
     bounds = ((2.0, 3.0), (0.5, 9.0), (1.0, 4.0))
 
     forward = _sequence("TL_00", *bounds)
@@ -989,28 +989,28 @@ def test_a_document_is_written_as_json_a_strict_reader_accepts(tmp_path):
     assert not path.exists()
 
 
-# ------------------------- a part that cannot be read --------------------- #
+# ------------------------- a result that cannot be read --------------------- #
 
 
 def test_an_unreadable_part_says_which_one_it_was(tmp_path):
     # The folder holds one file per sequence, so without the name there is
-    # nothing to go and look at, and the fold reads them in sorted order,
+    # nothing to go and look at, and the combine reads them in sorted order,
     # which is not the order they were written in.
     document = RangeDocument(
         tmp_path / "range", contents=_contents("a", "b"), source="p"
     )
     _scan(_meter(tmp_path, "a"), (0.0, 1.0))
     _scan(_meter(tmp_path, "b"), (0.0, 5.0))
-    (document.parts_root / "b.json").write_text("{not json", encoding="utf-8")
+    (document.results_root / "b.json").write_text("{not json", encoding="utf-8")
 
-    with pytest.raises(ValueError, match=r"unreadable part 'b'.*run it again"):
+    with pytest.raises(ValueError, match=r"unreadable result 'b'.*run it again"):
         document.to_dataset()
 
 
 def test_one_unreadable_part_does_not_take_the_whole_document(tmp_path):
     # The sequences that finished are on disk, and the document is the only
-    # thing that folds them, states their bounds, and says what they cover.
-    # Refusing to write it over one part leaves the rest with nothing to read
+    # thing that combines them, states their bounds, and says what they cover.
+    # Refusing to write it over one result leaves the rest with nothing to read
     # them by, so it is written from what does read and the refusal follows.
     document = RangeDocument(
         tmp_path / "range", contents=_contents("a", "b", "c"), source="p"
@@ -1020,9 +1020,9 @@ def test_one_unreadable_part_does_not_take_the_whole_document(tmp_path):
     _scan(_meter(tmp_path, "a"), (0.0, 1.0))
     _scan(_meter(tmp_path, "b"), (2.0, 3.0))
     _scan(_meter(tmp_path, "c"), (4.0, 5.0))
-    (document.parts_root / "b.json").write_text("{not json", encoding="utf-8")
+    (document.results_root / "b.json").write_text("{not json", encoding="utf-8")
 
-    with pytest.raises(ValueError, match=r"unreadable part 'b'"):
+    with pytest.raises(ValueError, match=r"unreadable result 'b'"):
         document.__exit__(None, None, None)
 
     saved = _saved(tmp_path)
@@ -1032,7 +1032,7 @@ def test_one_unreadable_part_does_not_take_the_whole_document(tmp_path):
 
 
 def test_a_part_holding_a_backwards_range_is_named_too(tmp_path):
-    # Malformed is not only unparseable: a part whose bounds are the wrong way
+    # Malformed is not only unparseable: a result whose bounds are the wrong way
     # round parses cleanly and is refused a layer later, and the name has to
     # survive that far too.
     document = RangeDocument(tmp_path / "range", contents=_contents("a"), source="p")
@@ -1040,39 +1040,41 @@ def test_a_part_holding_a_backwards_range_is_named_too(tmp_path):
 
     frame = {"source": "f", "min_value": 1.0, "max_value": 0.0}
     broken = json.dumps({"source": "a", "frames": [frame]})
-    (document.parts_root / "a.json").write_text(broken, encoding="utf-8")
+    (document.results_root / "a.json").write_text(broken, encoding="utf-8")
 
-    with pytest.raises(ValueError, match=r"unreadable part 'a'.*inverted range"):
+    with pytest.raises(ValueError, match=r"unreadable result 'a'.*inverted range"):
         document.to_dataset()
 
 
 def test_a_meter_takes_its_part_back_when_another_branch_fails(tmp_path):
-    # The document counts a sequence as covered when its part is there, so a
-    # part outliving the frames it was measured beside would be counted while
+    # The document counts a sequence as covered when its result is there, so a
+    # result outliving the frames it was measured beside would be counted while
     # nothing of that sequence is on disk.
-    meter = _meter(tmp_path, "a")
-    _scan(meter, (0.0, 1.0))
-    part = tmp_path / "range.parts" / "a.json"
-    assert part.exists()
+    writer = _meter(tmp_path, "a")
+    _scan(writer, (0.0, 1.0))
+    result = tmp_path / "range.results" / "a.json"
+    assert result.exists()
 
-    meter.revert()
+    writer.revert()
 
-    assert not part.exists()
+    assert not result.exists()
 
 
 def test_a_meter_that_wrote_nothing_reverts_to_nothing(tmp_path):
-    # A meter closed after an error writes no part, so reverting has nothing of
+    # A writer closed after an error writes no result, so reverting has nothing of
     # its own to remove, and must not reach for a name someone else holds.
-    meter = _meter(tmp_path, "a")
-    (tmp_path / "range.parts").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "range.parts" / "a.json").write_text("theirs", encoding="utf-8")
+    writer = _meter(tmp_path, "a")
+    (tmp_path / "range.results").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "range.results" / "a.json").write_text("theirs", encoding="utf-8")
 
-    meter.revert()
+    writer.revert()
 
-    assert (tmp_path / "range.parts" / "a.json").read_text(encoding="utf-8") == "theirs"
+    assert (tmp_path / "range.results" / "a.json").read_text(
+        encoding="utf-8"
+    ) == "theirs"
 
 
-# ------------------------------- reusing parts ---------------------------- #
+# ------------------------------- reusing results ---------------------------- #
 
 SETTINGS = {"filter": {"kind": "identity"}}
 
@@ -1104,7 +1106,7 @@ def _reusing(tmp_path, *names: str, settings=SETTINGS) -> RangeDocument:
 
 
 def test_a_part_that_still_describes_the_run_is_kept_rather_than_measured(tmp_path):
-    # What reuse is for is the frames it does not read, so the meter being absent
+    # What reuse is for is the frames it does not read, so the writer being absent
     # is the assertion: a document that handed one out would have re-read the
     # sequence whatever the numbers came out as.
     with _reusing(tmp_path, "a", "b") as first:
@@ -1120,9 +1122,9 @@ def test_a_part_that_still_describes_the_run_is_kept_rather_than_measured(tmp_pa
 
 
 def test_a_part_left_under_other_settings_is_measured_again(tmp_path):
-    # The numbers a part holds are the ones its settings produced, so a run that
-    # filters differently cannot stand on them, and the stale part must not
-    # reach the fold either, or the document would mix two filters.
+    # The numbers a result holds are the ones its settings produced, so a run that
+    # filters differently cannot stand on them, and the stale result must not
+    # reach the combine either, or the document would mix two filters.
     with _reusing(tmp_path, "a") as first:
         _measured(first, tmp_path, "a", (0.0, 1.0))
 
@@ -1135,7 +1137,7 @@ def test_a_part_left_under_other_settings_is_measured_again(tmp_path):
 
 
 def test_a_sequence_whose_frames_changed_is_measured_again(tmp_path):
-    # Same name, same settings, different frames: the part describes a read the
+    # Same name, same settings, different frames: the result describes a read the
     # source would no longer produce. Only the contents knows, which is why it
     # carries the frame names rather than the count.
     with _reusing(tmp_path, "a") as first:
@@ -1163,10 +1165,10 @@ def test_a_part_the_source_has_lost_stays_out_of_the_document(tmp_path):
         _measured(first, tmp_path, "went", (-9.0, 9.0))
 
     with _reusing(tmp_path, "a") as second:
-        # Sorted, which `list_parts` rather than this gives.
+        # Sorted, which `list_results` rather than this gives.
         assert second.list_unsourced() == ["gone", "went"]
 
-    assert (tmp_path / "range.parts" / "gone.json").exists()
+    assert (tmp_path / "range.results" / "gone.json").exists()
     assert _saved(tmp_path)["dataset"]["max_value"] == 1.0
     assert _saved(tmp_path)["coverage"]["found"] == 1
 
@@ -1187,8 +1189,8 @@ def test_a_part_the_source_has_lost_goes_when_the_policy_says_so(tmp_path):
     with dropping:
         pass
 
-    assert not (tmp_path / "range.parts" / "gone.json").exists()
-    assert (tmp_path / "range.parts" / "a.json").exists()
+    assert not (tmp_path / "range.results" / "gone.json").exists()
+    assert (tmp_path / "range.results" / "a.json").exists()
 
 
 def test_a_narrowed_run_leaves_the_parts_it_was_not_given(tmp_path):
@@ -1238,15 +1240,15 @@ def test_overwrite_still_clears_the_folder(tmp_path):
 
     with fresh:
         assert _measured(fresh, tmp_path, "a", (5.0, 6.0))
-        assert not (tmp_path / "range.parts" / "b.json").exists()
+        assert not (tmp_path / "range.results" / "b.json").exists()
 
     assert _saved(tmp_path)["coverage"]["reused"] == 0
     assert _saved(tmp_path)["coverage"]["skipped"] == ["b"]
 
 
 def test_error_refuses_the_parts_a_killed_run_left(tmp_path):
-    # A run killed outright commits its parts and never its document, so the
-    # document's own guard finds nothing to refuse on and the parts are all
+    # A run killed outright commits its results and never its document, so the
+    # document's own guard finds nothing to refuse on and the results are all
     # that is left to say so. Clearing them spends the whole measurement again.
     with _reusing(tmp_path, "a", "b") as first:
         _measured(first, tmp_path, "a", (0.0, 1.0))
@@ -1262,10 +1264,10 @@ def test_error_refuses_the_parts_a_killed_run_left(tmp_path):
         if_present="error",
     )
 
-    with pytest.raises(FileExistsError, match="2 parts already here"):
+    with pytest.raises(FileExistsError, match="2 results already here"):
         fresh.__enter__()
 
-    kept = sorted(part.name for part in (tmp_path / "range.parts").iterdir())
+    kept = sorted(result.name for result in (tmp_path / "range.results").iterdir())
     assert kept == ["a.json", "b.json"]
 
 
@@ -1273,20 +1275,20 @@ def test_a_part_that_is_not_a_mapping_at_all_is_refused(tmp_path):
     # JSON at the top may be a list or a bare number, and `.get` on either is an
     # attribute error several frames later rather than a malformed document.
     document = _reusing(tmp_path, "a")
-    document.parts_root.mkdir(parents=True, exist_ok=True)
-    (document.parts_root / "a.json").write_text("[1, 2]", encoding="utf-8")
+    document.results_root.mkdir(parents=True, exist_ok=True)
+    (document.results_root / "a.json").write_text("[1, 2]", encoding="utf-8")
 
-    with pytest.raises(ValueError, match=r"unreadable part 'a'.*list at the top"):
+    with pytest.raises(ValueError, match=r"unreadable result 'a'.*list at the top"):
         document.to_dataset()
 
 
 def test_a_part_that_cannot_be_read_is_measured_again_rather_than_reused(tmp_path):
     # The judgement is "does this still describe the run", and one that cannot
-    # be parsed cannot describe anything, so it is not reusable, and the fold
+    # be parsed cannot describe anything, so it is not reusable, and the combine
     # is where it becomes an error.
     document = _reusing(tmp_path, "a")
-    document.parts_root.mkdir(parents=True, exist_ok=True)
-    (document.parts_root / "a.json").write_text("{not json", encoding="utf-8")
+    document.results_root.mkdir(parents=True, exist_ok=True)
+    (document.results_root / "a.json").write_text("{not json", encoding="utf-8")
 
     with document:
         assert _measured(document, tmp_path, "a", (0.0, 1.0))
@@ -1297,16 +1299,16 @@ def test_a_part_that_cannot_be_read_is_measured_again_rather_than_reused(tmp_pat
 def test_a_part_filed_under_another_sequence_is_not_reused(tmp_path):
     # It parses and its settings match, but the name it is filed under is not
     # the one it holds, so nothing about it can be trusted to describe this
-    # sequence. Measuring it again is also what repairs it: the fold would
-    # otherwise refuse the whole document over one part.
+    # sequence. Measuring it again is also what repairs it: the combine would
+    # otherwise refuse the whole document over one result.
     with _reusing(tmp_path, "a", "b") as first:
         _measured(first, tmp_path, "a", (0.0, 1.0))
         _measured(first, tmp_path, "b", (2.0, 3.0))
 
-    part = tmp_path / "range.parts" / "b.json"
-    body = json.loads(part.read_text(encoding="utf-8"))
+    result = tmp_path / "range.results" / "b.json"
+    body = json.loads(result.read_text(encoding="utf-8"))
     body["source"] = "a"
-    part.write_text(json.dumps(body), encoding="utf-8")
+    result.write_text(json.dumps(body), encoding="utf-8")
 
     with _reusing(tmp_path, "a", "b") as second:
         assert _measured(second, tmp_path, "b", (4.0, 5.0))
@@ -1325,7 +1327,7 @@ def test_dropping_the_unsourced_names_what_it_removed(tmp_path):
 
 
 def test_a_stale_part_nobody_re_measured_stays_out_of_the_fold(tmp_path):
-    # Change the filter and narrow at once: the sequences left out keep parts
+    # Change the filter and narrow at once: the sequences left out keep results
     # the new settings did not produce, and nothing in this run will overwrite
     # them. Folding them would put two filters in one document.
     with _reusing(tmp_path, "a", "b") as first:
@@ -1344,15 +1346,15 @@ def test_a_stale_part_nobody_re_measured_stays_out_of_the_fold(tmp_path):
     with narrowed:
         assert _measured(narrowed, tmp_path, "a", (2.0, 3.0))
 
-    assert (tmp_path / "range.parts" / "b.json").exists()  # left alone
+    assert (tmp_path / "range.results" / "b.json").exists()  # left alone
     assert _saved(tmp_path)["dataset"]["max_value"] == 3.0  # not b's 9.0
     assert _saved(tmp_path)["coverage"]["unselected"] == ["b"]
 
 
 def test_settings_are_compared_as_a_part_on_disk_holds_them(tmp_path):
     # A tuple is written as a list and read back as one, so comparing what is
-    # held against what was written finds every part stale: this run's own
-    # included, which leaves the document folding nothing at all.
+    # held against what was written finds every result stale: this run's own
+    # included, which leaves the document combining nothing at all.
     tupled = {"filter": {"kind": "median", "radius": (1, 1, 1)}}
     document = RangeDocument(
         tmp_path / "range",
@@ -1369,7 +1371,7 @@ def test_settings_are_compared_as_a_part_on_disk_holds_them(tmp_path):
 
 
 def test_a_stale_part_is_left_out_of_the_fold_as_well_as_of_the_reuse(tmp_path):
-    # Judging and folding ask the same question, so a part whose frames have
+    # Judging and combining ask the same question, so a result whose frames have
     # moved is passed over by both. Folding it would put a range measured over
     # a different read of the sequence into the document, with nothing saying so.
     settings = {"filter": {"kind": "identity"}}
@@ -1395,7 +1397,7 @@ def test_a_stale_part_is_left_out_of_the_fold_as_well_as_of_the_reuse(tmp_path):
     with grown:
         pass
 
-    assert (tmp_path / "range.parts" / "b.json").exists()
+    assert (tmp_path / "range.results" / "b.json").exists()
     assert _saved(tmp_path)["dataset"]["max_value"] == 1.0  # not b's 9.0
     assert _saved(tmp_path)["coverage"]["unselected"] == ["b"]
 
@@ -1440,10 +1442,10 @@ def test_dropping_a_nested_unsourced_part_takes_what_it_empties(tmp_path):
         if_present="reuse",
         if_unsourced="delete",
     )
-    part = document.parts_root / "plate" / "2026.03.12" / "gone.json"
-    part.parent.mkdir(parents=True)
-    part.write_text('{"source": "x", "frames": []}', encoding="utf-8")
+    result = document.results_root / "plate" / "2026.03.12" / "gone.json"
+    result.parent.mkdir(parents=True)
+    result.write_text('{"source": "x", "frames": []}', encoding="utf-8")
 
     document.drop_unsourced()
 
-    assert not (document.parts_root / "plate" / "2026.03.12").exists()
+    assert not (document.results_root / "plate" / "2026.03.12").exists()

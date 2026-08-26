@@ -28,17 +28,17 @@ def _contents(*counts: int) -> dict[str, tuple[str, ...]]:
 
 def _score(document: EvaluationDocument, source: FlowSource) -> bool:
     """Score one sequence the way a flow stage would, or say it was reused."""
-    meter = document.get_hook(source)
-    if meter is None:
+    writer = document.get_hook(source)
+    if writer is None:
         return False
 
     of = FarnebackConfig().build("cpu")
     frames = source.frames
 
-    with meter:
+    with writer:
         for index in range(len(frames) - 1):
             flow = of.calc(frames[index].require(), frames[index + 1].require())
-            meter(Step(index, flow, frames[index].extra))
+            writer(Step(index, flow, frames[index].extra))
 
     return True
 
@@ -76,9 +76,9 @@ def test_a_run_folds_every_sequence_into_one_document(tmp_path):
 
 
 def test_a_part_covers_a_pair_short_of_the_frames_it_was_read_over(tmp_path):
-    # The whole point of `_expected` here: a part names one source fewer than
+    # The whole point of `_expected` here: a result names one source fewer than
     # the sequence holds, and a document expecting every frame would call every
-    # part stale and measure the dataset again on each run.
+    # result stale and measure the dataset again on each run.
     contents = _contents(5)
 
     _run(tmp_path / "evaluation", contents, if_present="overwrite")
@@ -109,7 +109,7 @@ def test_a_part_left_under_other_settings_is_measured_again(tmp_path):
 
 def test_a_sequence_that_grew_since_its_part_was_written_is_measured_again(tmp_path):
     # The other half of `_still_describes`: the settings held but the source
-    # did not, and the part now covers a prefix of the sequence rather than it.
+    # did not, and the result now covers a prefix of the sequence rather than it.
     path = tmp_path / "evaluation"
 
     _run(path, _contents(4), if_present="overwrite")

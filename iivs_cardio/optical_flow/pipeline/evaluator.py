@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-__all__ = ("SequenceEvaluator",)
+__all__ = ("EvaluationWriter",)
 
 from typing import TYPE_CHECKING, override
 
 from kaparoo.utils import quantify
 
-from iivs_cardio.common.pipeline.document import PartMeter
+from iivs_cardio.common.pipeline.document import ResultWriter
 from iivs_cardio.optical_flow.metrics import (
     WarpConsistency,
     flow_magnitude,
@@ -30,11 +30,11 @@ if TYPE_CHECKING:
     from iivs_cardio.optical_flow.estimators import OpticalFlowEstimator
 
 
-class SequenceEvaluator(PartMeter[SequenceEvaluation]):
+class EvaluationWriter(ResultWriter[SequenceEvaluation]):
     """Score every flow of one sequence, then write the result.
 
     This is the hook an evaluation document hands to a sequence. Unlike the
-    range meter it is not a consumer of what the step carries: warp consistency
+    range writer it is not a consumer of what the step carries: warp consistency
     wants the two frames the flow was computed from, and a step carries the flow
     alone. So it holds the stage those frames came from and pulls `i` and `i+1`
     when it fires, which costs nothing where the flow stage has just read them.
@@ -49,14 +49,14 @@ class SequenceEvaluator(PartMeter[SequenceEvaluation]):
     cache has no estimator, and so cannot have that axis at all.
 
     Args:
-        root: As `PartMeter`.
-        source: As `PartMeter`.
+        root: As `ResultWriter`.
+        source: As `ResultWriter`.
         frames: The stage the flows were computed from, held rather than
             rebuilt so that both consumers of an index share one computation.
         estimator: The estimator to take the reverse flow from, which doubles
             what a pair costs. Defaults to `None`, which leaves that axis out.
-        settings: As `PartMeter`.
-        overwrite: As `PartMeter`.
+        settings: As `ResultWriter`.
+        overwrite: As `ResultWriter`.
         data_range: The value range SSIM and PSNR are scored against; taken from
             the frame dtype when omitted, which a float frame has none to give.
         padding_mode: `grid_sample` out-of-bounds policy for both warps.
@@ -97,7 +97,7 @@ class SequenceEvaluator(PartMeter[SequenceEvaluation]):
         to pair with is the last rather than the first.
 
         Every score is kept as it came. A duplicated frame reconstructs exactly
-        and sends PSNR to infinity, which the fold leaves out and counts rather
+        and sends PSNR to infinity, which the combine leaves out and counts rather
         than something here quietly rounding away.
 
         Raises:
@@ -145,11 +145,11 @@ class SequenceEvaluator(PartMeter[SequenceEvaluation]):
         return float(error)
 
     @override
-    def _fold(self) -> SequenceEvaluation:
+    def _result(self) -> SequenceEvaluation:
         return self.to_evaluation()
 
     def to_evaluation(self) -> SequenceEvaluation:
-        """Fold what has been scored so far into one evaluation of the sequence.
+        """Combine what has been scored so far into one evaluation of the sequence.
 
         Raises:
             ValueError: If no pair has been scored yet.
@@ -161,11 +161,11 @@ class SequenceEvaluator(PartMeter[SequenceEvaluation]):
         if not self._scored:
             return None
 
-        folded = self.to_evaluation()
-        gain = folded.metrics["ssim"].mean - folded.metrics["ssim_floor"].mean
-        pairs = quantify(folded.pairs, "pair")
+        combined = self.to_evaluation()
+        gain = combined.metrics["ssim"].mean - combined.metrics["ssim_floor"].mean
+        pairs = quantify(combined.pairs, "pair")
         said = f"scored {pairs}, gaining {gain:+.4f} SSIM"
 
-        error = folded.metrics["fb_error"]
+        error = combined.metrics["fb_error"]
 
         return f"{said}, {error.mean:.4f} px apart" if error.scored else said

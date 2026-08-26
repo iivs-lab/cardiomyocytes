@@ -33,7 +33,7 @@ def test_a_given_span_covers_every_sequence_the_source_holds(tmp_path):
 
 
 def test_the_dataset_level_scales_every_sequence_by_the_widest_range(tmp_path):
-    # Folded across the whole dataset, so the sequence that reached the extreme
+    # DatasetResult across the whole dataset, so the sequence that reached the extreme
     # sets the constants for all of them and two sequences stay comparable.
     built = build_normalization(
         NormalizeConfig(range_file=_document(tmp_path)), torch.uint8

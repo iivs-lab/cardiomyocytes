@@ -10,7 +10,7 @@ from iivs_cardio.optical_flow.pipeline.evaluation import (
     DatasetEvaluation,
     SequenceEvaluation,
 )
-from iivs_cardio.optical_flow.pipeline.evaluator import SequenceEvaluator
+from iivs_cardio.optical_flow.pipeline.evaluator import EvaluationWriter
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 class Evaluated(Named, Protocol):
     """Whatever an evaluation document needs of a sequence.
 
-    Its name, to file the part under; the frames its flows were computed from,
+    Its name, to file the result under; the frames its flows were computed from,
     which no step carries and nothing here could rebuild, since reading them a
     second time would scale them a second time and two definitions of one thing
     agree only by coincidence; and the estimator those flows came from, which
@@ -42,7 +42,7 @@ class Evaluated(Named, Protocol):
 
 
 class EvaluationDocument(
-    DocumentBranch[Evaluated, SequenceEvaluation, DatasetEvaluation, SequenceEvaluator]
+    DocumentBranch[Evaluated, SequenceEvaluation, DatasetEvaluation, EvaluationWriter]
 ):
     """The document a flow stage writes, gathering what every sequence scored.
 
@@ -58,15 +58,15 @@ class EvaluationDocument(
         if_unsourced: As `DocumentBranch`.
         data_range: The value range SSIM and PSNR are scored against; taken
             from the frame dtype when omitted, which a float frame has none to
-            give. The reverse flow each meter measures comes from the
+            give. The reverse flow each writer measures comes from the
             estimator its own sequence carries, since that is what is bound to
             the device the sequence ran on.
         padding_mode: `grid_sample` out-of-bounds policy for every warp.
 
     Attributes:
-        PARTS_SUFFIX: As `DocumentBranch`.
+        RESULTS_SUFFIX: As `DocumentBranch`.
         path: As `DocumentBranch`.
-        parts_root: As `DocumentBranch`.
+        results_root: As `DocumentBranch`.
         source: As `DocumentBranch`.
         contents: As `DocumentBranch`.
         settings: As `DocumentBranch`.
@@ -105,9 +105,9 @@ class EvaluationDocument(
         self._padding_mode = padding_mode
 
     @override
-    def _make_meter(self, source: Evaluated) -> SequenceEvaluator:
-        return SequenceEvaluator(
-            self.parts_root,
+    def _make_writer(self, source: Evaluated) -> EvaluationWriter:
+        return EvaluationWriter(
+            self.results_root,
             source.name,
             source.frames,
             source.estimator,
@@ -122,8 +122,8 @@ class EvaluationDocument(
         return SequenceEvaluation.from_dict(document)
 
     @override
-    def _fold(self, parts: tuple[SequenceEvaluation, ...]) -> DatasetEvaluation:
-        return DatasetEvaluation(self.source, parts)
+    def _combine(self, results: tuple[SequenceEvaluation, ...]) -> DatasetEvaluation:
+        return DatasetEvaluation(self.source, results)
 
     @override
     def _expected(self, names: Sequence[str]) -> Sequence[str]:

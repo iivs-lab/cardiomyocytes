@@ -590,7 +590,7 @@ def test_writing_frames_over_the_source_is_refused(phase_tree):
 
 def test_a_destination_a_later_run_would_find_again_is_refused(phase_tree):
     # Nested under the source and laid out the way the source is, this run's
-    # output is more sequences to the next run, which folds a dataset boundary
+    # output is more sequences to the next run, which combines a dataset boundary
     # over frames that are already filtered and doubles the tree again.
     with pytest.raises(ValueError, match=r"frames would land on the source"):
         _scan(phase_tree, phase_tree / "filtered", 0)
@@ -665,7 +665,7 @@ def test_the_parts_a_run_gathered_stay_beside_the_document(phase_tree, tmp_path)
 
     _scan(phase_tree, dest, 2, save_frames=False, save_ranges=True)
 
-    assert sorted(p.name for p in (dest / "value_range.parts").iterdir()) == [
+    assert sorted(p.name for p in (dest / "value_range.results").iterdir()) == [
         f"TL_{index:02d}.json" for index in range(SEQUENCES)
     ]
 
@@ -808,7 +808,7 @@ def test_a_sequence_whose_filter_changed_is_written_again(phase_tree, tmp_path):
 
 
 def test_a_folder_missing_a_frame_is_not_reused(phase_tree, tmp_path):
-    # A range part is one file and so is there or not; a folder can be half
+    # A range result is one file and so is there or not; a folder can be half
     # removed. Reusing that leaves a short sequence reading as a whole one.
     dest = tmp_path / "out"
     _cache(phase_tree, dest)
@@ -938,7 +938,7 @@ def test_a_sequence_holding_a_non_finite_frame_costs_only_that_sequence(
     assert name == "TL_01"
     assert "non-finite value in" in reason
 
-    # The other two are whole, frames committed and ranges folded, and the one
+    # The other two are whole, frames committed and ranges combined, and the one
     # that failed left no half-written folder behind.
     subpath = Path(PHASE_FLOAT_BIN).as_posix()
     assert sorted(_written(dest)) == [f"TL_{s:02d}/{subpath}" for s in (0, 2)]
@@ -947,7 +947,7 @@ def test_a_sequence_holding_a_non_finite_frame_costs_only_that_sequence(
         "TL_02",
     ]
 
-    # And the document says so: bounds folded over two of three sequences are
+    # And the document says so: bounds combined over two of three sequences are
     # not the dataset's, and the consumer that sets a policy from them is the
     # one who would never find out.
     assert _document(dest)["coverage"] == {
@@ -1302,7 +1302,7 @@ def test_the_contents_reaches_the_document_that_reports_on_it(tmp_path):
 def test_a_narrowed_run_keeps_the_whole_dataset_in_its_contents(tmp_path):
     # What the document counts against: a run given one of three still describes
     # a dataset of three, and coverage measured against the selection alone
-    # would call one part of it complete.
+    # would call one result of it complete.
     (document,) = _branches(
         tmp_path, sequence_names=("TL_00", "TL_01", "TL_02"), selected=["TL_01"]
     )
@@ -1465,7 +1465,7 @@ def test_a_short_selection_is_listed_one_to_a_line(caplog):
 
 def test_a_long_selection_points_at_the_config_instead(caplog):
     # Listing it would bury the lines around it, and the job's own `.hydra` holds
-    # it exactly: `config.yaml` always, as part of the composed config, and
+    # it exactly: `config.yaml` always, as result of the composed config, and
     # `overrides.yaml` whenever the command line is what set it, which is the
     # usual way, since both selections default to null. The path stays relative
     # because the log file naming it already sits in that directory, which is
@@ -1566,7 +1566,7 @@ def test_the_written_frames_take_the_shape_the_source_was_read_in(caplog):
 
 
 def test_a_target_naming_a_subpath_says_that_one(caplog):
-    # The two lines part company here, and the one about writing has to follow
+    # The two lines result company here, and the one about writing has to follow
     # the target: a reader checking where the output went reads this line.
     logged = _logged(
         caplog,

@@ -4,8 +4,8 @@ __all__ = (
     "FrameRange",
     "FrameTree",
     "RangeDocument",
+    "RangeWriter",
     "SequenceRange",
-    "SequenceRangeMeter",
     "SequenceStageRun",
     "ValueRange",
 )
@@ -16,8 +16,8 @@ from iivs_cardio.data.pipeline.ranges import (
     DatasetRange,
     FrameRange,
     RangeDocument,
+    RangeWriter,
     SequenceRange,
-    SequenceRangeMeter,
     ValueRange,
 )
 from iivs_cardio.data.pipeline.stage import SequenceStageRun
