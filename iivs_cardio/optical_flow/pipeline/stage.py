@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, override
 
 from torch import Tensor
 
-from iivs_cardio.common.pipeline import SequenceStage, Stage, StageJob
+from iivs_cardio.common.pipeline import SequenceStage, Stage, StageRun
 from iivs_cardio.common.range import all_finite
 from iivs_cardio.optical_flow.estimators import OpticalFlowEstimator
 
@@ -151,7 +151,7 @@ class FlowSource:
     estimator: OpticalFlowEstimator | None = None
 
 
-class FlowStageFactory(StageJob["PhaseFilteredSequence"]):
+class FlowStageFactory(StageRun["PhaseFilteredSequence"]):
     """The job of computing one dataset's flows, one stage graph per sequence.
 
     Three stages deep: the sequence reads and filters a phase frame, the frames

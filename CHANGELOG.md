@@ -73,7 +73,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   filter is what it varies and only the winning one is worth keeping, so the run
   says so rather than filling the disk in turn. `is_multirun` is what answers
   the question.
-- `StageFactory` in `iivs_cardio/common/pipeline.py`, the whole of what a
+- `StageRun` in `iivs_cardio/common/pipeline.py`, the whole of what a
   driver sees: how many items, what each is called, how to run one on a device,
   and how to bracket the run. It carries the stage's own `name`, which the job
   assigns -- the same filtered-phase run is preprocessing under one pipeline and
@@ -233,7 +233,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is what they are checked against. Being a context manager is
   optional and is what tells the two apart -- a frame writer commits itself per
   sequence, where a range document only finishes once every sequence has, and
-  `StageFactory.running` brackets the ones that need it exactly as `Stage.run`
+  `StageRun.running` brackets the ones that need it exactly as `Stage.run`
   brackets the hooks a level down.
 - Non-finite values are refused rather than carried. `FilteredSequence` checks
   each source frame where it reads it -- the one place every frame passes exactly
@@ -276,7 +276,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   writer only collects while it is alive, and for folders whose sequence the
   source has lost. Both were previously nobody's to collect.
 - A side branch may decline an item: `SideBranch.get_hook` returns `Hook | None`,
-  and a sequence every branch declines is not read at all. `StageFactory.
+  and a sequence every branch declines is not read at all. `StageRun.
   run_stage` says whether it read one, and the run's summary splits three ways
   (`121 of 121 ready in 4.2s (90 reused, 31 computed)`) -- `done` counted only
   what was computed, which read as a smaller run than it was.

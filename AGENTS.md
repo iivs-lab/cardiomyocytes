@@ -59,7 +59,7 @@ push.
   writes diagnostics: a budget exceeded, a step recomputed, an output that
   could not be taken back. Anything filed under a run takes
   `getLogger(<run name>)` and writes the run's own account, set in with
-  `log_indented` so one item reads as one block. `StageJob` is the seam,
+  `log_indented` so one item reads as one block. `StageRun` is the seam,
   and takes the run's name.
 - A `%r` in a log line is only worth writing where the object says
   something. Give it a `__repr__` naming what it stands for, or

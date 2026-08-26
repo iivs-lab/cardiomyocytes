@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("Held", "StageJob")
+__all__ = ("Held", "StageRun")
 
 import logging
 from abc import ABC, abstractmethod
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 
 class Held(Named, Protocol):
-    """Whatever a job needs of one item: a name, and a hold it can be told to drop.
+    """Whatever a run needs of one item: a name, and a hold it can be told to drop.
 
     Every item of a run is held for the whole of it, so anything an item keeps
     while it is being worked on would otherwise be kept to the end.
@@ -35,10 +35,10 @@ class Held(Named, Protocol):
     def release(self) -> None: ...
 
 
-class StageJob[S: Held](ABC):
-    """The items of one job, and how to run and report on each of them.
+class StageRun[S: Held](ABC):
+    """The items of one run, and how to carry out and report on each of them.
 
-    The name is the job's to give rather than the machinery's to assume: the
+    The name is the caller's to give rather than the machinery's to assume: the
     same filtering run is preprocessing under one pipeline and postprocessing
     behind another, so a machine that named itself would be lying in the second
     case. Every line of the run is filed under it.
@@ -89,7 +89,7 @@ class StageJob[S: Held](ABC):
 
     @abstractmethod
     def _describe_work(self, index: int) -> str:
-        """Return what this job does to the item at `index`, without the device.
+        """Return what this run does to the item at `index`, without the device.
 
         Heads the item's block, so it reads as a phrase rather than a sentence:
         `"filtering 40 frames"`, which the device is appended to.

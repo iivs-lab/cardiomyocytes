@@ -5,7 +5,6 @@ __all__ = (
     "SequenceStage",
     "SideBranch",
     "Stage",
-    "StageFactory",
     "Step",
     "SupportsReport",
     "SupportsRevert",
@@ -23,8 +22,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
 
     from kaparoo.data import DataSequence
-
-    from iivs_cardio.common.device import Device
 
 
 _logger = logging.getLogger(__name__)
@@ -440,61 +437,3 @@ class SequenceStage[T, M](Stage[T, M]):
     @override
     def _describe(self, index: int) -> M:
         return self._sequence.get_meta(index)
-
-
-# ========================== #
-#            Jobs            #
-# ========================== #
-
-
-class StageFactory(Protocol):
-    """The whole of what a driver needs to run a job's items.
-
-    A driver asks how many items there are, runs each on a device it chose, and
-    names its log lines after the factory. Anything that has to be opened once
-    for the whole run rather than per item is opened by `running`.
-    """
-
-    @property
-    def name(self) -> str:
-        """The run's name, which every line of it is filed under."""
-        ...
-
-    def __len__(self) -> int:
-        """The number of items this run was given."""
-        ...
-
-    def get_name(self, index: int, /) -> str:
-        """Return what the item at `index` is called.
-
-        Args:
-            index: The item to name.
-
-        Returns:
-            The name, which is what a log line and a retry list carry rather
-            than the index.
-        """
-        ...
-
-    def run_stage(self, index: int, device: Device, /) -> bool:
-        """Carry out the item at `index` on `device`.
-
-        Args:
-            index: The item to carry out.
-            device: The device to carry it out on.
-
-        Returns:
-            Whether the item was computed. One that every branch already holds
-            what it needs for is not read at all, and the frames that would
-            have cost are the whole point of asking first.
-        """
-        ...
-
-    def running(self) -> AbstractContextManager[object]:
-        """Return the bracket around the whole run.
-
-        Returns:
-            A context manager holding open whatever outlives one item, such as
-            a branch that gathers across the dataset.
-        """
-        ...

@@ -30,7 +30,7 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 
 from iivs_cardio.common.device import Device, DeviceKind
 from iivs_cardio.common.logging import log_indented
-from iivs_cardio.common.pipeline import StageFactory
+from iivs_cardio.common.pipeline import StageRun
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -306,7 +306,7 @@ class SharedContext:
     """
 
     name: str
-    stages: StageFactory
+    stages: StageRun[Any]
     devices: tuple[Device, ...]
     log_folder: WorkerLogFolder | None
     log_level: int = logging.INFO
@@ -407,7 +407,7 @@ def log_insights(insights: dict[str, Any], name: str, *, unit: str = "it") -> No
 
 def _collect_outcomes(
     outcomes: Iterable[Outcome],
-    stages: StageFactory,
+    stages: StageRun[Any],
     logger: logging.Logger,
     record: RunRecord,
 ) -> None:
@@ -532,7 +532,7 @@ def _run_in_pool(
 
 
 def run_all(
-    stages: StageFactory,
+    stages: StageRun[Any],
     config: ComputeConfig,
     *,
     unit: str = "it",

@@ -1264,7 +1264,7 @@ SequenceStage(위상)  →  NormalizedFrameStage (창 2)  →  FlowStage (창 1)
 - **추정기는 `FlowSource`가 든다.** `EvaluationDocument`에서 뺐다 — 추정기는 장치에
   묶이는데 잡은 시퀀스마다 다른 장치를 쓸 수 있으므로 실행 하나에 하나로 고정할 수 없다.
   잡이 **장치마다 하나** 만들어 스테이지와 곁가지에 같은 객체를 준다.
-- `StageJob`을 `SequenceStageFactory`에서 뽑았다. 잡이 하는 일 중 필터링에 대한 것은
+- `StageRun`을 `SequenceStageFactory`에서 뽑았다. 잡이 하는 일 중 필터링에 대한 것은
   둘뿐이라(그래프를 만드는 것, 블록 머리글) 그 둘만 추상으로 남았고 `FlowStageFactory`가
   나머지를 물려받는다.
 - 정규화기는 `Mapping[str, FrameNormalizer]`로 받는다. `level`이 `dataset`·`given`이면 한
@@ -1311,7 +1311,7 @@ C에서는 `normalize`가 `flow.sources`에 없으므로 **그래프 밖**이다
   그것을 돌려줘야 하며, 이것이 사이드카를 실제로 쓰는 자리다.
 - **`flow` config 블록.** `FlowCacheConfig(SourceConfig)`, `DEFAULT_SUBPATH =
   FLOW_FLOAT_NPY`. `flow.root`가 null이면 A/B, 아니면 C.
-- **`CachedFlowStageFactory`.** `StageJob`의 자식 하나. `FlowStage` 대신
+- **`CachedFlowStageFactory`.** `StageRun`의 자식 하나. `FlowStage` 대신
   `SequenceStage(CachedFlowSequence)`를 만들고, `NormalizedFrameStage`는 소스가 아니라 옆에
   서서 `FlowSource.frames`로만 곁가지에 간다. `estimator=None`이라 FB error 축은 빠진다.
 - **전제 조건 검사**, 프레임 한 장 읽기 전에 시퀀스마다: record의 `frames`가 이번 실행이
@@ -1676,7 +1676,7 @@ float 3채널이다. 그러면 평가의 `data_range`가 dtype에서 안 나오�
 
 로거 이름이 **스테이지**다(`preprocess` / `optical_flow` / ...) — 모듈이 아니라. 셋이 한
 프로세스에서 돌 때 `%(name)s` 열 하나로 갈리고, hydra의 잡 포맷을 그대로 쓰므로 포맷을 손대지
-않는다. 이름은 **잡이 정해서** `StageFactory.name`으로 실린다: 같은 필터링 실행이 한
+않는다. 이름은 **호출자가 정해서** `StageRun.name`으로 실린다: 같은 필터링 실행이 한
 파이프라인에서는 전처리이고 홀로그램 복원 뒤에서는 후처리라, 기계가 스스로 이름을 주장하면
 거짓말이 된다. 드라이버는 그 이름을 팩토리에게 물어 쓴다 — 부모와 워커가 한 실행을 두 이름으로
 적을 길이 없다.

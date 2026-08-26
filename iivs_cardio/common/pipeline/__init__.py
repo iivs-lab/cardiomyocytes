@@ -15,8 +15,7 @@ __all__ = (
     "SideBranch",
     "Sourced",
     "Stage",
-    "StageFactory",
-    "StageJob",
+    "StageRun",
     "Step",
     "SupportsReport",
     "SupportsRevert",
@@ -35,7 +34,6 @@ from iivs_cardio.common.pipeline.base import (
     SequenceStage,
     SideBranch,
     Stage,
-    StageFactory,
     Step,
     SupportsReport,
     SupportsRevert,
@@ -63,4 +61,4 @@ from iivs_cardio.common.pipeline.document import (
     Sourced,
     save_document,
 )
-from iivs_cardio.common.pipeline.job import Held, StageJob
+from iivs_cardio.common.pipeline.job import Held, StageRun

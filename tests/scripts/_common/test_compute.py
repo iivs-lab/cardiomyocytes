@@ -4,14 +4,15 @@ import logging
 import os
 import sys
 from contextlib import contextmanager, nullcontext
-from dataclasses import replace
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, override
 
 import pytest
 import torch
 from mpire import WorkerPool
 
 from iivs_cardio.common.device import Device
+from iivs_cardio.common.pipeline import StageRun
 from scripts._common import compute
 from scripts._common.compute import (
     _DEFAULT_WORKERS,
@@ -36,11 +37,23 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-class _Stages:
-    """A stage factory that records what ran, through the filesystem.
+@dataclass(frozen=True, slots=True)
+class _Item:
+    """The least an item can be: a name, and a hold there is none of."""
+
+    name: str
+
+    def release(self) -> None: ...
+
+
+class _Stages(StageRun[_Item]):
+    """A run that records what ran, through the filesystem.
 
     Through files rather than an attribute, because the pool hands each worker
     its own copy: what a worker did to itself never comes home.
+
+    `run_stage` is replaced whole, so the stage graph and the block heading it
+    would otherwise build are never reached.
     """
 
     def __init__(
@@ -50,21 +63,21 @@ class _Stages:
         explode_at: Iterable[int] = (),
         reuse_at: Iterable[int] = (),
     ) -> None:
-        self._count = count
+        super().__init__([_Item(f"item{i}") for i in range(count)], name="run")
+
         self._dest = dest
         self._explode_at = frozenset(explode_at)
         self._reuse_at = frozenset(reuse_at)
 
-    @property
-    def name(self) -> str:
-        return "run"
+    @override
+    def get_stage(self, index: int, device: Device) -> None:
+        raise NotImplementedError
 
-    def __len__(self) -> int:
-        return self._count
+    @override
+    def _describe_work(self, index: int) -> str:
+        raise NotImplementedError
 
-    def get_name(self, index: int) -> str:
-        return f"item{index}"
-
+    @override
     def run_stage(self, index: int, device: Device) -> bool:
         if index in self._explode_at:
             msg = f"item {index} gave up"
@@ -77,6 +90,7 @@ class _Stages:
 
         return True
 
+    @override
     @contextmanager
     def running(self) -> Iterator[_Stages]:
         self._dest.mkdir(parents=True, exist_ok=True)
@@ -150,6 +164,7 @@ def test_the_run_is_bracketed_before_anything_says_it_failed(tmp_path):
 
 
 class _Unclosable(_Stages):
+    @override
     @contextmanager
     def running(self) -> Iterator[_Stages]:
         self._dest.mkdir(parents=True, exist_ok=True)
@@ -237,8 +252,9 @@ def test_workers_take_a_share_of_the_machine_each(restored_thread_count):
 
 
 class _Talkative(_Stages):
-    """A factory whose items say something only a low level lets through."""
+    """A run whose items say something only a low level lets through."""
 
+    @override
     def run_stage(self, index: int, device: Device) -> bool:
         logging.getLogger(self.name).debug("item %d had something to say", index)
 

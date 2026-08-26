@@ -4,7 +4,7 @@ __all__ = ("SequenceStageFactory",)
 
 from typing import TYPE_CHECKING, override
 
-from iivs_cardio.common.pipeline import SequenceStage, StageJob
+from iivs_cardio.common.pipeline import SequenceStage, StageRun
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -17,16 +17,16 @@ if TYPE_CHECKING:
     from iivs_cardio.data.phase import PhaseFilteredSequence
 
 
-class SequenceStageFactory(StageJob["PhaseFilteredSequence"]):
+class SequenceStageFactory(StageRun["PhaseFilteredSequence"]):
     """The job of filtering one dataset's sequences, one stage per sequence.
 
     A sequence filters itself as it is read, so the stage is the sequence and
     the branches watch it directly.
 
     Args:
-        sequences: As `StageJob`.
-        branches: As `StageJob`, each asked for a hook with the sequence itself.
-        name: As `StageJob`.
+        sequences: As `StageRun`.
+        branches: As `StageRun`, each asked for a hook with the sequence itself.
+        name: As `StageRun`.
     """
 
     def __init__(
