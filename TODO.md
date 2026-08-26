@@ -613,7 +613,8 @@ estimator 자식을 두던 상속은 사라졌고 `OpenCVEstimator` 하나가 �
   쟀는지 말하지 않는 실행이 생기지 않게.
 - `dtype`은 `EstimatorConfig.FRAME_DTYPE`에서 온다. **기본값 없이** 선언했다. 틀린 값은
   라이브러리 안쪽 shape 오류로 나타나지 정규화기를 설정한 자리에서 나타나지 않기 때문이다.
-  §「프레임 표현이 추정기에 종속된다」가 여기로 닫혔다.
+  §「프레임 표현이 추정기에 종속된다」의 절반이 여기로 닫혔다. 나머지 절반은
+  평가가 그 범위를 받는 쪽이고, 아직 안 이어졌다.
 - `target=None`이면 dtype 자신의 span을 쓴다 — float은 `[0, 1]`, 정수는 `iinfo` 전체.
 
 ### 결정 — 정규화는 필터링 **이후**다
@@ -1380,13 +1381,28 @@ pins the concrete dtype and shape」로 이미 열어둔 자리다. cv2는 uint8
 float 3채널이다. 그러면 평가의 `data_range`가 dtype에서 안 나오고 **명시해야 한다** —
 `_resolve_data_range`가 float에 대해 추측을 거부한다. 표현을 둘 두고 uint8 쪽에서 채점하면
 「흐름을 계산한 그 프레임」이라는 전제가 깨지므로, **정규화 출력이 추정기를 따르고 평가가
-`data_range`를 받는 쪽**이 맞다. `EstimatorConfig.FRAME_DTYPE`으로 닫혔다 —
-정규화기는 그 dtype으로 스케일하고, 평가기는 `data_range`를 인자로 받는다.
+`data_range`를 받는 쪽**이 맞다. `EstimatorConfig.FRAME_DTYPE`으로 **절반만 닫혔다** —
+정규화기는 추정기가 요구하는 dtype으로 스케일한다. 평가가 `data_range`를 실제로 받는
+쪽은 안 이어졌고, 그것이 §열린 것의 첫 항목이다.
 
 **`no_grad`가 필요해진다(추정기 층).** `warp_consistency`의 gradient가 flow까지 닿는 것은 학습에
 좋은 성질이지만 평가 실행에서는 시퀀스 내내 그래프가 남아 메모리가 터진다. cv2에는 없던 요구다.
 
 ## 열린 것
+
+- **평가가 정규화 목표가 아니라 프레임 dtype으로 채점한다.**
+  `scripts/optical_flow/_process.py`의 `build_branches`가 `data_range`를 넘기지 않아
+  `None`으로 남고, `_resolve_data_range`가 프레임 dtype에서 가져온다 — uint8이면 255다.
+  `normalize.target`을 `[0, 100]`으로 좁혀도 PSNR·SSIM은 255를 기준으로 계산된다.
+  값은 나오고 테스트도 통과하며 **조용히 틀린다.**
+
+  고칠 자리는 하나다: 정규화기의 `target` 폭을 `data_range`로 넘길 것. `FrameNormalizer`가
+  이미 그 값을 들고 있고, 프레임 단을 만드는 쪽과 평가 곁가지를 만드는 쪽이 같은 함수라
+  실을 새로 뽑을 필요가 없다. 파라미터 탐색을 시작하기 전에 닫을 것 — 스윕의 순위가
+  이 값에 걸린다.
+
+  닫히면 float `FRAME_DTYPE`을 든 추정기도 붙는다. 지금 붙이면 `_resolve_data_range`가
+  예외를 던진다.
 
 - **`DualTVL1Config`가 장치에 따라 조용히 무시되는 필드를 넷 든다.**
   `inner_iterations`·`outer_iterations`·`median_filtering`은 CUDA에서, `iterations`는 CPU에서
