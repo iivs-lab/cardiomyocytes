@@ -65,35 +65,9 @@ class StageRun[S: Releasable](ABC):
     ) -> None:
         self._items = items
         self._branches = branches
+
         self._name = name
-
         self._logger = logging.getLogger(name)
-
-    @abstractmethod
-    def get_stage(self, index: int, device: Device) -> Stage[Any, Any] | None:
-        """Build the stage for the item at `index`, running on `device`.
-
-        Every branch is asked for a hook, so a branch that cannot make one
-        refuses before any frame is read, and one that has nothing to do for
-        this item says so before it costs anything.
-
-        Args:
-            index: The item to build the stage for.
-            device: The device the item is to be computed on.
-
-        Returns:
-            The stage, or `None` when no branch wants this item. Reading it
-            would then produce nothing anyone had asked for, so the device is
-            left alone too.
-        """
-
-    @abstractmethod
-    def _describe_work(self, index: int) -> str:
-        """Return what this run does to the item at `index`, without the device.
-
-        Heads the item's block, so it reads as a phrase rather than a sentence:
-        `"filtering 40 frames"`, which the device is appended to.
-        """
 
     @property
     def name(self) -> str:
@@ -115,17 +89,67 @@ class StageRun[S: Releasable](ABC):
         """
         return self._items[index].name
 
-    def _log(self, message: str, *args: object, nested: bool = True) -> None:
+    @abstractmethod
+    def get_stage(self, index: int, device: Device) -> Stage[Any, Any] | None:
+        """Build the stage for the item at `index`, running on `device`.
+
+        Every branch is asked for a hook, so a branch that cannot make one
+        refuses before any frame is read, and one that has nothing to do for
+        this item says so before it costs anything.
+
+        Args:
+            index: The item to build the stage for.
+            device: The device the item is to be computed on.
+
+        Returns:
+            The stage, or `None` when no branch wants this item. Reading it
+            would then produce nothing anyone had asked for, so the device is
+            left alone too.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def _work_label(self, index: int) -> str:
+        """Return what this run does to the item at `index`, without the device.
+
+        Sits under the item's name with the device appended, so it reads as a
+        phrase rather than as a sentence.
+        """
+        raise NotImplementedError
+
+    def _log(self, message: str, *args: object, head: bool = False) -> None:
         """Log under this run's name, indented unless it heads a block.
 
         Args:
             message: The format string to log.
             *args: What it interpolates, left to the logger to apply.
-            nested: Whether to indent the line under a block. Defaults to True.
+            head: Whether the line heads a block rather than sitting under one.
+                Defaults to False.
         """
-        log_indented(self._logger, message, *args, depth=int(nested))
+        log_indented(self._logger, message, *args, depth=0 if head else 1)
 
-    def _nothing_to_do(self) -> str:
+    def _log_unsourced(self) -> None:
+        """Say which outputs have no item behind them any more, once each.
+
+        Said whatever the branch then does with them, and before the run rather
+        than after: a dataset that shrank and a share that came up half read
+        the same from here, and only whoever started the run can tell them
+        apart. Waiting until the end would say it after the frames were spent.
+        """
+        named: set[str] = set()
+        for branch in self._branches:
+            if isinstance(branch, SupportsUnsourced):
+                named.update(branch.list_unsourced())
+
+        if not named:
+            return
+
+        self._log("%s with no source:", quantify(len(named), "output"), head=True)
+
+        for name in named:
+            self._log("%s", name)
+
+    def _log_unchanged(self) -> None:
         """Say why an item is being passed over, which is not always reuse.
 
         A run given no target has no branch to ask, so nothing is held and
@@ -133,9 +157,10 @@ class StageRun[S: Releasable](ABC):
         the branches already hold it would name a cause that is not there.
         """
         if not self._branches:
-            return "nothing to do: this run writes nothing"
+            self._log("nothing to do: this run writes nothing")
+            return
 
-        return "nothing to compute: every branch already holds this sequence"
+        self._log("nothing to compute: every branch already holds this item")
 
     def run_stage(self, index: int, device: Device) -> bool:
         """Carry out the item at `index` on `device`, and log what happened.
@@ -160,14 +185,14 @@ class StageRun[S: Releasable](ABC):
         """
         item = self._items[index]
 
-        self._log("%s", item.name, nested=False)
+        self._log("%s", item.name, head=True)
 
         stage = self.get_stage(index, device)
         if stage is None:
-            self._log("%s", self._nothing_to_do())
+            self._log_unchanged()
             return False
 
-        self._log("%s on %s", self._describe_work(index), device)
+        self._log("%s on %s", self._work_label(index), device)
 
         try:
             with Timer("s") as timer:
@@ -181,28 +206,6 @@ class StageRun[S: Releasable](ABC):
         self._log("done in %.1fs", timer.elapsed)
 
         return True
-
-    def _log_unsourced(self) -> None:
-        """Say which outputs have no item behind them any more, once each.
-
-        Said whatever the branch then does with them, and before the run rather
-        than after: a dataset that shrank and a share that came up half read
-        the same from here, and only whoever started the run can tell them
-        apart. Waiting until the end would say it after the frames were spent.
-        """
-        named = {
-            name
-            for branch in self._branches
-            if isinstance(branch, SupportsUnsourced)
-            for name in branch.list_unsourced()
-        }
-        if not named:
-            return
-
-        listed = ", ".join(sorted(named))
-        outputs = quantify(len(named), "output")
-
-        self._log("%s with no source: %s", outputs, listed, nested=False)
 
     @contextmanager
     def running(self) -> Iterator[Self]:
@@ -235,7 +238,7 @@ class StageRun[S: Releasable](ABC):
             close_together(opened, None)
         finally:
             for line in _reports(self._branches):
-                self._log("%s", line, nested=False)
+                self._log("%s", line, head=True)
 
 
 def _reports(candidates: Iterable[object]) -> Iterator[str]:

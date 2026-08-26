@@ -235,5 +235,5 @@ class FlowStageFactory(StageRun["PhaseFilteredSequence"]):
         return flows.register_hooks(*hooks)
 
     @override
-    def _describe_work(self, index: int) -> str:
+    def _work_label(self, index: int) -> str:
         return f"computing {len(self._items[index]) - 1} flows"

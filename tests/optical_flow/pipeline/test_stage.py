@@ -353,4 +353,4 @@ def test_a_sequence_too_short_to_make_a_pair_is_refused_before_the_run():
 def test_the_job_says_what_it_is_about_to_do():
     (sequence,) = _sequences(6)
 
-    assert _job(sequence)._describe_work(0) == "computing 5 flows"  # noqa: SLF001
+    assert _job(sequence)._work_label(0) == "computing 5 flows"  # noqa: SLF001

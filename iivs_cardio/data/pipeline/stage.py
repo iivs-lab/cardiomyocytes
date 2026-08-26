@@ -52,5 +52,5 @@ class SequenceStageFactory(StageRun["PhaseFilteredSequence"]):
         return SequenceStage(sequence).register_hooks(*hooks)
 
     @override
-    def _describe_work(self, index: int) -> str:
+    def _work_label(self, index: int) -> str:
         return f"filtering {len(self._items[index])} frames"

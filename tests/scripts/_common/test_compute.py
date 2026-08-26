@@ -69,7 +69,7 @@ class _Stages(StageRun[_Item]):
         raise NotImplementedError
 
     @override
-    def _describe_work(self, index: int) -> str:
+    def _work_label(self, index: int) -> str:
         raise NotImplementedError
 
     @override
