@@ -448,13 +448,14 @@ class SequenceStage[T, M](Stage[T, M]):
 def close_together(
     opened: Sequence[AbstractContextManager[object]], error: BaseException | None
 ) -> None:
-    """Close everything in `opened`, in reverse, each told only about `error`.
+    """Close everything in `opened`, in reverse, in place of a nested `with`.
 
-    They write separate outputs rather than nesting one inside another, so one
-    that cannot commit must not tell the rest their work failed, and an
-    `ExitStack` does exactly that. Where one does fail, those that can take
-    their output back are asked to, and a revert that fails is logged rather
-    than raised: the failure being answered is the one worth carrying.
+    Every close is told about `error` alone, never about what another close
+    raised, so a failure does not reach work that did not fail. Once all are
+    closed, a failure sends `revert` to those that closed cleanly and can take
+    their output back: the set commits whole or not at all, except for one
+    that cannot revert and keeps what it committed. A revert that fails is
+    logged rather than raised.
 
     Args:
         opened: The context managers to close, in the order they were opened.
