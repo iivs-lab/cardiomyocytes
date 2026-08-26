@@ -54,6 +54,17 @@ push.
   `line-length` is the real constraint, so when a message does not fit,
   shorten the prose or the variable interpolated into it rather than
   reaching for the multi-line form.
+- A log line goes to one of two registers. Machinery that does not know
+  the run it is part of takes a module logger (`getLogger(__name__)`) and
+  writes diagnostics: a budget exceeded, a step recomputed, an output that
+  could not be taken back. Anything filed under a run takes
+  `getLogger(<run name>)` and writes the run's own account, set in with
+  `log_indented` so one item reads as one block. `StageJob` is the seam,
+  and takes the run's name.
+- A `%r` in a log line is only worth writing where the object says
+  something. Give it a `__repr__` naming what it stands for, or
+  interpolate that name yourself: a default `<... object at 0x...>` leaves
+  a reader with nothing to act on.
 
 ## Tests
 
