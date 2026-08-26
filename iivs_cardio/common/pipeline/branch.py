@@ -8,7 +8,7 @@ __all__ = (
     "Named",
     "PresentPolicy",
     "UnsourcedPolicy",
-    "as_read_back",
+    "as_json_value",
     "ensure_json_name",
     "ensure_policy",
 )
@@ -67,8 +67,8 @@ def ensure_json_name(name: str) -> str:
     return ensure_file_extension(name, JSON_EXT, add=True).name
 
 
-def as_read_back(settings: Mapping[str, object] | None) -> object:
-    """Return `settings` as they will read back out of an output on disk.
+def as_json_value(settings: Mapping[str, object] | None) -> object:
+    """Return `settings` as the value JSON would give them back as.
 
     Writing changes nothing: `json.dumps` puts a tuple down as an array
     faithfully. Reading is where the asymmetry appears, since that array comes

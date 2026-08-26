@@ -21,7 +21,7 @@ __all__ = (
     "SupportsRevert",
     "SupportsUnsourced",
     "UnsourcedPolicy",
-    "as_read_back",
+    "as_json_value",
     "close_together",
     "ensure_json_name",
     "ensure_policy",
@@ -47,7 +47,7 @@ from iivs_cardio.common.pipeline.branch import (
     Named,
     PresentPolicy,
     UnsourcedPolicy,
-    as_read_back,
+    as_json_value,
     ensure_json_name,
     ensure_policy,
 )

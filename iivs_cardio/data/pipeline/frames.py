@@ -21,7 +21,7 @@ from iivs_cardio.common.pipeline.branch import (
     Named,
     PresentPolicy,
     UnsourcedPolicy,
-    as_read_back,
+    as_json_value,
     ensure_json_name,
     ensure_policy,
 )
@@ -124,7 +124,7 @@ class FrameBranch[S: Named, T](ABC):
             raise ValueError(msg)
 
         object.__setattr__(self, "_taken", frozenset(names))
-        object.__setattr__(self, "_recorded", as_read_back(self.settings))
+        object.__setattr__(self, "_recorded", as_json_value(self.settings))
 
     @property
     def _replacing(self) -> bool:

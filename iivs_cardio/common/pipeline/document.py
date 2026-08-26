@@ -34,7 +34,7 @@ from iivs_cardio.common.pipeline.branch import (
     Named,
     PresentPolicy,
     UnsourcedPolicy,
-    as_read_back,
+    as_json_value,
 )
 
 if TYPE_CHECKING:
@@ -417,7 +417,7 @@ class DocumentBranch[S: Named, P: Part, D: Folded, M](ABC):
             msg = f"selected {unknown[0]!r}, which the source does not hold"
             raise ValueError(msg)
 
-        self._recorded = as_read_back(settings)
+        self._recorded = as_json_value(settings)
         self._entered = False
         self._reused: frozenset[str] = frozenset()
         self._saved: D | None = None
