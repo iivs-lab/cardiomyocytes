@@ -28,9 +28,7 @@ if TYPE_CHECKING:
     from torch import Tensor
 
     from iivs_cardio.common.pipeline import Step
-    from iivs_cardio.common.pipeline.branch import (
-        Named,
-    )
+    from iivs_cardio.common.pipeline.base import Named
 
 
 def _entry[T](

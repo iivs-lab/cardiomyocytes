@@ -4,7 +4,7 @@ __all__ = ("Evaluated", "EvaluationDocument")
 
 from typing import TYPE_CHECKING, Any, Protocol, override
 
-from iivs_cardio.common.pipeline.branch import Named
+from iivs_cardio.common.pipeline.base import Named
 from iivs_cardio.common.pipeline.document import DocumentBranch
 from iivs_cardio.optical_flow.pipeline.evaluation import (
     DatasetEvaluation,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 __all__ = (
     "Hook",
+    "Named",
     "SequenceStage",
     "SideBranch",
     "Stage",
@@ -87,6 +88,13 @@ type Hook[T, E = None] = Callable[[Step[T, E]], None]
 # ========================== #
 #        Capabilities        #
 # ========================== #
+
+
+class Named(Protocol):
+    """Something with a name, which is what an output or a log line is filed under."""
+
+    @property
+    def name(self) -> str: ...
 
 
 class SideBranch[S, T, E = None](Protocol):

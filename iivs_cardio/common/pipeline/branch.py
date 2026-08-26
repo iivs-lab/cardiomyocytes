@@ -5,7 +5,6 @@ __all__ = (
     "PRESENT_POLICIES",
     "STAGING",
     "UNSOURCED_POLICIES",
-    "Named",
     "PresentPolicy",
     "UnsourcedPolicy",
     "as_json_value",
@@ -15,7 +14,7 @@ __all__ = (
 
 import json
 from pathlib import PurePath
-from typing import TYPE_CHECKING, Final, Literal, Protocol
+from typing import TYPE_CHECKING, Final, Literal
 
 from kaparoo.filesystem import ensure_file_extension
 from kaparoo.filters import And, EndsWith, StartsWith
@@ -31,13 +30,6 @@ PRESENT_POLICIES: Final[tuple[PresentPolicy, ...]] = literal_values(PresentPolic
 UNSOURCED_POLICIES: Final[tuple[UnsourcedPolicy, ...]] = literal_values(UnsourcedPolicy)
 
 STAGING: Final = And((StartsWith("."), EndsWith(".tmp")))
-
-
-class Named(Protocol):
-    """Something with a name, which is what an output or a log line is filed under."""
-
-    @property
-    def name(self) -> str: ...
 
 
 JSON_EXT: Final = ".json"

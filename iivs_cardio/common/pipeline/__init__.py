@@ -30,6 +30,7 @@ __all__ = (
 
 from iivs_cardio.common.pipeline.base import (
     Hook,
+    Named,
     SequenceStage,
     SideBranch,
     Stage,
@@ -44,7 +45,6 @@ from iivs_cardio.common.pipeline.branch import (
     PRESENT_POLICIES,
     STAGING,
     UNSOURCED_POLICIES,
-    Named,
     PresentPolicy,
     UnsourcedPolicy,
     as_json_value,

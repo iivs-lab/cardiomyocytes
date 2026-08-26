@@ -28,10 +28,10 @@ from kaparoo.filters import EndsWith
 from kaparoo.utils import quantify
 from kaparoo.utils.optional import unwrap_or_default
 
+from iivs_cardio.common.pipeline.base import Named
 from iivs_cardio.common.pipeline.branch import (
     JSON_EXT,
     STAGING,
-    Named,
     PresentPolicy,
     UnsourcedPolicy,
     as_json_value,

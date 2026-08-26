@@ -12,11 +12,11 @@ from kaparoo.utils.timer import Timer
 
 from iivs_cardio.common.logging import log_indented
 from iivs_cardio.common.pipeline.base import (
+    Named,
     SupportsReport,
     SupportsUnsourced,
     close_together,
 )
-from iivs_cardio.common.pipeline.branch import Named
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
