@@ -171,57 +171,59 @@ class SupportsRevert(Protocol):
         ...
 
 
-class StageFactory(Protocol):
-    """The whole of what a driver needs to run a job's items.
+# ========================== #
+#          Closing           #
+# ========================== #
 
-    A driver asks how many items there are, runs each on a device it chose, and
-    names its log lines after the factory. Anything that has to be opened once
-    for the whole run rather than per item is opened by `running`.
+
+def close_together(
+    opened: Sequence[AbstractContextManager[object]], error: BaseException | None
+) -> None:
+    """Close everything in `opened`, in reverse, in place of a nested `with`.
+
+    Every close is told about `error` alone, never about what another close
+    raised, so a failure does not reach work that did not fail. Once all are
+    closed, a failure sends `revert` to those that closed cleanly and can take
+    their output back: the set commits whole or not at all, except for one
+    that cannot revert and keeps what it committed. A revert that fails is
+    logged rather than raised.
+
+    Args:
+        opened: The context managers to close, in the order they were opened.
+            Read rather than emptied, so a caller keeps whatever it built.
+        error: The exception the block they bracket ended with, or `None`
+            if it finished.
+
+    Raises:
+        BaseException: What closing raised, once everything has been closed
+            rather than at the one that raised it. Only the first is carried,
+            since a second means the destination itself has gone.
     """
+    failure: BaseException | None = None
+    closed: list[AbstractContextManager[object]] = []
 
-    @property
-    def name(self) -> str:
-        """The run's name, which every line of it is filed under."""
-        ...
+    for hook in reversed(opened):
+        try:
+            if error is None:
+                hook.__exit__(None, None, None)
+            else:
+                hook.__exit__(type(error), error, error.__traceback__)
+        except BaseException as closing:  # noqa: BLE001
+            failure = failure or closing
+        else:
+            closed.append(hook)
 
-    def __len__(self) -> int:
-        """The number of items this run was given."""
-        ...
+    if failure is None:
+        return
 
-    def get_name(self, index: int, /) -> str:
-        """Return what the item at `index` is called.
+    for hook in closed:
+        if isinstance(hook, SupportsRevert):
+            try:
+                hook.revert()
+            except Exception:
+                _logger.exception("could not take back %r", hook)
 
-        Args:
-            index: The item to name.
-
-        Returns:
-            The name, which is what a log line and a retry list carry rather
-            than the index.
-        """
-        ...
-
-    def run_stage(self, index: int, device: Device, /) -> bool:
-        """Carry out the item at `index` on `device`.
-
-        Args:
-            index: The item to carry out.
-            device: The device to carry it out on.
-
-        Returns:
-            Whether the item was computed. One that every branch already holds
-            what it needs for is not read at all, and the frames that would
-            have cost are the whole point of asking first.
-        """
-        ...
-
-    def running(self) -> AbstractContextManager[object]:
-        """Return the bracket around the whole run.
-
-        Returns:
-            A context manager holding open whatever outlives one item, such as
-            a branch that gathers across the dataset.
-        """
-        ...
+    raise failure
 
 
 # ========================== #
@@ -441,55 +443,58 @@ class SequenceStage[T, M](Stage[T, M]):
 
 
 # ========================== #
-#          Closing           #
+#            Jobs            #
 # ========================== #
 
 
-def close_together(
-    opened: Sequence[AbstractContextManager[object]], error: BaseException | None
-) -> None:
-    """Close everything in `opened`, in reverse, in place of a nested `with`.
+class StageFactory(Protocol):
+    """The whole of what a driver needs to run a job's items.
 
-    Every close is told about `error` alone, never about what another close
-    raised, so a failure does not reach work that did not fail. Once all are
-    closed, a failure sends `revert` to those that closed cleanly and can take
-    their output back: the set commits whole or not at all, except for one
-    that cannot revert and keeps what it committed. A revert that fails is
-    logged rather than raised.
-
-    Args:
-        opened: The context managers to close, in the order they were opened.
-            Read rather than emptied, so a caller keeps whatever it built.
-        error: The exception the block they bracket ended with, or `None`
-            if it finished.
-
-    Raises:
-        BaseException: What closing raised, once everything has been closed
-            rather than at the one that raised it. Only the first is carried,
-            since a second means the destination itself has gone.
+    A driver asks how many items there are, runs each on a device it chose, and
+    names its log lines after the factory. Anything that has to be opened once
+    for the whole run rather than per item is opened by `running`.
     """
-    failure: BaseException | None = None
-    closed: list[AbstractContextManager[object]] = []
 
-    for hook in reversed(opened):
-        try:
-            if error is None:
-                hook.__exit__(None, None, None)
-            else:
-                hook.__exit__(type(error), error, error.__traceback__)
-        except BaseException as closing:  # noqa: BLE001
-            failure = failure or closing
-        else:
-            closed.append(hook)
+    @property
+    def name(self) -> str:
+        """The run's name, which every line of it is filed under."""
+        ...
 
-    if failure is None:
-        return
+    def __len__(self) -> int:
+        """The number of items this run was given."""
+        ...
 
-    for hook in closed:
-        if isinstance(hook, SupportsRevert):
-            try:
-                hook.revert()
-            except Exception:
-                _logger.exception("could not take back %r", hook)
+    def get_name(self, index: int, /) -> str:
+        """Return what the item at `index` is called.
 
-    raise failure
+        Args:
+            index: The item to name.
+
+        Returns:
+            The name, which is what a log line and a retry list carry rather
+            than the index.
+        """
+        ...
+
+    def run_stage(self, index: int, device: Device, /) -> bool:
+        """Carry out the item at `index` on `device`.
+
+        Args:
+            index: The item to carry out.
+            device: The device to carry it out on.
+
+        Returns:
+            Whether the item was computed. One that every branch already holds
+            what it needs for is not read at all, and the frames that would
+            have cost are the whole point of asking first.
+        """
+        ...
+
+    def running(self) -> AbstractContextManager[object]:
+        """Return the bracket around the whole run.
+
+        Returns:
+            A context manager holding open whatever outlives one item, such as
+            a branch that gathers across the dataset.
+        """
+        ...
