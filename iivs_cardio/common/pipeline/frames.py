@@ -105,9 +105,19 @@ class FrameWriter[T, E = Path]:
         self._committed = False
 
     def __call__(self, step: Step[T, E]) -> None:
+        """Write `step`, so the writer can be registered as a hook directly."""
         self.write(step)
 
     def write(self, step: Step[T, E]) -> None:
+        """Write the frame in `step`, numbered after the last one written.
+
+        A step carrying no frame is passed over, which is what lets a sequence
+        start late or end early.
+
+        Raises:
+            ValueError: If a frame does not follow the one before it at the
+                source, since the numbering here would close the gap.
+        """
         if step.value is None:
             return
 
@@ -125,12 +135,22 @@ class FrameWriter[T, E = Path]:
         self._last_index = step.index
 
     def report(self) -> str | None:
+        """Return one line naming how many frames landed, or `None` before any did.
+
+        Nothing is reported until the folder reaches its destination, since a
+        sequence that gave up has none to point at however many it staged.
+        """
         if not self._committed:
             return None
 
         return f"wrote {quantify(self._written, 'frame')}"
 
     def _save_record(self) -> None:
+        """Write what the folder says about itself, into the staged folder.
+
+        Into the staged one, so the move that makes the frames visible makes
+        this visible with them.
+        """
         if self._record is None:
             return
 
@@ -139,11 +159,23 @@ class FrameWriter[T, E = Path]:
         (self._staged.workdir / self._record_file).write_text(written, encoding="utf-8")
 
     def _abort(self) -> None:
+        """Drop the staged folder, and the empty ones opening it made.
+
+        Left behind, they put an empty sequence in the output tree. The climb
+        stops below what was already standing, and at the first folder
+        something else landed in meanwhile.
+        """
         self._staged.abort()
 
         prune_upward(self._staged.path.parent, self._untouched)
 
     def __enter__(self) -> Self:
+        """Take the writer, refusing one that has been through a walk already.
+
+        Raises:
+            RuntimeError: If it has been opened before. Closing takes the
+                staged folder away, so a second walk writes where nothing is.
+        """
         if self._entered:
             msg = f"{self._staged.path} was opened already: one writer per walk"
             raise RuntimeError(msg)
@@ -158,6 +190,15 @@ class FrameWriter[T, E = Path]:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
+        """Move the folder into place, unless nothing was written or it failed.
+
+        A move that fails takes the staged folder with it, the only other
+        reference to it dying with the process.
+
+        Raises:
+            ValueError: If the sequence ended without a single frame, an empty
+                folder reading as a finished one.
+        """
         if exc_type is not None:
             self._abort()
             return
