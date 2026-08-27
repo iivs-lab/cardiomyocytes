@@ -97,8 +97,8 @@ class KoalaFrameWriter[T]:
         self._record_file = record_file
 
         self._taken: list[str] = []
-        self._written = -1
-        self._source = -1
+        self._written = 0
+        self._source: int | None = None
         self._entered = False
         self._committed = False
 
@@ -118,14 +118,14 @@ class KoalaFrameWriter[T]:
             return
 
         last = self._source
-        if self._written >= 0 and step.index != last + 1:
+        if last is not None and step.index != last + 1:
             msg = f"frame {step.index} does not follow {last}: expected {last + 1}"
             raise ValueError(msg)
 
         if self._record is not None:
             self._taken.append(Path(str(step.require_extra())).name)
 
-        name = self._frame_name(self._written + 1)
+        name = self._frame_name(self._written)
         self._save_frame(self._staged.workdir / name, step.value)
 
         self._written += 1
@@ -147,7 +147,7 @@ class KoalaFrameWriter[T]:
         if not self._committed:
             return None
 
-        return f"wrote {quantify(self._written + 1, 'frame')}"
+        return f"wrote {quantify(self._written, 'frame')}"
 
     def _file_record(self) -> None:
         """Write what the folder says about itself, into the staged folder.
@@ -213,7 +213,7 @@ class KoalaFrameWriter[T]:
             self._abort()
             return
 
-        if self._written < 0:
+        if not self._written:
             self._abort()
             msg = f"no frame was written: nothing to commit at {self._staged.path}"
             raise ValueError(msg)
