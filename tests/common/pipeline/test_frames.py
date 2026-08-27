@@ -27,6 +27,19 @@ def _refuse(path: Path, frame: str) -> None:
     raise RuntimeError(msg)
 
 
+def test_a_writer_is_opened_once(tmp_path: Path) -> None:
+    # Committing takes the staged folder away, so a second walk would write
+    # where nothing is and file a record naming the frames of both.
+    writer = KoalaFrameWriter(tmp_path / "out", _save_text, stem="frame", ext="txt")
+    _drive(writer, [Step(0, "a")])
+
+    with (
+        pytest.raises(RuntimeError, match=r"opened already: one writer per walk"),
+        writer,
+    ):
+        pass
+
+
 def _write_all(
     dest: Path,
     steps: Iterable[Step[str]],

@@ -99,6 +99,7 @@ class KoalaFrameWriter[T]:
         self._taken: list[str] = []
         self._written = -1
         self._source = -1
+        self._entered = False
         self._committed = False
 
     def write(self, step: Step[T, Any]) -> None:
@@ -178,6 +179,19 @@ class KoalaFrameWriter[T]:
         prune_upward(self._staged.path.parent, self._untouched)
 
     def __enter__(self) -> Self:
+        """Take the writer, refusing one that has been through a walk already.
+
+        Raises:
+            RuntimeError: If this writer has been opened before. Closing takes
+                the staged folder away, so a second walk writes where nothing
+                is, and the record it files would name the frames of both.
+        """
+        if self._entered:
+            msg = f"{self._staged.path} was opened already: one writer per walk"
+            raise RuntimeError(msg)
+
+        self._entered = True
+
         return self
 
     def __exit__(
