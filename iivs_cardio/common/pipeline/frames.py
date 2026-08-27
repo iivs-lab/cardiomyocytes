@@ -99,6 +99,7 @@ class KoalaFrameWriter[T]:
         self._sources: list[str] = []
         self._written = 0
         self._last_index: int | None = None
+
         self._entered = False
         self._committed = False
 
@@ -281,7 +282,7 @@ class FrameBranch[N: Named, T](ABC):
     record_file: str = field(default=RECORD_FILE, kw_only=True)
     if_present: PresentPolicy = field(default="error", kw_only=True)
     if_unsourced: UnsourcedPolicy = field(default="keep", kw_only=True)
-    _taken: frozenset[str] = field(init=False, repr=False)
+    _wanted: frozenset[str] = field(init=False, repr=False)
     _recorded: object = field(init=False, repr=False)
     _reused: set[str] = field(default_factory=set, init=False, repr=False)
     _dropped: list[str] = field(default_factory=list, init=False, repr=False)
@@ -300,7 +301,7 @@ class FrameBranch[N: Named, T](ABC):
             msg = f"selected {unknown[0]!r}, which the source does not hold"
             raise ValueError(msg)
 
-        object.__setattr__(self, "_taken", frozenset(names))
+        object.__setattr__(self, "_wanted", frozenset(names))
         object.__setattr__(self, "_recorded", as_json_value(self.settings))
 
     @property
@@ -519,9 +520,9 @@ class FrameBranch[N: Named, T](ABC):
         self.clear_staging()
 
         if self.if_present == "reuse":
-            here = self._written()
+            here = self._already_written()
             self._reused.update(name for name in here if self._still_describes(name))
-        elif self.if_present == "error" and (written := self._written()):
+        elif self.if_present == "error" and (written := self._already_written()):
             sequences = quantify(len(written), "sequence")
             fix = "set `if_present` to 'overwrite' or 'reuse'"
             msg = f"{sequences} already written, from {written[0]!r}: {fix}"
@@ -529,9 +530,9 @@ class FrameBranch[N: Named, T](ABC):
 
         return self
 
-    def _written(self) -> list[str]:
+    def _already_written(self) -> list[str]:
         """Return the sequences this run would write that already have a folder."""
-        return [name for name in self.list_sequences() if name in self._taken]
+        return [name for name in self.list_sequences() if name in self._wanted]
 
     def __exit__(
         self,
