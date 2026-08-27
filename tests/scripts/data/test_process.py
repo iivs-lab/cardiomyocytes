@@ -732,8 +732,8 @@ def test_a_written_sequence_says_which_frames_it_was_made_from(phase_tree, tmp_p
         "frames": {"start": 0, "step": 2, "count": None},
     }
     kept = range(0, FRAMES, 2)
-    assert record["frames"] == [f"{index:05d}_phase.bin" for index in kept]
-    assert len(PhaseBinFolder(folder)) == len(record["frames"])
+    assert record["sources"] == [f"{index:05d}_phase.bin" for index in kept]
+    assert len(PhaseBinFolder(folder)) == len(record["sources"])
 
 
 def _cache(phase_tree: Path, dest: Path, **target: object) -> None:

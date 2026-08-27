@@ -106,7 +106,7 @@ def test_the_record_names_the_frame_each_flow_starts_from(tmp_path):
     _write(tree, source, _phase_names(4)[:-1])
 
     read = (tmp_path / source.name / SUBPATH / RECORD_FILE).read_text("utf-8")
-    assert json.loads(read)["frames"] == list(_phase_names(4)[:-1])
+    assert json.loads(read)["sources"] == list(_phase_names(4)[:-1])
 
 
 def test_a_folder_written_from_another_source_is_not_reused(tmp_path):

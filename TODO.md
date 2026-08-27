@@ -767,7 +767,7 @@ median 필터는 이 오염에 대한 정확한 대응이고, 창 안 절반 미
 `get_hook`을 세 줄로 줄이고 그 아래 하나만 추상으로 남긴다.
 
 ```python
-def get_hook(self, source: S) -> KoalaFrameWriter[T] | None:
+def get_hook(self, source: S) -> FrameWriter[T] | None:
     if source.name in self._reused:
         return None
 
@@ -783,11 +783,11 @@ def get_hook(self, source: S) -> KoalaFrameWriter[T] | None:
 흐름 쪽 `_make_writer`는 위상 쪽보다 **짧다** — 헤더가 없다.
 
 ```python
-KoalaFrameWriter(dest, save_flow_npy, stem="flow", ext="npy", overwrite=..., record=...)
+FrameWriter(dest, save_fn, overwrite=..., record=...)
 ```
 
-`KoalaFrameWriter`는 이미 `T`와 저장 함수에 대해 일반적이고, `koala_frame_name`이
-`00000_flow.npy`를 내므로 이름 규약도 그대로 이어진다.
+`FrameWriter`는 `T`와 저장 함수에 대해 일반적이고, 이름 규약은 `save_fn` 이 쥔다 —
+`koala_frame_name` 이 `00000_flow.npy` 를 내는 것은 흐름 쪽 팩토리의 일이다.
 
 #### 문서 곁가지 — 18개 중 13개가 이미 값에 무관하다
 
@@ -830,13 +830,13 @@ PSNR은 이미 결정돼 있다. `_metrics`의 주석이 「per sample로 재고
 
 
 ```python
-frames = record.get("frames")
-if tuple(frames) != tuple(self.contents[name]):
+sources = record.get("sources")
+if tuple(sources) != tuple(self.contents[name]):
     return False
-return self._count_frames(folder) == len(frames)
+return self._count_frames(folder) == len(sources)
 ```
 
-`record["frames"]`는 **쓴 프레임마다 하나씩** 쌓인다(`KoalaFrameWriter.write`가
+`record["sources"]`는 **쓴 프레임마다 하나씩** 쌓인다(`FrameWriter.write`가
 `step.value is None`을 먼저 걸러낸 뒤에 append한다). (1)은 필터링이 1:1이라 이것과
 `contents[name]`이 둘 다 N개다.
 
@@ -859,7 +859,7 @@ return self._count_frames(folder) == len(frames)
 **(2)에서는 한쪽만 맞는다.** 저장은 `flow[i]` 하나면 되지만 워프 일관성은 `frame1`·`frame2`·
 `flow` 셋을 요구한다. `Step`은 flow를 나르고 프레임은 안 나른다.
 
-`extra`에 싣는 안은 **기각한다.** 임자가 이미 있다 — `KoalaFrameWriter.write`가
+`extra`에 싣는 안은 **기각한다.** 임자가 이미 있다 — `FrameWriter.write`가
 `Path(str(step.require_extra())).name`으로 기록을 남기므로 경로처럼 생겨야 한다. 프레임 두
 장을 겸하는 타입을 만들면 한 타입이 무관한 두 소비자를 섬기고, 평가하지 않는 실행에서도 모든
 스텝이 프레임을 달고 다닌다. 값 자체를 `(flow, prev, curr)`로 뭉치는 안도 마찬가지다 — 곁가지
@@ -1212,7 +1212,7 @@ source.root=$OUT/filtered       filter=identity                (1)이 남긴 캐
 
 - **주입된 범위.** `level: dataset`이면 값이 하나이므로 `settings`에 그대로 넣는다.
   `level: sequence`면 시퀀스마다 다르므로 공유 `settings`가 아니라 **각 시퀀스의 record**에
-  들어간다 — `KoalaFrameWriter`의 `_record`가 `get_hook`에서 시퀀스별로 만들어지므로 자리는
+  들어간다 — `FrameWriter`의 `_record`가 `get_hook`에서 시퀀스별로 만들어지므로 자리는
   있다. `range_file`의 **경로**만 넣는 것으로는 부족하다. 같은 경로의 문서가 다시 쓰였을 수
   있고, 그것은 `R15`와 같은 함정이다.
 - **흐름이 계산된 것인지 읽힌 것인지.** 두 실행이 같은 이름의 평가 문서를 낸다.
@@ -1292,7 +1292,7 @@ C에서는 `normalize`가 `flow.sources`에 없으므로 **그래프 밖**이다
 
 한때 「C는 둘에 막혀 있다」고 적었으나 **둘 다 이미 캐시의 `source.json`에 있다.**
 
-- **어디서부터 시작하는지.** record의 `frames`가 **인덱스별 원본 프레임 이름**을 든다.
+- **어디서부터 시작하는지.** record의 `sources`가 **인덱스별 원본 프레임 이름**을 든다.
   §「캐시 폴더는 자기가 어디서부터 시작하는지 말하지 않는다」가 요구한 사이드카가 그것이고,
   `FrameBranch`의 재사용 판정용으로 이미 쓰이고 있었을 뿐이다. `start=1 step=2`로 돌린
   실측: 파일은 `00000_flow.npy` 하나인데 record는 `["00001_phase.bin"]`이라고 말한다.
@@ -1307,14 +1307,14 @@ C에서는 `normalize`가 `flow.sources`에 없으므로 **그래프 밖**이다
   `get_meta`·`__len__`). 모자란 것 둘: ndarray를 Tensor로 바꾸는 것과, **`get_meta`가
   `00000_flow.npy`를 준다**는 것. 두 번째가 중요하다 — `SequenceEvaluator`가 `path.name`을
   파트에 적으므로 그대로 두면 C의 문서는 프레임을 `00000_flow.npy`로 부르고 A/B는
-  `00000_phase.bin`으로 불러 **두 문서를 나란히 놓을 수 없다.** record의 `frames`를 들고
+  `00000_phase.bin`으로 불러 **두 문서를 나란히 놓을 수 없다.** record의 `sources`를 들고
   그것을 돌려줘야 하며, 이것이 사이드카를 실제로 쓰는 자리다.
 - **`flow` config 블록.** `FlowCacheConfig(SourceConfig)`, `DEFAULT_SUBPATH =
   FLOW_FLOAT_NPY`. `flow.root`가 null이면 A/B, 아니면 C.
 - **`CachedFlowStageRun`.** `StageRun`의 자식 하나. `FlowStage` 대신
   `SequenceStage(CachedFlowSequence)`를 만들고, `NormalizedFrameStage`는 소스가 아니라 옆에
   서서 `FlowSource.frames`로만 곁가지에 간다. `estimator=None`이라 FB error 축은 빠진다.
-- **전제 조건 검사**, 프레임 한 장 읽기 전에 시퀀스마다: record의 `frames`가 이번 실행이
+- **전제 조건 검사**, 프레임 한 장 읽기 전에 시퀀스마다: record의 `sources`가 이번 실행이
   owe하는 `names[:-1]`과 같은가(어긋난 짝), `.npy` 개수가 `len(frames)`와 같은가(반쯤 지워진
   폴더), record의 `filter`가 이번 실행의 필터와 같은가. 그리고 C에서 `target.flows.save`는
   거절한다.
@@ -1362,7 +1362,7 @@ C에서는 `normalize`가 `flow.sources`에 없으므로 **그래프 밖**이다
 `Stage._compute`를 뒷받침할 수 없다.
 
 **선행 결측은 (2)가 아니라 (3)의 것이다.** 순간량은 중심 라벨링이라 `acceleration[k]`가
-`phase[k-1..k+1]`을 쓰고 `k=0`과 `k=T-1`이 둘 다 빈다. `KoalaFrameWriter`가 앞의 결측을
+`phase[k-1..k+1]`을 쓰고 `k=0`과 `k=T-1`이 둘 다 빈다. `FrameWriter`가 앞의 결측을
 통과시키게 고친 근거가 이쪽이다.
 
 ### torch(`nn.Module`) 추정기가 오면 무엇이 바뀌는가
@@ -1415,7 +1415,7 @@ float 3채널이다. 그러면 평가의 `data_range`가 dtype에서 안 나오�
   아니라 `run_estimator.py`가 config를 instantiate하는 자리에 붙일 것. 파라미터 탐색을
   시작하기 전에 닫을 것.
 
-- **캐시 폴더는 자기가 어디서부터 시작하는지 말하지 않는다.** `KoalaFrameWriter`는 도착한
+- **캐시 폴더는 자기가 어디서부터 시작하는지 말하지 않는다.** `FrameWriter`는 도착한
   첫 프레임부터 0으로 번호를 매기므로, 시간 방향으로 줄어드는 단마다 원본과의 어긋남이 하나씩
   쌓인다. 6프레임 시퀀스를 실제로 세 단에 통과시킨 결과:
 
@@ -1739,7 +1739,7 @@ GPU 업로드 전이라 호스트에서 검사할 수 있는 마지막 자리 �
 수 없다. iivs-lib은 비유한 값을 읽고 쓰는 것을 허용하므로 이 거절은 이 프로젝트의 몫이다.
 
 - **`overwrite=false` 재실행은 재개가 아니라 깨진 상태다.** 이미 있는 시퀀스는 `get_stage`가
-  `KoalaFrameWriter`를 만들 때 `FileExistsError`로 실패한다 — 필터링 전이라 계산이 낭비되지는
+  `FrameWriter`를 만들 때 `FileExistsError`로 실패한다 — 필터링 전이라 계산이 낭비되지는
   않는다. 그런데 `RangeDocument.__enter__`가 파트를 이미 전부 지운 뒤이고, `save()`는
   `value_range.json`이 있어 또 실패하므로 **낡은 문서가 그대로 남아 디스크와 모순된다.**
   실측: 4개 중 3개가 이미 있는 상태에서 재실행하면, 문서는 방금 완성된 하나를 "빠진 것"으로

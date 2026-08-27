@@ -84,13 +84,13 @@ def test_a_sequence_already_written_is_refused_before_a_frame_is_read(tmp_path):
     (
         ("{ not json", "unreadable"),
         ('["a", "b"]', "not a mapping"),
-        ('{"settings": null}', "no frames listed"),
-        ('{"settings": null, "frames": "00000_phase.bin"}', "frames not a list"),
+        ('{"settings": null}', "no sources listed"),
+        ('{"settings": null, "sources": "00000_phase.bin"}', "sources not a list"),
         (
-            '{"settings": {"filter": 1}, "frames": ["00000_phase.bin"]}',
+            '{"settings": {"filter": 1}, "sources": ["00000_phase.bin"]}',
             "other settings",
         ),
-        ('{"settings": null, "frames": ["00099_phase.bin"]}', "other frames"),
+        ('{"settings": null, "sources": ["00099_phase.bin"]}', "other sources"),
     ),
 )
 def test_a_record_that_cannot_be_believed_is_written_again(tmp_path, written, why):
@@ -119,7 +119,7 @@ def test_a_folder_holding_fewer_frames_than_its_record_is_written_again(tmp_path
     folder = _sequence(tmp_path, "TL_00")
     (folder / "00001_phase.bin").write_bytes(b"")
     contents = {"TL_00": ("00000_phase.bin", "00001_phase.bin")}
-    record = {"settings": None, "frames": list(contents["TL_00"])}
+    record = {"settings": None, "sources": list(contents["TL_00"])}
     (folder / RECORD_FILE).write_text(json.dumps(record), encoding="utf-8")
 
     with FrameTree(tmp_path, PHASE_FLOAT_BIN, contents, if_present="reuse") as kept:
@@ -140,7 +140,7 @@ def test_something_that_is_not_a_frame_cannot_stand_in_for_one(tmp_path):
     folder = _sequence(tmp_path, "TL_00")
     (folder / "00001_phase.bin").write_bytes(b"")
     contents = {"TL_00": ("00000_phase.bin", "00001_phase.bin")}
-    record = {"settings": None, "frames": list(contents["TL_00"])}
+    record = {"settings": None, "sources": list(contents["TL_00"])}
     (folder / RECORD_FILE).write_text(json.dumps(record), encoding="utf-8")
 
     (folder / "00001_phase.bin").unlink()
@@ -158,7 +158,7 @@ def test_a_tree_reads_its_record_back_under_the_name_it_was_given(tmp_path):
     # told one thing must not go looking under the default.
     folder = _sequence(tmp_path, "TL_00")
     contents = {"TL_00": ("00000_phase.bin",)}
-    record = {"settings": None, "frames": list(contents["TL_00"])}
+    record = {"settings": None, "sources": list(contents["TL_00"])}
     (folder / "origin.json").write_text(json.dumps(record), encoding="utf-8")
 
     tree = FrameTree(
@@ -176,7 +176,7 @@ def test_a_record_left_under_another_name_counts_as_a_frame(tmp_path):
     # this tree cannot vouch for, so it must not read as a whole one.
     folder = _sequence(tmp_path, "TL_00")
     contents = {"TL_00": ("00000_phase.bin",)}
-    record = {"settings": None, "frames": list(contents["TL_00"])}
+    record = {"settings": None, "sources": list(contents["TL_00"])}
     (folder / "origin.json").write_text(json.dumps(record), encoding="utf-8")
     (folder / RECORD_FILE).write_text(json.dumps(record), encoding="utf-8")
 

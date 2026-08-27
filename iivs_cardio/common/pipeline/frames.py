@@ -7,7 +7,7 @@ import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, Any, Final, Self
 
 from kaparoo.filesystem import (
@@ -98,18 +98,10 @@ class FrameWriter[T]:
         self._entered = False
         self._committed = False
 
+    def __call__(self, step: Step[T, Any]) -> None:
+        self.write(step)
+
     def write(self, step: Step[T, Any]) -> None:
-        """Write the frame in `step`, numbered after the last one written.
-
-        Args:
-            step: The step to write. One carrying no frame is passed over.
-
-        Raises:
-            ValueError: If a frame does not follow the one before it at the
-                source, since the numbering here would close the gap, or if a
-                `record` was asked for and the step says nothing about where
-                its frame came from.
-        """
         if step.value is None:
             return
 
@@ -119,68 +111,36 @@ class FrameWriter[T]:
             raise ValueError(msg)
 
         if self._record is not None:
-            self._sources.append(Path(str(step.require_extra())).name)
+            self._sources.append(self._source_of(step))
 
         self._save_fn(self._staged.workdir, self._written, step.value)
 
         self._written += 1
         self._last_index = step.index
 
-    def __call__(self, step: Step[T, Any]) -> None:
-        self.write(step)
+    def _source_of(self, step: Step[T, Any]) -> str:
+        return PurePath(step.require_extra()).name
 
     def report(self) -> str | None:
-        """Return one line naming how many frames landed.
-
-        Frames are staged and moved into place together, so there is nothing to
-        report until that move: a sequence that was interrupted or gave up has
-        no folder to point at, however many frames it had staged by then.
-
-        Returns:
-            The line, or `None` before the folder reached its destination.
-        """
         if not self._committed:
             return None
 
         return f"wrote {quantify(self._written, 'frame')}"
 
-    def _file_record(self) -> None:
-        """Write what the folder says about itself, into the staged folder.
-
-        Into the staged folder rather than the committed one, so the move that
-        makes the frames visible makes this visible with them: a record written
-        afterwards could be missing from a folder that is otherwise finished,
-        and a reader has no way to tell that from one written without a record.
-        """
+    def _save_record(self) -> None:
         if self._record is None:
             return
 
-        document = {**self._record, "frames": self._sources}
+        document = {**self._record, "sources": self._sources}
         written = json.dumps(document, allow_nan=False)
         (self._staged.workdir / self._record_file).write_text(written, encoding="utf-8")
 
     def _abort(self) -> None:
-        """Drop the staged folder, and the ones opening it brought into being.
-
-        Staging needs somewhere to sit, so the destination's parents are made
-        before a single frame is written. Leaving them behind would put an
-        empty `<sequence>/...` in the output tree for every sequence that gave
-        up, which reads as a sequence that is there. The climb stops below
-        what was already standing, and at the first folder something else
-        landed in meanwhile.
-        """
         self._staged.abort()
 
         prune_upward(self._staged.path.parent, self._untouched)
 
     def __enter__(self) -> Self:
-        """Take the writer, refusing one that has been through a walk already.
-
-        Raises:
-            RuntimeError: If this writer has been opened before. Closing takes
-                the staged folder away, so a second walk writes where nothing
-                is, and the record it files would name the frames of both.
-        """
         if self._entered:
             msg = f"{self._staged.path} was opened already: one writer per walk"
             raise RuntimeError(msg)
@@ -195,15 +155,6 @@ class FrameWriter[T]:
         exc: BaseException | None,
         traceback: TracebackType | None,
     ) -> None:
-        """Move the folder into place, unless nothing was written or it failed.
-
-        A move that fails takes the staged folder with it, the only other
-        reference to it dying with the process.
-
-        Raises:
-            ValueError: If the sequence ended without a single frame, an empty
-                folder reading as a finished one.
-        """
         if exc_type is not None:
             self._abort()
             return
@@ -214,7 +165,7 @@ class FrameWriter[T]:
             raise ValueError(msg)
 
         try:
-            self._file_record()
+            self._save_record()
             self._staged.commit()
         except BaseException:
             self._abort()
@@ -411,11 +362,11 @@ class FrameBranch[N: Named, T](ABC):
             return False
 
         owed = tuple(self._expected(self.contents[name]))
-        frames = record.get("frames")
-        if not isinstance(frames, list) or tuple(frames) != owed:
+        sources = record.get("sources")
+        if not isinstance(sources, list) or tuple(sources) != owed:
             return False
 
-        return self._count_frames(folder) == len(frames)
+        return self._count_frames(folder) == len(sources)
 
     def _count_frames(self, folder: Path) -> int:
         """Count the files the folder holds beside the record it carries.

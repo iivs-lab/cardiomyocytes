@@ -354,7 +354,7 @@ def test_a_record_says_which_source_frame_each_written_one_came_from(tmp_path):
     assert written == {
         "settings": {"filter": {"kind": "identity"}},
         "source": "plate/TL_00",
-        "frames": ["00000_phase.bin", "00002_phase.bin", "00004_phase.bin"],
+        "sources": ["00000_phase.bin", "00002_phase.bin", "00004_phase.bin"],
     }
     assert RECORD_FILE in _names(dest)
 
@@ -376,7 +376,7 @@ def test_a_record_is_filed_under_the_name_the_writer_was_given(tmp_path):
     assert RECORD_FILE not in _names(dest)
 
     written = json.loads((dest / "origin.json").read_text(encoding="utf-8"))
-    assert written == {"source": "plate/TL_00", "frames": ["00000_phase.bin"]}
+    assert written == {"source": "plate/TL_00", "sources": ["00000_phase.bin"]}
 
 
 def test_a_record_name_that_could_reach_out_of_the_folder_is_refused(tmp_path):
