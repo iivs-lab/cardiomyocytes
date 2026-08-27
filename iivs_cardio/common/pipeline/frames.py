@@ -271,7 +271,7 @@ class FrameBranch[N: Named, T](ABC):
     record_file: str = field(default=RECORD_FILE, kw_only=True)
     if_present: PresentPolicy = field(default="error", kw_only=True)
     if_unsourced: UnsourcedPolicy = field(default="keep", kw_only=True)
-    _taken: frozenset[str] = field(init=False, repr=False)
+    _wanted: frozenset[str] = field(init=False, repr=False)
     _recorded: object = field(init=False, repr=False)
     _reused: set[str] = field(default_factory=set, init=False, repr=False)
     _dropped: list[str] = field(default_factory=list, init=False, repr=False)
@@ -290,7 +290,7 @@ class FrameBranch[N: Named, T](ABC):
             msg = f"selected {unknown[0]!r}, which the source does not hold"
             raise ValueError(msg)
 
-        object.__setattr__(self, "_taken", frozenset(names))
+        object.__setattr__(self, "_wanted", frozenset(names))
         object.__setattr__(self, "_recorded", as_json_value(self.settings))
 
     @property
@@ -521,7 +521,7 @@ class FrameBranch[N: Named, T](ABC):
 
     def _already_written(self) -> list[str]:
         """Return the sequences this run would write that already have a folder."""
-        return [name for name in self.list_sequences() if name in self._taken]
+        return [name for name in self.list_sequences() if name in self._wanted]
 
     def __exit__(
         self,
