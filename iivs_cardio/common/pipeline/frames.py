@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
-from typing import TYPE_CHECKING, Any, Final, Self
+from typing import TYPE_CHECKING, Final, Self
 
 from kaparoo.filesystem import (
     StagedDirectory,
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 RECORD_FILE: Final = "source.json"
 
 
-class FrameWriter[T]:
+class FrameWriter[T, E: StrPath = Path]:
     """A hook that writes the frames it is given, one file each.
 
     Frames are numbered from the first that arrives rather than from the
@@ -52,6 +52,8 @@ class FrameWriter[T]:
 
     Type Parameters:
         T: The type of one frame, as `save_fn` expects it.
+        E: The type of what a step says about where its frame came from.
+            Defaults to `Path`.
 
     Args:
         dest: The folder the finished frames go into.
@@ -98,10 +100,10 @@ class FrameWriter[T]:
         self._entered = False
         self._committed = False
 
-    def __call__(self, step: Step[T, Any]) -> None:
+    def __call__(self, step: Step[T, E]) -> None:
         self.write(step)
 
-    def write(self, step: Step[T, Any]) -> None:
+    def write(self, step: Step[T, E]) -> None:
         if step.value is None:
             return
 
@@ -118,7 +120,7 @@ class FrameWriter[T]:
         self._written += 1
         self._last_index = step.index
 
-    def _source_of(self, step: Step[T, Any]) -> str:
+    def _source_of(self, step: Step[T, E]) -> str:
         return PurePath(step.require_extra()).name
 
     def report(self) -> str | None:
