@@ -25,6 +25,18 @@ def test_a_tree_has_to_be_told_what_the_source_holds(tmp_path):
         FrameTree(tmp_path, PHASE_FLOAT_BIN)  # type: ignore[call-arg]
 
 
+def test_a_tree_makes_its_own_root_rather_than_leaving_it_to_a_writer(tmp_path):
+    # A writer takes away the folders its own opening made, and the first one
+    # through made this too where nothing else had. One sequence giving up then
+    # took the whole output tree with it.
+    root = tmp_path / "out"
+
+    with _tree(root, "TL_00"):
+        assert root.is_dir()
+
+    assert root.is_dir()
+
+
 def _sequence(tmp_path: Path, name: str) -> Path:
     folder = tmp_path / name / PHASE_FLOAT_BIN
     folder.mkdir(parents=True)

@@ -14,6 +14,7 @@ from iivs.dhm.data.koala import koala_frame_name
 from kaparoo.filesystem import (
     StagedDirectory,
     contains,
+    ensure_dir_exists,
     prune_upward,
     search_dirs,
     search_files,
@@ -500,10 +501,16 @@ class FrameBranch[N: Named, T](ABC):
         folder, which meets them one at a time and so refuses only once the
         sequences before it have been paid for.
 
+        The root is made here rather than left to the first writer, which
+        would otherwise count it among the folders it made and take it away
+        again when it gave up.
+
         Raises:
             FileExistsError: If `if_present` is `"error"` and a sequence this
                 run would write already has a folder here.
         """
+        ensure_dir_exists(self.root, make=True)
+
         self.clear_staging()
 
         if self.if_present == "reuse":
