@@ -194,9 +194,13 @@ def flow_frame_writer(
         )
         save_flow_npy(folder / name, flow.cpu().numpy(), on_nonfinite="raise")
 
+    def source_fn(source: Path) -> str:
+        return source.name
+
     return FrameWriter(
         dest,
         save_fn,
+        source_fn=source_fn,
         overwrite=overwrite,
         record=record,
         record_file=record_file,

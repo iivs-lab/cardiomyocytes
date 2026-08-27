@@ -104,8 +104,11 @@ def phase_frame_writer(
 
     def save_fn(folder: Path, index: int, frame: Tensor) -> None:
         name = koala_frame_name(
-            index, stem=PhaseBinFolder.FILE_STEM, ext=PhaseBinFolder.FILE_EXT
+            index,
+            stem=PhaseBinFolder.FILE_STEM,
+            ext=PhaseBinFolder.FILE_EXT,
         )
+
         save_phase_bin(
             folder / name,
             frame.cpu().numpy(),
@@ -115,9 +118,13 @@ def phase_frame_writer(
             on_nonfinite="raise",
         )
 
+    def source_fn(source: Path) -> str:
+        return source.name
+
     return FrameWriter(
         dest,
         save_fn,
+        source_fn=source_fn,
         overwrite=overwrite,
         record=record,
         record_file=record_file,

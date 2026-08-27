@@ -22,6 +22,10 @@ def _name(index: int) -> str:
     return f"{index:05d}_frame.txt"
 
 
+def _source_name(source: Path) -> str:
+    return source.name
+
+
 def _save_text(folder: Path, index: int, frame: str) -> None:
     (folder / _name(index)).write_text(frame, encoding="utf-8")
 
@@ -345,6 +349,7 @@ def test_a_record_says_which_source_frame_each_written_one_came_from(tmp_path):
     writer = FrameWriter(
         dest,
         _save_text,
+        source_fn=_source_name,
         record={"settings": {"filter": {"kind": "identity"}}, "source": "plate/TL_00"},
     )
 
@@ -366,6 +371,7 @@ def test_a_record_is_filed_under_the_name_the_writer_was_given(tmp_path):
     writer = FrameWriter(
         dest,
         _save_text,
+        source_fn=_source_name,
         record={"source": "plate/TL_00"},
         record_file="origin",
     )
@@ -400,7 +406,9 @@ def test_a_record_asked_for_over_steps_that_name_no_source_is_refused(tmp_path):
     # Better here than a record whose `frames` is short by however many steps
     # said nothing, which reads as a shorter acquisition.
     dest = tmp_path / "cache"
-    writer = FrameWriter(dest, _save_text, record={"source": "plate/TL_00"})
+    writer = FrameWriter(
+        dest, _save_text, source_fn=_source_name, record={"source": "plate/TL_00"}
+    )
 
     with pytest.raises(ValueError, match="holds nothing beside its value"), writer:
         writer.write(Step(0, "a"))
@@ -413,6 +421,7 @@ def test_the_record_lands_with_the_frames_or_not_at_all(tmp_path):
     writer = FrameWriter(
         dest,
         _refuse_the_third,
+        source_fn=_source_name,
         record={"source": "plate/TL_00"},
     )
 

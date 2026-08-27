@@ -7,7 +7,7 @@ import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path, PurePath
+from pathlib import Path
 from typing import TYPE_CHECKING, Final, Self
 
 from kaparoo.filesystem import (
@@ -43,7 +43,7 @@ if TYPE_CHECKING:
 RECORD_FILE: Final = "source.json"
 
 
-class FrameWriter[T, E: StrPath = Path]:
+class FrameWriter[T, E = Path]:
     """A hook that writes the frames it is given, one file each.
 
     Frames are numbered from the first that arrives rather than from the
@@ -52,14 +52,17 @@ class FrameWriter[T, E: StrPath = Path]:
 
     Type Parameters:
         T: The type of one frame, as `save_fn` expects it.
-        E: The type of what a step says about where its frame came from.
-            Defaults to `Path`.
+        E: The type of what a step says about where its frame came from,
+            which `source_fn` reads. Defaults to `Path`.
 
     Args:
         dest: The folder the finished frames go into.
         save_fn: A function writing one frame into a folder, under the
             number it is given. Naming it is the caller's, since the name a
             format takes and the format itself are one choice.
+        source_fn: A function naming where one frame came from, from what its
+            step carries. Defaults to `None`, which a run filing a `record`
+            has no way to do without.
         overwrite: Whether an existing folder may be replaced. Defaults to
             False.
         record: The block the folder should carry about itself, beside the
@@ -70,7 +73,8 @@ class FrameWriter[T, E: StrPath = Path]:
 
     Raises:
         FileExistsError: If the destination is there and `overwrite` is not set.
-        ValueError: If `record_file` carries a directory part.
+        ValueError: If `record_file` carries a directory part, or a `record`
+            was asked for with no `source_fn` to fill it.
     """
 
     def __init__(
@@ -78,17 +82,23 @@ class FrameWriter[T, E: StrPath = Path]:
         dest: StrPath,
         save_fn: Callable[[Path, int, T], object],
         *,
+        source_fn: Callable[[E], str] | None = None,
         overwrite: bool = False,
         record: Mapping[str, object] | None = None,
         record_file: str = RECORD_FILE,
     ) -> None:
         record_file = ensure_json_name(record_file)  # before anything is made
 
+        if record is not None and source_fn is None:
+            msg = "a record needs `source_fn` to name where each frame came from"
+            raise ValueError(msg)
+
         # read before the staging makes them
         self._untouched = next(p for p in Path(dest).parents if p.is_dir())
         self._staged = StagedDirectory(dest, overwrite=overwrite, make_parents=True)
 
         self._save_fn = save_fn
+        self._source_fn = source_fn
 
         self._record = record
         self._record_file = record_file
@@ -112,16 +122,13 @@ class FrameWriter[T, E: StrPath = Path]:
             msg = f"frame {step.index} does not follow {last}: expected {last + 1}"
             raise ValueError(msg)
 
-        if self._record is not None:
-            self._sources.append(self._source_of(step))
+        if self._record is not None and self._source_fn is not None:
+            self._sources.append(self._source_fn(step.require_extra()))
 
         self._save_fn(self._staged.workdir, self._written, step.value)
 
         self._written += 1
         self._last_index = step.index
-
-    def _source_of(self, step: Step[T, E]) -> str:
-        return PurePath(step.require_extra()).name
 
     def report(self) -> str | None:
         if not self._committed:
