@@ -96,9 +96,9 @@ class KoalaFrameWriter[T]:
         self._record = record
         self._record_file = record_file
 
-        self._taken: list[str] = []
+        self._sources: list[str] = []
         self._written = 0
-        self._source: int | None = None
+        self._last_index: int | None = None
         self._entered = False
         self._committed = False
 
@@ -117,19 +117,19 @@ class KoalaFrameWriter[T]:
         if step.value is None:
             return
 
-        last = self._source
+        last = self._last_index
         if last is not None and step.index != last + 1:
             msg = f"frame {step.index} does not follow {last}: expected {last + 1}"
             raise ValueError(msg)
 
         if self._record is not None:
-            self._taken.append(Path(str(step.require_extra())).name)
+            self._sources.append(Path(str(step.require_extra())).name)
 
         name = self._frame_name(self._written)
         self._save_frame(self._staged.workdir / name, step.value)
 
         self._written += 1
-        self._source = step.index
+        self._last_index = step.index
 
     def __call__(self, step: Step[T, Any]) -> None:
         self.write(step)
@@ -160,7 +160,7 @@ class KoalaFrameWriter[T]:
         if self._record is None:
             return
 
-        document = {**self._record, "frames": self._taken}
+        document = {**self._record, "frames": self._sources}
         written = json.dumps(document, allow_nan=False)
         (self._staged.workdir / self._record_file).write_text(written, encoding="utf-8")
 
