@@ -8,9 +8,10 @@ __all__ = (
     "SequenceRange",
     "SequenceStageRun",
     "ValueRange",
+    "phase_frame_writer",
 )
 
-from iivs_cardio.data.pipeline.frames import FrameTree
+from iivs_cardio.data.pipeline.frames import FrameTree, phase_frame_writer
 from iivs_cardio.data.pipeline.ranges import (
     CompositeRange,
     DatasetRange,

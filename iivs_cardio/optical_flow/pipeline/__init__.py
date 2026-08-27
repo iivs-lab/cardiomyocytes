@@ -12,6 +12,7 @@ __all__ = (
     "NormalizedFrameStage",
     "SequenceEvaluation",
     "Spread",
+    "flow_frame_writer",
 )
 
 from iivs_cardio.optical_flow.pipeline.document import (
@@ -26,7 +27,7 @@ from iivs_cardio.optical_flow.pipeline.evaluation import (
     Spread,
 )
 from iivs_cardio.optical_flow.pipeline.evaluator import EvaluationWriter
-from iivs_cardio.optical_flow.pipeline.frames import FlowTree
+from iivs_cardio.optical_flow.pipeline.frames import FlowTree, flow_frame_writer
 from iivs_cardio.optical_flow.pipeline.stage import (
     FlowSource,
     FlowStage,

@@ -5,7 +5,6 @@ __all__ = (
     "FLOW_FLOAT_NPY",
     "FLOW_NDIM",
     "OpticalFlowFolder",
-    "flow_frame_writer",
     "load_flow_npy",
     "read_flow_npy_header",
     "save_flow_folder",
@@ -17,25 +16,18 @@ from typing import TYPE_CHECKING, ClassVar, Final, override
 
 import numpy as np
 from iivs.common.data import ArrayFileList, validate_float32_array, write_npy
-from iivs.dhm.data.koala import (
-    KoalaFrameFolder,
-    koala_frame_name,
-    save_koala_frames,
-)
+from iivs.dhm.data.koala import KoalaFrameFolder, save_koala_frames
 from kaparoo.filesystem import ensure_file_exists, ensure_file_extension
 from numpy.typing import NDArray  # runtime: subscripted in the class bases below
 
-from iivs_cardio.common.pipeline.frames import RECORD_FILE, FrameWriter
-
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Iterable
     from pathlib import Path
     from typing import Any
 
     from iivs.common.data import OnNonFinite
     from iivs.dhm.data.koala import ValidationLevel
     from kaparoo.filesystem.types import StrPath
-    from torch import Tensor
 
 FLOW_NDIM = 3
 """Axis count of a stored flow field: `(2, H, W)`."""
@@ -159,52 +151,6 @@ def save_flow_npy(
         flow, ndim=FLOW_NDIM, on_nonfinite=on_nonfinite, allow_stack=False
     )
     write_npy(path, flow, overwrite=overwrite)
-
-
-def flow_frame_writer(
-    dest: StrPath,
-    *,
-    overwrite: bool = False,
-    record: Mapping[str, object] | None = None,
-    record_file: str = RECORD_FILE,
-) -> FrameWriter[Tensor]:
-    """Build a writer that saves flows as an `OpticalFlowFolder` under `dest`.
-
-    Header-less, so nothing a later run needs travels with the fields: neither
-    the pixel size and frame interval that turn a flow into a velocity, nor
-    which frames it came from. That is what `record` is for.
-
-    A non finite value is refused rather than written, as it is on the phase
-    side and for the same reason: what is written here is what a later run will
-    take as its source, and one that got through could not be traced back.
-
-    Args:
-        dest: The folder the finished flows go to.
-        overwrite: Whether an existing folder may be replaced. Defaults to
-            `False`.
-        record: The block the folder should carry about itself. Defaults to
-            `None`, which files nothing.
-        record_file: The name that block is filed under. Defaults to
-            `RECORD_FILE`.
-    """
-
-    def save_fn(folder: Path, index: int, flow: Tensor) -> None:
-        name = koala_frame_name(
-            index, stem=OpticalFlowFolder.FILE_STEM, ext=OpticalFlowFolder.FILE_EXT
-        )
-        save_flow_npy(folder / name, flow.cpu().numpy(), on_nonfinite="raise")
-
-    def source_fn(source: Path) -> str:
-        return source.name
-
-    return FrameWriter(
-        dest,
-        save_fn,
-        source_fn=source_fn,
-        overwrite=overwrite,
-        record=record,
-        record_file=record_file,
-    )
 
 
 def save_flow_folder(
