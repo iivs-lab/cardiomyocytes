@@ -130,7 +130,7 @@ def phase_frame_writer(
     return FrameWriter(
         dest,
         save_fn,
-        source_fn=source_fn,
+        source_fn,
         overwrite=overwrite,
         record=record,
         record_file=record_file,

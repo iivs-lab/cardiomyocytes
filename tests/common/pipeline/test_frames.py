@@ -38,7 +38,7 @@ def _refuse(folder: Path, index: int, frame: str) -> None:
 def test_a_writer_is_opened_once(tmp_path: Path) -> None:
     # Committing takes the staged folder away, so a second walk would write
     # where nothing is and file a record naming the frames of both.
-    writer = FrameWriter(tmp_path / "out", _save_text)
+    writer = FrameWriter(tmp_path / "out", _save_text, _source_name)
     _drive(writer, [Step(0, "a")])
 
     with (
@@ -56,7 +56,7 @@ def _write_all(
     overwrite: bool = False,
 ) -> None:
     """Drive a whole folder in one call, so `pytest.raises` wraps one statement."""
-    writer = FrameWriter(dest, save, overwrite=overwrite)
+    writer = FrameWriter(dest, save, _source_name, overwrite=overwrite)
     with writer:
         for step in steps:
             writer.write(step)
@@ -93,7 +93,7 @@ def test_written_folder_reads_back_through_its_own_reader(tmp_path: Path) -> Non
     def save_fn(folder: Path, index: int, flow: NDArray[np.float32]) -> None:
         save_flow_npy(folder / f"{index:05d}_flow.npy", flow)
 
-    with FrameWriter(dest, save_fn) as writer:
+    with FrameWriter(dest, save_fn, _source_name) as writer:
         for index, flow in enumerate(flows):
             writer.write(Step(index, flow))
 
@@ -215,7 +215,7 @@ def test_a_failure_stops_climbing_at_what_it_did_not_empty(tmp_path: Path) -> No
     out = tmp_path / "out"
     out.mkdir()
     sequence = out / "TL_00"
-    writer = FrameWriter(sequence / "Phase" / "Float" / "Bin", _refuse)
+    writer = FrameWriter(sequence / "Phase" / "Float" / "Bin", _refuse, _source_name)
     (sequence / "notes.txt").write_text("a neighbour", encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="the disk gave up"):
@@ -241,7 +241,7 @@ def test_a_move_that_fails_leaves_no_staging_behind(
     out = tmp_path / "out"
     out.mkdir()
     monkeypatch.setattr(StagedDirectory, "commit", refuse)
-    writer = FrameWriter(out / "Bin", _save_text)
+    writer = FrameWriter(out / "Bin", _save_text, _source_name)
 
     with pytest.raises(OSError, match="rename failed"):
         _drive(writer, [Step(0, "a")])
@@ -276,7 +276,7 @@ def test_overwrite_replaces_the_folder_wholesale(tmp_path: Path) -> None:
 def test_a_writer_is_callable_so_a_stage_can_register_it(tmp_path):
     dest = tmp_path / "frames"
 
-    with FrameWriter(dest, _save_text) as writer:
+    with FrameWriter(dest, _save_text, _source_name) as writer:
         writer(Step(0, "a"))
 
     assert (dest / "00000_frame.txt").read_text(encoding="utf-8") == "a"
@@ -286,7 +286,7 @@ def test_a_writer_ignores_what_a_step_carries_beside_its_value(tmp_path: Path) -
     # `extra` is for the side branches that want it; naming is the index's job.
     dest = tmp_path / "frames"
 
-    with FrameWriter(dest, _save_text) as writer:
+    with FrameWriter(dest, _save_text, _source_name) as writer:
         writer.write(Step(0, "a", "some_other_name.txt"))
 
     assert _names(dest) == ["00000_frame.txt"]
@@ -295,7 +295,7 @@ def test_a_writer_ignores_what_a_step_carries_beside_its_value(tmp_path: Path) -
 def test_a_writer_reports_what_it_committed(tmp_path):
     # The count rather than the destination: a count below the sequence's length
     # is what says frames were skipped, and nothing else in a log says it.
-    writer = FrameWriter(tmp_path / "out", _save_text)
+    writer = FrameWriter(tmp_path / "out", _save_text, _source_name)
 
     assert writer.report() is None  # nothing written, so nothing to say
 
@@ -312,7 +312,7 @@ def test_a_writer_that_gave_up_reports_nothing(tmp_path):
     # nothing committed reports `None`, which is the contract the block relies
     # on to leave the line out rather than print an empty one.
     dest = tmp_path / "out"
-    writer = FrameWriter(dest, _refuse_the_third)
+    writer = FrameWriter(dest, _refuse_the_third, _source_name)
     steps = [Step(0, "a"), Step(1, "b"), Step(2, "c")]
 
     with pytest.raises(RuntimeError, match="the disk gave up"):
@@ -324,7 +324,7 @@ def test_a_writer_that_gave_up_reports_nothing(tmp_path):
 
 def test_a_writer_counts_what_it_wrote_not_what_it_was_offered(tmp_path):
     # A step with no value is skipped rather than written, so the two differ.
-    writer = FrameWriter(tmp_path / "out", _save_text)
+    writer = FrameWriter(tmp_path / "out", _save_text, _source_name)
     with writer:
         writer.write(Step(0, "a"))
         writer.write(Step(1, None))
@@ -349,7 +349,7 @@ def test_a_record_says_which_source_frame_each_written_one_came_from(tmp_path):
     writer = FrameWriter(
         dest,
         _save_text,
-        source_fn=_source_name,
+        _source_name,
         record={"settings": {"filter": {"kind": "identity"}}, "source": "plate/TL_00"},
     )
 
@@ -371,7 +371,7 @@ def test_a_record_is_filed_under_the_name_the_writer_was_given(tmp_path):
     writer = FrameWriter(
         dest,
         _save_text,
-        source_fn=_source_name,
+        _source_name,
         record={"source": "plate/TL_00"},
         record_file="origin",
     )
@@ -389,7 +389,9 @@ def test_a_record_name_that_could_reach_out_of_the_folder_is_refused(tmp_path):
     # It is joined onto the staged folder, so a directory part would file the
     # account somewhere the commit never moves and a reader never looks.
     with pytest.raises(ValueError, match=r"invalid file name '\.\./origin\.json'"):
-        FrameWriter(tmp_path / "cache", _save_text, record_file="../origin.json")
+        FrameWriter(
+            tmp_path / "cache", _save_text, _source_name, record_file="../origin.json"
+        )
 
 
 def test_a_writer_told_nothing_files_nothing_and_asks_nothing_of_a_step(tmp_path):
@@ -407,7 +409,7 @@ def test_a_record_asked_for_over_steps_that_name_no_source_is_refused(tmp_path):
     # said nothing, which reads as a shorter acquisition.
     dest = tmp_path / "cache"
     writer = FrameWriter(
-        dest, _save_text, source_fn=_source_name, record={"source": "plate/TL_00"}
+        dest, _save_text, _source_name, record={"source": "plate/TL_00"}
     )
 
     with pytest.raises(ValueError, match="holds nothing beside its value"), writer:
@@ -421,7 +423,7 @@ def test_the_record_lands_with_the_frames_or_not_at_all(tmp_path):
     writer = FrameWriter(
         dest,
         _refuse_the_third,
-        source_fn=_source_name,
+        _source_name,
         record={"source": "plate/TL_00"},
     )
 

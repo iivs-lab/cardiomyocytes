@@ -61,8 +61,7 @@ class FrameWriter[T, E = Path]:
             number it is given. Naming it is the caller's, since the name a
             format takes and the format itself are one choice.
         source_fn: A function naming where one frame came from, from what its
-            step carries. Defaults to `None`, which a run filing a `record`
-            has no way to do without.
+            step carries. Read only where a `record` is filed.
         overwrite: Whether an existing folder may be replaced. Defaults to
             False.
         record: The block the folder should carry about itself, beside the
@@ -73,25 +72,20 @@ class FrameWriter[T, E = Path]:
 
     Raises:
         FileExistsError: If the destination is there and `overwrite` is not set.
-        ValueError: If `record_file` carries a directory part, or a `record`
-            was asked for with no `source_fn` to fill it.
+        ValueError: If `record_file` carries a directory part.
     """
 
     def __init__(
         self,
         dest: StrPath,
         save_fn: Callable[[Path, int, T], object],
+        source_fn: Callable[[E], str],
         *,
-        source_fn: Callable[[E], str] | None = None,
         overwrite: bool = False,
         record: Mapping[str, object] | None = None,
         record_file: str = RECORD_FILE,
     ) -> None:
         record_file = ensure_json_name(record_file)  # before anything is made
-
-        if record is not None and source_fn is None:
-            msg = "a record needs `source_fn` to name where each frame came from"
-            raise ValueError(msg)
 
         # read before the staging makes them
         self._untouched = next(p for p in Path(dest).parents if p.is_dir())
@@ -122,7 +116,7 @@ class FrameWriter[T, E = Path]:
             msg = f"frame {step.index} does not follow {last}: expected {last + 1}"
             raise ValueError(msg)
 
-        if self._record is not None and self._source_fn is not None:
+        if self._record is not None:
             self._sources.append(self._source_fn(step.require_extra()))
 
         self._save_fn(self._staged.workdir, self._written, step.value)
