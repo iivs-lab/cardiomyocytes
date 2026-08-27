@@ -184,12 +184,12 @@ def flow_frame_writer(
             `RECORD_FILE`.
     """
 
-    def save(path: Path, flow: Tensor) -> None:
+    def save_frame(path: Path, flow: Tensor) -> None:
         save_flow_npy(path, flow.cpu().numpy(), on_nonfinite="raise")
 
     return KoalaFrameWriter(
         dest,
-        save,
+        save_frame,
         stem=OpticalFlowFolder.FILE_STEM,
         ext=OpticalFlowFolder.FILE_EXT,
         overwrite=overwrite,

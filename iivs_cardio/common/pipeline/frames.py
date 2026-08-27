@@ -7,6 +7,7 @@ import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Self
 
@@ -56,7 +57,7 @@ class KoalaFrameWriter[T]:
 
     Args:
         dest: The folder the finished frames go into.
-        save: A function writing one frame to one path.
+        save_frame: A function writing one frame to one path.
         stem: The part of a frame's name after its number.
         ext: The extension a frame is written with.
         overwrite: Whether an existing folder may be replaced. Defaults to
@@ -75,7 +76,7 @@ class KoalaFrameWriter[T]:
     def __init__(
         self,
         dest: StrPath,
-        save: Callable[[Path, T], object],
+        save_frame: Callable[[Path, T], object],
         *,
         stem: str,
         ext: str,
@@ -89,9 +90,8 @@ class KoalaFrameWriter[T]:
         self._untouched = next(p for p in Path(dest).parents if p.is_dir())
         self._staged = StagedDirectory(dest, overwrite=overwrite, make_parents=True)
 
-        self._save = save
-        self._stem = stem
-        self._ext = ext
+        self._save_frame = save_frame
+        self._frame_name = partial(koala_frame_name, stem=stem, ext=ext)
 
         self._record = record
         self._record_file = record_file
@@ -124,8 +124,8 @@ class KoalaFrameWriter[T]:
         if self._record is not None:
             self._taken.append(Path(str(step.require_extra())).name)
 
-        name = koala_frame_name(self._written + 1, stem=self._stem, ext=self._ext)
-        self._save(self._staged.workdir / name, step.value)
+        name = self._frame_name(self._written + 1)
+        self._save_frame(self._staged.workdir / name, step.value)
 
         self._written += 1
         self._source = step.index

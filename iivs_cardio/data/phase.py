@@ -101,7 +101,7 @@ def phase_frame_writer(
         A writer ready to be registered as a hook.
     """
 
-    def save(path: Path, frame: Tensor) -> None:
+    def save_frame(path: Path, frame: Tensor) -> None:
         save_phase_bin(
             path,
             frame.cpu().numpy(),
@@ -113,7 +113,7 @@ def phase_frame_writer(
 
     return KoalaFrameWriter(
         dest,
-        save,
+        save_frame,
         stem=PhaseBinFolder.FILE_STEM,
         ext=PhaseBinFolder.FILE_EXT,
         overwrite=overwrite,
