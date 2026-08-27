@@ -85,7 +85,8 @@ class KoalaFrameWriter[T]:
     ) -> None:
         record_file = ensure_json_name(record_file)  # before anything is made
 
-        self._made = [path for path in Path(dest).parents if not path.is_dir()]
+        # read before the staging makes them
+        self._untouched = next(p for p in Path(dest).parents if p.is_dir())
         self._staged = StagedDirectory(dest, overwrite=overwrite, make_parents=True)
 
         self._save = save
@@ -130,11 +131,6 @@ class KoalaFrameWriter[T]:
         self._source = step.index
 
     def __call__(self, step: Step[T, Any]) -> None:
-        """Write `step`, so the writer can be registered as a hook directly.
-
-        Args:
-            step: The step to write.
-        """
         self.write(step)
 
     def report(self) -> str | None:
@@ -173,18 +169,13 @@ class KoalaFrameWriter[T]:
         Staging needs somewhere to sit, so the destination's parents are made
         before a single frame is written. Leaving them behind would put an
         empty `<sequence>/...` in the output tree for every sequence that gave
-        up, which reads as a sequence that is there. Only folders that were
-        absent when this writer opened are removed, and the climb stops at the
-        first one that will not come away: another sequence landed in it
-        meanwhile, or a worker sharing the ancestor took it first.
+        up, which reads as a sequence that is there. The climb stops below
+        what was already standing, and at the first folder something else
+        landed in meanwhile.
         """
         self._staged.abort()
 
-        for path in self._made:
-            try:
-                path.rmdir()
-            except OSError:
-                return
+        prune_upward(self._staged.path.parent, self._untouched)
 
     def __enter__(self) -> Self:
         return self
