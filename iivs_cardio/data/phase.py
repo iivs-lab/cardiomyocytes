@@ -5,6 +5,7 @@ __all__ = ("PhaseFilteredSequence", "phase_frame_writer")
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from iivs.dhm.data.koala import koala_frame_name
 from iivs.dhm.data.phase import (
     PhaseBinFolder,
     PhaseFileFolder,
@@ -13,7 +14,7 @@ from iivs.dhm.data.phase import (
 )
 from kaparoo.filesystem import stringify_path
 
-from iivs_cardio.common.pipeline.frames import RECORD_FILE, KoalaFrameWriter
+from iivs_cardio.common.pipeline.frames import RECORD_FILE, FrameWriter
 from iivs_cardio.data.transforms.filtering import FilteredSequence
 
 if TYPE_CHECKING:
@@ -73,7 +74,7 @@ def phase_frame_writer(
     overwrite: bool = False,
     record: Mapping[str, object] | None = None,
     record_file: str = RECORD_FILE,
-) -> KoalaFrameWriter[Tensor]:
+) -> FrameWriter[Tensor]:
     """Build a writer that saves frames as a phase folder under `dest`.
 
     The pixel size, height scale and unit are written into each file, so what
@@ -101,9 +102,12 @@ def phase_frame_writer(
         A writer ready to be registered as a hook.
     """
 
-    def save_frame(path: Path, frame: Tensor) -> None:
+    def save_fn(folder: Path, index: int, frame: Tensor) -> None:
+        name = koala_frame_name(
+            index, stem=PhaseBinFolder.FILE_STEM, ext=PhaseBinFolder.FILE_EXT
+        )
         save_phase_bin(
-            path,
+            folder / name,
             frame.cpu().numpy(),
             pixel_size=pixel_size,
             height_scale=height_scale,
@@ -111,11 +115,9 @@ def phase_frame_writer(
             on_nonfinite="raise",
         )
 
-    return KoalaFrameWriter(
+    return FrameWriter(
         dest,
-        save_frame,
-        stem=PhaseBinFolder.FILE_STEM,
-        ext=PhaseBinFolder.FILE_EXT,
+        save_fn,
         overwrite=overwrite,
         record=record,
         record_file=record_file,

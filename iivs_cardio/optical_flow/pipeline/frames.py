@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from torch import Tensor
 
     from iivs_cardio.common.pipeline import Named
-    from iivs_cardio.common.pipeline.frames import KoalaFrameWriter
+    from iivs_cardio.common.pipeline.frames import FrameWriter
 
 
 class FlowTree(FrameBranch["Named", "Tensor"]):
@@ -47,7 +47,7 @@ class FlowTree(FrameBranch["Named", "Tensor"]):
         *,
         overwrite: bool,
         record: Mapping[str, object] | None,
-    ) -> KoalaFrameWriter[Tensor]:
+    ) -> FrameWriter[Tensor]:
         return flow_frame_writer(
             dest, overwrite=overwrite, record=record, record_file=self.record_file
         )

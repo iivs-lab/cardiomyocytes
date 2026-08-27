@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-__all__ = ("RECORD_FILE", "FrameBranch", "KoalaFrameWriter")
+__all__ = ("RECORD_FILE", "FrameBranch", "FrameWriter")
 
 import json
 import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Self
 
-from iivs.dhm.data.koala import koala_frame_name
 from kaparoo.filesystem import (
     StagedDirectory,
     contains,
@@ -45,21 +43,21 @@ if TYPE_CHECKING:
 RECORD_FILE: Final = "source.json"
 
 
-class KoalaFrameWriter[T]:
-    """A hook that writes the frames it is given as a Koala folder.
+class FrameWriter[T]:
+    """A hook that writes the frames it is given, one file each.
 
     Frames are numbered from the first that arrives rather than from the
     source, and staged until a clean close. What the renumbering loses,
     `record` keeps.
 
     Type Parameters:
-        T: The type of one frame, as `save` expects it.
+        T: The type of one frame, as `save_fn` expects it.
 
     Args:
         dest: The folder the finished frames go into.
-        save_frame: A function writing one frame to one path.
-        stem: The part of a frame's name after its number.
-        ext: The extension a frame is written with.
+        save_fn: A function writing one frame into a folder, under the
+            number it is given. Naming it is the caller's, since the name a
+            format takes and the format itself are one choice.
         overwrite: Whether an existing folder may be replaced. Defaults to
             False.
         record: The block the folder should carry about itself, beside the
@@ -76,10 +74,8 @@ class KoalaFrameWriter[T]:
     def __init__(
         self,
         dest: StrPath,
-        save_frame: Callable[[Path, T], object],
+        save_fn: Callable[[Path, int, T], object],
         *,
-        stem: str,
-        ext: str,
         overwrite: bool = False,
         record: Mapping[str, object] | None = None,
         record_file: str = RECORD_FILE,
@@ -90,8 +86,7 @@ class KoalaFrameWriter[T]:
         self._untouched = next(p for p in Path(dest).parents if p.is_dir())
         self._staged = StagedDirectory(dest, overwrite=overwrite, make_parents=True)
 
-        self._save_frame = save_frame
-        self._frame_name = partial(koala_frame_name, stem=stem, ext=ext)
+        self._save_fn = save_fn
 
         self._record = record
         self._record_file = record_file
@@ -126,8 +121,7 @@ class KoalaFrameWriter[T]:
         if self._record is not None:
             self._sources.append(Path(str(step.require_extra())).name)
 
-        name = self._frame_name(self._written)
-        self._save_frame(self._staged.workdir / name, step.value)
+        self._save_fn(self._staged.workdir, self._written, step.value)
 
         self._written += 1
         self._last_index = step.index
@@ -282,7 +276,7 @@ class FrameBranch[N: Named, T](ABC):
     record_file: str = field(default=RECORD_FILE, kw_only=True)
     if_present: PresentPolicy = field(default="error", kw_only=True)
     if_unsourced: UnsourcedPolicy = field(default="keep", kw_only=True)
-    _wanted: frozenset[str] = field(init=False, repr=False)
+    _taken: frozenset[str] = field(init=False, repr=False)
     _recorded: object = field(init=False, repr=False)
     _reused: set[str] = field(default_factory=set, init=False, repr=False)
     _dropped: list[str] = field(default_factory=list, init=False, repr=False)
@@ -301,7 +295,7 @@ class FrameBranch[N: Named, T](ABC):
             msg = f"selected {unknown[0]!r}, which the source does not hold"
             raise ValueError(msg)
 
-        object.__setattr__(self, "_wanted", frozenset(names))
+        object.__setattr__(self, "_taken", frozenset(names))
         object.__setattr__(self, "_recorded", as_json_value(self.settings))
 
     @property
@@ -314,7 +308,7 @@ class FrameBranch[N: Named, T](ABC):
         """
         return self.if_present != "error"
 
-    def get_hook(self, source: N) -> KoalaFrameWriter[T] | None:
+    def get_hook(self, source: N) -> FrameWriter[T] | None:
         """Return the writer for `source`, or `None` to keep what is there.
 
         Whether a folder still stands for this run was settled when the tree
@@ -348,7 +342,7 @@ class FrameBranch[N: Named, T](ABC):
         *,
         overwrite: bool,
         record: Mapping[str, object] | None,
-    ) -> KoalaFrameWriter[T]:
+    ) -> FrameWriter[T]:
         """Return the writer that puts `source`'s frames under `dest`.
 
         Args:
@@ -532,7 +526,7 @@ class FrameBranch[N: Named, T](ABC):
 
     def _already_written(self) -> list[str]:
         """Return the sequences this run would write that already have a folder."""
-        return [name for name in self.list_sequences() if name in self._wanted]
+        return [name for name in self.list_sequences() if name in self._taken]
 
     def __exit__(
         self,

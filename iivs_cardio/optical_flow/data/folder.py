@@ -17,11 +17,15 @@ from typing import TYPE_CHECKING, ClassVar, Final, override
 
 import numpy as np
 from iivs.common.data import ArrayFileList, validate_float32_array, write_npy
-from iivs.dhm.data.koala import KoalaFrameFolder, save_koala_frames
+from iivs.dhm.data.koala import (
+    KoalaFrameFolder,
+    koala_frame_name,
+    save_koala_frames,
+)
 from kaparoo.filesystem import ensure_file_exists, ensure_file_extension
 from numpy.typing import NDArray  # runtime: subscripted in the class bases below
 
-from iivs_cardio.common.pipeline.frames import RECORD_FILE, KoalaFrameWriter
+from iivs_cardio.common.pipeline.frames import RECORD_FILE, FrameWriter
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
@@ -163,7 +167,7 @@ def flow_frame_writer(
     overwrite: bool = False,
     record: Mapping[str, object] | None = None,
     record_file: str = RECORD_FILE,
-) -> KoalaFrameWriter[Tensor]:
+) -> FrameWriter[Tensor]:
     """Build a writer that saves flows as an `OpticalFlowFolder` under `dest`.
 
     Header-less, so nothing a later run needs travels with the fields: neither
@@ -184,14 +188,15 @@ def flow_frame_writer(
             `RECORD_FILE`.
     """
 
-    def save_frame(path: Path, flow: Tensor) -> None:
-        save_flow_npy(path, flow.cpu().numpy(), on_nonfinite="raise")
+    def save_fn(folder: Path, index: int, flow: Tensor) -> None:
+        name = koala_frame_name(
+            index, stem=OpticalFlowFolder.FILE_STEM, ext=OpticalFlowFolder.FILE_EXT
+        )
+        save_flow_npy(folder / name, flow.cpu().numpy(), on_nonfinite="raise")
 
-    return KoalaFrameWriter(
+    return FrameWriter(
         dest,
-        save_frame,
-        stem=OpticalFlowFolder.FILE_STEM,
-        ext=OpticalFlowFolder.FILE_EXT,
+        save_fn,
         overwrite=overwrite,
         record=record,
         record_file=record_file,

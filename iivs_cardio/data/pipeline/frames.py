@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
     from torch import Tensor
 
-    from iivs_cardio.common.pipeline.frames import KoalaFrameWriter
+    from iivs_cardio.common.pipeline.frames import FrameWriter
     from iivs_cardio.data.phase import PhaseFilteredSequence
 
 
@@ -46,7 +46,7 @@ class FrameTree(FrameBranch["PhaseFilteredSequence", "Tensor"]):
         *,
         overwrite: bool,
         record: Mapping[str, object] | None,
-    ) -> KoalaFrameWriter[Tensor]:
+    ) -> FrameWriter[Tensor]:
         origin = source.origin
         header = origin.header
 

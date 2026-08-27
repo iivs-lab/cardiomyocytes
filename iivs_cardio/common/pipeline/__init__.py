@@ -8,8 +8,8 @@ __all__ = (
     "DatasetResult",
     "DocumentBranch",
     "FrameBranch",
+    "FrameWriter",
     "Hook",
-    "KoalaFrameWriter",
     "Named",
     "PresentPolicy",
     "Releasable",
@@ -65,6 +65,6 @@ from iivs_cardio.common.pipeline.document import (
 from iivs_cardio.common.pipeline.frames import (
     RECORD_FILE,
     FrameBranch,
-    KoalaFrameWriter,
+    FrameWriter,
 )
 from iivs_cardio.common.pipeline.run import Releasable, StageRun
