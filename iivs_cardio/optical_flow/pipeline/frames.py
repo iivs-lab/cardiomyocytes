@@ -42,8 +42,6 @@ class FlowTree(FrameBranch["Named", "Tensor"]):
         if_unsourced: As `FrameBranch`.
     """
 
-    __slots__ = ()
-
     @override
     def _make_writer(
         self,

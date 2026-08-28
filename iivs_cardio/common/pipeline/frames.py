@@ -5,8 +5,6 @@ __all__ = ("RECORD_FILE", "FrameBranch", "FrameWriter")
 import json
 import shutil
 from abc import ABC, abstractmethod
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Self
 
@@ -18,7 +16,6 @@ from kaparoo.filesystem import (
     search_dirs,
     search_files,
 )
-from kaparoo.filesystem.types import StrPath
 from kaparoo.utils import quantify
 from kaparoo.utils.optional import unwrap_or_default
 
@@ -34,12 +31,12 @@ from iivs_cardio.common.pipeline.branch import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping, Sequence
     from types import TracebackType
 
-# What a written folder says about itself, filed inside it, unless the caller
-# asks for another name. The readers select frames by extension, so a name of
-# another kind sits there unnoticed.
+    from kaparoo.filesystem.types import StrPath
+
+
 RECORD_FILE: Final = "source.json"
 
 
@@ -218,7 +215,6 @@ class FrameWriter[T, E = Path]:
         self._committed = True
 
 
-@dataclass(frozen=True, slots=True)
 class FrameBranch[N: Named, T](ABC):
     """The side branch that writes each sequence back out under a new root.
 
@@ -245,8 +241,8 @@ class FrameBranch[N: Named, T](ABC):
         settings: The settings that shaped the frames, filed inside each
             sequence's folder beside the source names its writer collected.
             Defaults to `None`, which files nothing.
-        selected: The sequences of the contents this run was given to write.
-            Repeats count once. Defaults to `None`, which takes all of them.
+        selected: The sequences of the contents this run was given to write,
+            repeats counted once. Taking all of them when `None` is given.
         record_file: The name each written folder keeps its own account under,
             given `.json` if it has no extension. A folder is read back by this
             name too. Defaults to `RECORD_FILE`.
@@ -263,35 +259,44 @@ class FrameBranch[N: Named, T](ABC):
             something the contents does not hold.
     """
 
-    root: StrPath
-    subpath: str
-    contents: Mapping[str, Sequence[str]]
-    settings: Mapping[str, object] | None = None
-    selected: Sequence[str] | None = field(default=None, kw_only=True)
-    record_file: str = field(default=RECORD_FILE, kw_only=True)
-    if_present: PresentPolicy = field(default="error", kw_only=True)
-    if_unsourced: UnsourcedPolicy = field(default="keep", kw_only=True)
-    _wanted: frozenset[str] = field(init=False, repr=False)
-    _recorded: object = field(init=False, repr=False)
-    _reused: set[str] = field(default_factory=set, init=False, repr=False)
-    _dropped: list[str] = field(default_factory=list, init=False, repr=False)
+    def __init__(
+        self,
+        root: StrPath,
+        subpath: str,
+        contents: Mapping[str, Sequence[str]],
+        settings: Mapping[str, object] | None = None,
+        *,
+        selected: Sequence[str] | None = None,
+        record_file: str = RECORD_FILE,
+        if_present: PresentPolicy = "error",
+        if_unsourced: UnsourcedPolicy = "keep",
+    ) -> None:
+        ensure_policy(if_present, PRESENT_POLICIES, "if_present")
 
-    def __post_init__(self) -> None:
-        ensure_policy(self.if_present, PRESENT_POLICIES, "if_present")
-        object.__setattr__(self, "record_file", ensure_json_name(self.record_file))
-
-        if not self.subpath and any("/" in name for name in self.contents):
+        if not subpath and any("/" in name for name in contents):
             fix = "give the branch a `subpath`"
             msg = f"a nested dataset cannot be found again without a layout: {fix}"
             raise ValueError(msg)
 
-        names = unwrap_or_default(self.selected, tuple(self.contents))
+        self.root = Path(root)
+        self.subpath = subpath
+        self.contents = {name: tuple(frames) for name, frames in contents.items()}
+        self.settings = settings
+
+        self.record_file = ensure_json_name(record_file)
+        self.if_present = if_present
+        self.if_unsourced = if_unsourced
+
+        names = unwrap_or_default(selected, tuple(self.contents))
         if unknown := [name for name in names if name not in self.contents]:
             msg = f"selected {unknown[0]!r}, which the source does not hold"
             raise ValueError(msg)
+        self.selected = tuple(dict.fromkeys(names))
 
-        object.__setattr__(self, "_wanted", frozenset(names))
-        object.__setattr__(self, "_recorded", as_json_value(self.settings))
+        self._wanted = frozenset(self.selected)
+        self._recorded = as_json_value(settings)
+        self._reused: set[str] = set()
+        self._dropped: list[str] = []
 
     @property
     def _replacing(self) -> bool:
@@ -352,19 +357,18 @@ class FrameBranch[N: Named, T](ABC):
         A sequence is recognised by holding `subpath` rather than by the walk
         reaching it, so nothing below one is ever listed.
         """
-        root = Path(self.root)
-        if not root.is_dir():
+        if not self.root.is_dir():
             return []
 
         holds_frames = contains(self.subpath, kind="dir")
         found = search_dirs(
-            root,
+            self.root,
             predicate=holds_frames,
             descend=lambda folder: not holds_frames(folder),
             ordered=False,
         )
 
-        return sorted(folder.relative_to(root).as_posix() for folder in found)
+        return sorted(folder.relative_to(self.root).as_posix() for folder in found)
 
     def _still_describes(self, name: str) -> bool:
         """Whether the folder already written for `name` stands for this run.
@@ -417,13 +421,12 @@ class FrameBranch[N: Named, T](ABC):
         The folders a removal empties go with it, so a sequence dropped from a
         nested dataset does not leave the path down to it standing.
         """
-        root = Path(self.root)
         dropped = []
 
         for name in self.list_unsourced():
-            folder = root / name
+            folder = self.root / name
             shutil.rmtree(folder)
-            prune_upward(folder.parent, root)
+            prune_upward(folder.parent, self.root)
             dropped.append(name)
 
         self._dropped.extend(dropped)
@@ -437,13 +440,12 @@ class FrameBranch[N: Named, T](ABC):
         folders it leaves empty, since a run writes into the directory that
         keeps its logs too.
         """
-        root = Path(self.root)
-        if not root.is_dir():
+        if not self.root.is_dir():
             return
 
-        for folder in search_dirs(root, name_filter=STAGING):
+        for folder in search_dirs(self.root, name_filter=STAGING):
             shutil.rmtree(folder, ignore_errors=True)
-            prune_upward(folder.parent, root)
+            prune_upward(folder.parent, self.root)
 
     def report(self) -> str | None:
         """Return one line naming what was kept and removed, or `None` if neither.
