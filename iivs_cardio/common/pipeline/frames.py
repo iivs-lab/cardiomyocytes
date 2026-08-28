@@ -297,9 +297,8 @@ class FrameBranch[N: Named, T](ABC):
     def _replacing(self) -> bool:
         """Whether a folder already there may be written over.
 
-        `"reuse"` replaces as readily as `"overwrite"` does: what it keeps it
-        keeps by never making a writer for it, so a writer that was made has
-        already been told the folder does not describe this run.
+        `"reuse"` replaces as readily as `"overwrite"`: what it keeps it keeps
+        by never making a writer for it.
         """
         return self.if_present != "error"
 
@@ -307,16 +306,9 @@ class FrameBranch[N: Named, T](ABC):
         """Return the writer for `source`, or `None` to keep what is there.
 
         Whether a folder still stands for this run was settled when the tree
-        opened, where the whole dataset was in view; this only looks the answer
-        up. A sequence nothing has to write costs no frames at all, which is
-        what reuse is for.
-
-        The record names the sequence as the dataset does and leaves out the
-        root it sat under, an absolute path not surviving a move.
-
-        Returns:
-            The writer, placed where the source sits, or `None` when a folder
-            already there was found to still describe this run.
+        opened; this only looks the answer up. The record names the sequence as
+        the dataset does and leaves out the root, an absolute path not
+        surviving a move.
         """
         if source.name in self._reused:
             return None
@@ -341,11 +333,8 @@ class FrameBranch[N: Named, T](ABC):
         """Return the writer that puts `source`'s frames under `dest`.
 
         Args:
-            dest: Where the source sits under this tree's own root.
             source: The sequence the frames come from, for whatever the format
                 takes from it that a frame alone does not carry.
-            overwrite: Whether a folder already there may be replaced.
-            record: The block to file beside the frames, or `None` for none.
         """
 
     @abstractmethod
@@ -353,21 +342,15 @@ class FrameBranch[N: Named, T](ABC):
         """Return the sources of the frames this stage owes for `names`.
 
         A stage answering one frame per source returns what it was given; one
-        reading a pair to answer once returns fewer. The record holds one name
-        per frame written, so a stage like that would otherwise never recognise
-        a folder it wrote.
-
-        Args:
-            names: The frames the source holds, in order.
+        reading a pair to answer once returns fewer, and saying so is what lets
+        a folder it wrote be recognised again.
         """
 
     def list_sequences(self) -> list[str]:
         """Return every sequence this tree already holds frames for, sorted.
 
-        A sequence is named by where its own folder sits under the root, and is
-        recognised by holding `subpath` rather than by the walk reaching it, so
-        nothing below one is ever listed. A folder inside a sequence is
-        therefore never taken for one itself.
+        A sequence is recognised by holding `subpath` rather than by the walk
+        reaching it, so nothing below one is ever listed.
         """
         root = Path(self.root)
         if not root.is_dir():
@@ -386,16 +369,15 @@ class FrameBranch[N: Named, T](ABC):
     def _still_describes(self, name: str) -> bool:
         """Whether the folder already written for `name` stands for this run.
 
-        Three things can have moved since it was written and none shows in the
-        folder's name: the settings that shaped the frames, which frames the
-        source holds by name, and whether the folder still holds all its record
-        says. A folder can be half removed where a single file cannot.
+        Three things can have moved and none shows in the folder's name: the
+        settings, which frames the source holds by name, and whether the folder
+        still holds all its record says.
         """
         folder = Path(self.root, name, self.subpath)
 
         try:
-            read = (folder / self.record_file).read_text(encoding="utf-8")
-            record = json.loads(read)
+            text = (folder / self.record_file).read_text(encoding="utf-8")
+            record = json.loads(text)
         except (OSError, ValueError):
             return False
 
@@ -415,10 +397,9 @@ class FrameBranch[N: Named, T](ABC):
     def _count_frames(self, folder: Path) -> int:
         """Count the files the folder holds beside the record it carries.
 
-        Files only, and only the folder's own, so nothing else stands in for a
-        frame that has gone. Only this tree's own record is set aside: one left
-        under another name counts as a frame, which stops a folder a
-        differently named run wrote from reading as whole here.
+        Only this tree's own record is set aside: one left under another name
+        counts as a frame, which stops a folder another run wrote from reading
+        as whole here.
         """
         return len(search_files(folder, max_depth=1, exclude=self.record_file))
 
@@ -435,10 +416,6 @@ class FrameBranch[N: Named, T](ABC):
 
         The folders a removal empties go with it, so a sequence dropped from a
         nested dataset does not leave the path down to it standing.
-
-        Returns:
-            The sequences whose folders were removed, in the order they were
-            found.
         """
         root = Path(self.root)
         dropped = []
@@ -456,10 +433,9 @@ class FrameBranch[N: Named, T](ABC):
     def clear_staging(self) -> None:
         """Drop what a writer that did not live to clear up after itself left.
 
-        A staged folder sits under a hidden name ending in `.tmp` beside the
-        destination it is to become, and the writer undoes it while it is
-        alive. Only that shape is taken, and only the folders it leaves empty,
-        since a run writes into the directory that keeps its logs too.
+        Only that shape is taken, a hidden name ending in `.tmp`, and only the
+        folders it leaves empty, since a run writes into the directory that
+        keeps its logs too.
         """
         root = Path(self.root)
         if not root.is_dir():
@@ -489,28 +465,22 @@ class FrameBranch[N: Named, T](ABC):
         """Settle what is already here before a single frame is read.
 
         Judging happens here, with the whole dataset in view and in one
-        process. A worker holds a copy of this branch and nothing it learns
-        comes home, so a folder judged there could not be counted.
-
-        `"error"` refuses here rather than at the writer that meets the
-        folder, which meets them one at a time and so refuses only once the
-        sequences before it have been paid for.
-
-        The root is made here rather than left to the first writer, which
-        would otherwise count it among the folders it made and take it away
-        again when it gave up.
+        process: a worker holds a copy of this branch and nothing it learns
+        comes home. The root is made here too, which a writer would otherwise
+        count among the folders it made and take away when it gave up.
 
         Raises:
             FileExistsError: If `if_present` is `"error"` and a sequence this
-                run would write already has a folder here.
+                run would write already has a folder here. Refused here rather
+                than at the writer, which meets them one at a time.
         """
         ensure_dir_exists(self.root, make=True)
 
         self.clear_staging()
 
         if self.if_present == "reuse":
-            here = self._already_written()
-            self._reused.update(name for name in here if self._still_describes(name))
+            written = self._already_written()
+            self._reused.update(n for n in written if self._still_describes(n))
         elif self.if_present == "error" and (written := self._already_written()):
             sequences = quantify(len(written), "sequence")
             fix = "set `if_present` to 'overwrite' or 'reuse'"
