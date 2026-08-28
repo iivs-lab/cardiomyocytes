@@ -23,6 +23,7 @@ from iivs_cardio.common.pipeline.base import Named, Step
 from iivs_cardio.common.pipeline.branch import (
     PRESENT_POLICIES,
     STAGING,
+    UNSOURCED_POLICIES,
     PresentPolicy,
     UnsourcedPolicy,
     as_json_value,
@@ -254,9 +255,9 @@ class FrameBranch[N: Named, T](ABC):
 
     Raises:
         ValueError: If `subpath` is empty for a dataset whose names are
-            nested, if `if_present` is not a policy a tree offers, if
-            `record_file` carries a directory part, or if `selected` names
-            something the contents does not hold.
+            nested, if `if_present` or `if_unsourced` is not a policy a tree
+            offers, if `record_file` carries a directory part, or if `selected`
+            names something the contents does not hold.
     """
 
     def __init__(
@@ -271,7 +272,10 @@ class FrameBranch[N: Named, T](ABC):
         if_present: PresentPolicy = "error",
         if_unsourced: UnsourcedPolicy = "keep",
     ) -> None:
-        ensure_policy(if_present, PRESENT_POLICIES, "if_present")
+        self.if_present = ensure_policy(if_present, PRESENT_POLICIES, "if_present")
+        self.if_unsourced = ensure_policy(
+            if_unsourced, UNSOURCED_POLICIES, "if_unsourced"
+        )
 
         if not subpath and any("/" in name for name in contents):
             fix = "give the branch a `subpath`"
@@ -284,8 +288,6 @@ class FrameBranch[N: Named, T](ABC):
         self.settings = settings
 
         self.record_file = ensure_json_name(record_file)
-        self.if_present = if_present
-        self.if_unsourced = if_unsourced
 
         names = unwrap_or_default(selected, tuple(self.contents))
         if unknown := [name for name in names if name not in self.contents]:
@@ -293,8 +295,11 @@ class FrameBranch[N: Named, T](ABC):
             raise ValueError(msg)
         self.selected = tuple(dict.fromkeys(names))
 
+        # settled here, read from every sequence
         self._wanted = frozenset(self.selected)
         self._recorded = as_json_value(settings)
+
+        # what the run leaves behind, which `report` counts
         self._reused: set[str] = set()
         self._dropped: list[str] = []
 

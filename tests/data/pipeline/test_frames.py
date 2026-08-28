@@ -65,6 +65,10 @@ def test_a_tree_refuses_a_policy_nobody_offers(tmp_path):
     with pytest.raises(ValueError, match=r"unsupported if_present 'sync'"):
         _tree(tmp_path, if_present="sync")
 
+    # A typo here would otherwise read as `"keep"` and take nothing away.
+    with pytest.raises(ValueError, match=r"unsupported if_unsourced 'delele'"):
+        _tree(tmp_path, if_unsourced="delele")
+
 
 def test_a_selection_naming_what_the_source_lacks_is_refused(tmp_path):
     # The contents is the dataset, so a selection outside it is the caller

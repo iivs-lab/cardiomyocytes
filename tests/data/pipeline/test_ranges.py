@@ -687,6 +687,22 @@ def test_coverage_sits_ahead_of_the_numbers_it_qualifies(tmp_path):
     assert list(_saved(tmp_path)) == ["settings", "coverage", "dataset"]
 
 
+def test_a_document_refuses_a_policy_nobody_offers(tmp_path):
+    # Config arrives as text whatever the field says, and neither typo would
+    # raise on its own: one reads as `"overwrite"`, the other as `"keep"`.
+    contents = {"a": ()}
+
+    with pytest.raises(ValueError, match=r"unsupported if_present 'overwite'"):
+        RangeDocument(
+            tmp_path / "r", contents=contents, source="p", if_present="overwite"
+        )
+
+    with pytest.raises(ValueError, match=r"unsupported if_unsourced 'delele'"):
+        RangeDocument(
+            tmp_path / "r", contents=contents, source="p", if_unsourced="delele"
+        )
+
+
 def test_a_document_with_no_sequence_to_cover_is_refused(tmp_path):
     # `search_sources` refuses a root holding nothing and a selection that kept
     # nothing, so a run cannot reach here with an empty contents. Refused at the

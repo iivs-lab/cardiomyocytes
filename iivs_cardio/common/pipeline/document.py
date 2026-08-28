@@ -31,10 +31,13 @@ from kaparoo.utils.optional import unwrap_or_default
 from iivs_cardio.common.pipeline.base import Named
 from iivs_cardio.common.pipeline.branch import (
     JSON_EXT,
+    PRESENT_POLICIES,
     STAGING,
+    UNSOURCED_POLICIES,
     PresentPolicy,
     UnsourcedPolicy,
     as_json_value,
+    ensure_policy,
 )
 
 if TYPE_CHECKING:
@@ -374,7 +377,8 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](ABC):
         if_unsourced: As given.
 
     Raises:
-        ValueError: If `contents` is empty, since coverage would then have nothing
+        ValueError: If `if_present` or `if_unsourced` is not a policy a document
+            offers, if `contents` is empty, since coverage would then have nothing
             to be measured against, or if `selected` names something the contents
             does not hold.
     """
@@ -392,6 +396,11 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](ABC):
         if_present: PresentPolicy = "error",
         if_unsourced: UnsourcedPolicy = "keep",
     ) -> None:
+        self.if_present = ensure_policy(if_present, PRESENT_POLICIES, "if_present")
+        self.if_unsourced = ensure_policy(
+            if_unsourced, UNSOURCED_POLICIES, "if_unsourced"
+        )
+
         if not contents:
             msg = "no sequence to cover: `contents` must hold at least one"
             raise ValueError(msg)
@@ -402,8 +411,6 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](ABC):
         self.source = source
         self.contents = {name: tuple(frames) for name, frames in contents.items()}
         self.settings = settings
-        self.if_present = if_present
-        self.if_unsourced = if_unsourced
 
         names = unwrap_or_default(selected, tuple(self.contents))
         self.selected = tuple(dict.fromkeys(names))
