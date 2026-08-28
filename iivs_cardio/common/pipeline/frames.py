@@ -21,14 +21,12 @@ from kaparoo.utils.optional import unwrap_or_default
 
 from iivs_cardio.common.pipeline.base import Named, Step
 from iivs_cardio.common.pipeline.branch import (
-    PRESENT_POLICIES,
     STAGING,
-    UNSOURCED_POLICIES,
     PresentPolicy,
     UnsourcedPolicy,
     as_json_value,
+    ensure_branch_policies,
     ensure_json_name,
-    ensure_policy,
 )
 
 if TYPE_CHECKING:
@@ -272,9 +270,8 @@ class FrameBranch[N: Named, T](ABC):
         if_present: PresentPolicy = "error",
         if_unsourced: UnsourcedPolicy = "keep",
     ) -> None:
-        self.if_present = ensure_policy(if_present, PRESENT_POLICIES, "if_present")
-        self.if_unsourced = ensure_policy(
-            if_unsourced, UNSOURCED_POLICIES, "if_unsourced"
+        self.if_present, self.if_unsourced = ensure_branch_policies(
+            if_present, if_unsourced
         )
 
         if not subpath and any("/" in name for name in contents):

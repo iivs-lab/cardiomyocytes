@@ -31,13 +31,11 @@ from kaparoo.utils.optional import unwrap_or_default
 from iivs_cardio.common.pipeline.base import Named
 from iivs_cardio.common.pipeline.branch import (
     JSON_EXT,
-    PRESENT_POLICIES,
     STAGING,
-    UNSOURCED_POLICIES,
     PresentPolicy,
     UnsourcedPolicy,
     as_json_value,
-    ensure_policy,
+    ensure_branch_policies,
 )
 
 if TYPE_CHECKING:
@@ -396,9 +394,8 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](ABC):
         if_present: PresentPolicy = "error",
         if_unsourced: UnsourcedPolicy = "keep",
     ) -> None:
-        self.if_present = ensure_policy(if_present, PRESENT_POLICIES, "if_present")
-        self.if_unsourced = ensure_policy(
-            if_unsourced, UNSOURCED_POLICIES, "if_unsourced"
+        self.if_present, self.if_unsourced = ensure_branch_policies(
+            if_present, if_unsourced
         )
 
         if not contents:

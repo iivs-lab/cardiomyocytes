@@ -8,6 +8,7 @@ __all__ = (
     "PresentPolicy",
     "UnsourcedPolicy",
     "as_json_value",
+    "ensure_branch_policies",
     "ensure_json_name",
     "ensure_policy",
 )
@@ -105,3 +106,18 @@ def ensure_policy[T: str](value: str, allowed: Sequence[T], key: str) -> T:
         offered = ", ".join(repr(policy) for policy in allowed)
         msg = f"unsupported {key} {value!r}: expected {offered}"
         raise ValueError(msg) from None
+
+
+def ensure_branch_policies(
+    if_present: PresentPolicy,
+    if_unsourced: UnsourcedPolicy,
+) -> tuple[PresentPolicy, UnsourcedPolicy]:
+    """Read the pair of policies every branch takes, refusing either unknown.
+
+    Returns:
+        The two, in the order they were given.
+    """
+    return (
+        ensure_policy(if_present, PRESENT_POLICIES, "if_present"),
+        ensure_policy(if_unsourced, UNSOURCED_POLICIES, "if_unsourced"),
+    )

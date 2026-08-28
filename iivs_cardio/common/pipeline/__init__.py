@@ -26,6 +26,7 @@ __all__ = (
     "UnsourcedPolicy",
     "as_json_value",
     "close_together",
+    "ensure_branch_policies",
     "ensure_json_name",
     "ensure_policy",
     "save_document",
@@ -51,6 +52,7 @@ from iivs_cardio.common.pipeline.branch import (
     PresentPolicy,
     UnsourcedPolicy,
     as_json_value,
+    ensure_branch_policies,
     ensure_json_name,
     ensure_policy,
 )
