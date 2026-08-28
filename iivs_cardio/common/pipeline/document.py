@@ -26,16 +26,14 @@ from kaparoo.filesystem import (
 )
 from kaparoo.filters import EndsWith
 from kaparoo.utils import quantify
-from kaparoo.utils.optional import unwrap_or_default
 
 from iivs_cardio.common.pipeline.base import Named
 from iivs_cardio.common.pipeline.branch import (
     JSON_EXT,
     STAGING,
+    DatasetBranch,
     PresentPolicy,
     UnsourcedPolicy,
-    as_json_value,
-    ensure_branch_policies,
 )
 
 if TYPE_CHECKING:
@@ -322,7 +320,7 @@ class ResultWriter[S: SequenceResult](ABC):
 # ========================== #
 
 
-class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](ABC):
+class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBranch):
     """The side branch that gathers a dataset's results into one document.
 
     It hands each sequence a writer, and each writer leaves its own result in a
@@ -394,11 +392,15 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](ABC):
         if_present: PresentPolicy = "error",
         if_unsourced: UnsourcedPolicy = "keep",
     ) -> None:
-        self.if_present, self.if_unsourced = ensure_branch_policies(
-            if_present, if_unsourced
+        super().__init__(
+            contents,
+            settings,
+            selected=selected,
+            if_present=if_present,
+            if_unsourced=if_unsourced,
         )
 
-        if not contents:
+        if not self.contents:
             msg = "no sequence to cover: `contents` must hold at least one"
             raise ValueError(msg)
 
@@ -406,17 +408,7 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](ABC):
         self.results_root = self.path.with_suffix(self.RESULTS_SUFFIX)
 
         self.source = source
-        self.contents = {name: tuple(frames) for name, frames in contents.items()}
-        self.settings = settings
 
-        names = unwrap_or_default(selected, tuple(self.contents))
-        self.selected = tuple(dict.fromkeys(names))
-
-        if unknown := [n for n in self.selected if n not in self.contents]:
-            msg = f"selected {unknown[0]!r}, which the source does not hold"
-            raise ValueError(msg)
-
-        self._recorded = as_json_value(settings)
         self._entered = False
         self._reused: frozenset[str] = frozenset()
         self._saved: D | None = None
@@ -451,28 +443,10 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](ABC):
                 gets here.
         """
 
-    @abstractmethod
-    def _expected(self, names: Sequence[str]) -> Sequence[str]:
-        """Return the sources this stage owes for a sequence holding `names`.
-
-        The same question the frame branch of a stage answers, and for the same
-        reason: a stage reading a pair to answer once owes one fewer than it was
-        given, and its results would otherwise never be found to still describe
-        the run that wrote them.
-
-        Args:
-            names: The frames the source holds, in order.
-        """
-
     @property
     def found(self) -> int:
         """How many sequences the source holds."""
         return len(self.contents)
-
-    @property
-    def _replacing(self) -> bool:
-        """Whether a document or result already there may be written over."""
-        return self.if_present != "error"
 
     def get_hook(self, source: N) -> W | None:
         """Return the writer that will measure `source`, or `None` to reuse.

@@ -5,6 +5,7 @@ __all__ = (
     "PRESENT_POLICIES",
     "STAGING",
     "UNSOURCED_POLICIES",
+    "DatasetBranch",
     "PresentPolicy",
     "UnsourcedPolicy",
     "as_json_value",
@@ -14,12 +15,14 @@ __all__ = (
 )
 
 import json
+from abc import ABC, abstractmethod
 from pathlib import PurePath
 from typing import TYPE_CHECKING, Final, Literal
 
 from kaparoo.filesystem import ensure_file_extension
 from kaparoo.filters import And, EndsWith, StartsWith
 from kaparoo.utils import ensure_one_of, literal_values
+from kaparoo.utils.optional import unwrap_or_default
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -121,3 +124,72 @@ def ensure_branch_policies(
         ensure_policy(if_present, PRESENT_POLICIES, "if_present"),
         ensure_policy(if_unsourced, UNSOURCED_POLICIES, "if_unsourced"),
     )
+
+
+class DatasetBranch(ABC):
+    """What a side branch judging a whole dataset holds, whatever it writes.
+
+    A branch settles what to write again by measuring what it was given against
+    what an earlier run left. The inputs that measurement rests on are the same
+    whether the branch writes frames or a document, so they are read here and
+    the two cannot drift apart.
+
+    Args:
+        contents: Every sequence the source holds, each mapped to the frames it
+            covers and kept as a tuple. The whole dataset rather than the run's
+            own selection.
+        settings: The settings a later run would compare against this one.
+            Defaults to `None`, which records nothing.
+        selected: The sequences of the contents this run was given, repeats
+            dropped. Defaults to `None`, which takes all of them.
+        if_present: The policy for a sequence this branch already holds
+            something for. Defaults to `"error"`.
+        if_unsourced: The policy for what the branch holds and the source has
+            lost. Defaults to `"keep"`.
+
+    Raises:
+        ValueError: If `if_present` or `if_unsourced` is not a policy a branch
+            offers, or if `selected` names something the contents does not hold.
+    """
+
+    def __init__(
+        self,
+        contents: Mapping[str, Sequence[str]],
+        settings: Mapping[str, object] | None = None,
+        *,
+        selected: Sequence[str] | None = None,
+        if_present: PresentPolicy = "error",
+        if_unsourced: UnsourcedPolicy = "keep",
+    ) -> None:
+        self.if_present, self.if_unsourced = ensure_branch_policies(
+            if_present, if_unsourced
+        )
+
+        self.contents = {name: tuple(frames) for name, frames in contents.items()}
+        self.settings = settings
+
+        names = unwrap_or_default(selected, tuple(self.contents))
+        if unknown := [name for name in names if name not in self.contents]:
+            msg = f"selected {unknown[0]!r}, which the source does not hold"
+            raise ValueError(msg)
+        self.selected = tuple(dict.fromkeys(names))
+
+        self._recorded = as_json_value(settings)
+
+    @property
+    def _replacing(self) -> bool:
+        """Whether what a branch already holds may be written over.
+
+        `"reuse"` replaces as readily as `"overwrite"`: what it keeps it keeps
+        by never making a writer for it.
+        """
+        return self.if_present != "error"
+
+    @abstractmethod
+    def _expected(self, names: Sequence[str]) -> Sequence[str]:
+        """Return the sources of what this stage owes for `names`.
+
+        A stage answering once per source returns what it was given; one reading
+        a pair to answer once returns fewer, and saying so is what lets what it
+        wrote be recognised again.
+        """

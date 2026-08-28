@@ -4,7 +4,7 @@ __all__ = ("RECORD_FILE", "FrameBranch", "FrameWriter")
 
 import json
 import shutil
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Self
 
@@ -17,15 +17,13 @@ from kaparoo.filesystem import (
     search_files,
 )
 from kaparoo.utils import quantify
-from kaparoo.utils.optional import unwrap_or_default
 
 from iivs_cardio.common.pipeline.base import Named, Step
 from iivs_cardio.common.pipeline.branch import (
     STAGING,
+    DatasetBranch,
     PresentPolicy,
     UnsourcedPolicy,
-    as_json_value,
-    ensure_branch_policies,
     ensure_json_name,
 )
 
@@ -214,7 +212,7 @@ class FrameWriter[T, E = Path]:
         self._committed = True
 
 
-class FrameBranch[N: Named, T](ABC):
+class FrameBranch[N: Named, T](DatasetBranch):
     """The side branch that writes each sequence back out under a new root.
 
     A written sequence keeps the name and the layout it had in the source, so
@@ -270,44 +268,30 @@ class FrameBranch[N: Named, T](ABC):
         if_present: PresentPolicy = "error",
         if_unsourced: UnsourcedPolicy = "keep",
     ) -> None:
-        self.if_present, self.if_unsourced = ensure_branch_policies(
-            if_present, if_unsourced
+        super().__init__(
+            contents,
+            settings,
+            selected=selected,
+            if_present=if_present,
+            if_unsourced=if_unsourced,
         )
 
-        if not subpath and any("/" in name for name in contents):
+        if not subpath and any("/" in name for name in self.contents):
             fix = "give the branch a `subpath`"
             msg = f"a nested dataset cannot be found again without a layout: {fix}"
             raise ValueError(msg)
 
         self.root = Path(root)
         self.subpath = subpath
-        self.contents = {name: tuple(frames) for name, frames in contents.items()}
-        self.settings = settings
 
         self.record_file = ensure_json_name(record_file)
 
-        names = unwrap_or_default(selected, tuple(self.contents))
-        if unknown := [name for name in names if name not in self.contents]:
-            msg = f"selected {unknown[0]!r}, which the source does not hold"
-            raise ValueError(msg)
-        self.selected = tuple(dict.fromkeys(names))
-
         # settled here, read from every sequence
         self._wanted = frozenset(self.selected)
-        self._recorded = as_json_value(settings)
 
         # what the run leaves behind, which `report` counts
         self._reused: set[str] = set()
         self._dropped: list[str] = []
-
-    @property
-    def _replacing(self) -> bool:
-        """Whether a folder already there may be written over.
-
-        `"reuse"` replaces as readily as `"overwrite"`: what it keeps it keeps
-        by never making a writer for it.
-        """
-        return self.if_present != "error"
 
     def get_hook(self, source: N) -> FrameWriter[T] | None:
         """Return the writer for `source`, or `None` to keep what is there.
@@ -342,15 +326,6 @@ class FrameBranch[N: Named, T](ABC):
         Args:
             source: The sequence the frames come from, for whatever the format
                 takes from it that a frame alone does not carry.
-        """
-
-    @abstractmethod
-    def _expected(self, names: Sequence[str]) -> Sequence[str]:
-        """Return the sources of the frames this stage owes for `names`.
-
-        A stage answering one frame per source returns what it was given; one
-        reading a pair to answer once returns fewer, and saying so is what lets
-        a folder it wrote be recognised again.
         """
 
     def list_sequences(self) -> list[str]:
