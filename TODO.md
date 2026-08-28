@@ -1081,9 +1081,9 @@ error는 높은 쪽)를 문서 코드가 알아야 하고 지표가 늘 때마�
 
 ## 실행 모양
 
-같은 스테이지 그래프가 세 가지로 배선된다. `flow.root`가 어느 것인지 정한다.
+같은 스테이지 그래프가 세 가지로 배선된다. A·B는 `estimate.py`가, C는 `evaluate.py`가 낸다.
 
-### 결정 — 실행이 세 모양이고, `flow.root`가 어느 것인지 정한다
+### 결정 — 실행이 세 모양이다. A·B는 `save_flows`로, C는 스크립트로 갈린다
 
 
 | | 읽는 것 | 쓰는 것 | 추정기 |
@@ -1094,7 +1094,7 @@ error는 높은 쪽)를 문서 코드가 알아야 하고 지표가 늘 때마�
 
 A와 B는 `save_flows` 하나로 갈린다 — (1)의 `save_frames`/`save_ranges`와 같은 짝이다.
 **C가 새로운 모양이고, 소스가 둘이다.** 워프 일관성이 `frame1`·`frame2`·`flow` 셋을 요구하므로
-캐시를 읽어도 위상은 여전히 필요하다.
+캐시를 읽어도 위상은 여전히 필요하다. C를 어디에 둘지는 §「C는 별도 스크립트다」에서 정했다.
 
 C가 필요한 이유는 비용이다. 448,800 프레임에 흐름을 다시 계산하는 것보다 읽는 쪽이 훨씬 싸다.
 
@@ -1163,6 +1163,10 @@ target:
   if_sources_gone: keep
 ```
 
+**이 블록은 분리 이전의 것이다.** 실제 `configs/optical_flow/estimate/config.yaml`에는 `flow`가
+없고, 필드 이름도 `target.flows.save`·`target.evaluations.file`·`if_present`·`if_unsourced`로
+섰다. C의 config는 §「C는 별도 스크립트다」에 있다.
+
 `evals_file`의 기본값은 (1)의 `range_file: value_range`와 같은 모양이다 — 짧은 필드명에 풀어
 쓴 파일명. `flow_` 접두어는 (3)이 자기 문서를 같은 루트에 쓸 때 값을 한다.
 
@@ -1202,8 +1206,9 @@ source.root=$OUT/filtered       filter=identity                (1)이 남긴 캐
 **`_still_describes`가 쓰는 그 비교를 재사용 판정이 아니라 전제 조건으로 쓰면 된다.** 어긋나면
 시퀀스 이름을 대고 거절한다. 새 기계가 필요 없다.
 
-그리고 **C에서 `save_flows`는 거절한다.** 읽으면서 쓰면 복사이고, `_validate_output`이 (1)에서
-「소스 위에 쓰는 것」을 거절한 자리와 같다.
+그리고 **C에는 흐름을 쓰는 자리가 아예 없다.** 읽으면서 쓰면 복사인데, `evaluate.py`의
+target에는 흐름 블록이 서지 않으므로 거절할 것도 없다. 한 스크립트였다면 `_validate_output`이
+(1)에서 「소스 위에 쓰는 것」을 거절한 자리와 같은 검사가 하나 필요했을 것이다.
 
 #### `settings`가 담아야 하는 것 넷
 
@@ -1300,6 +1305,51 @@ C에서는 `normalize`가 `flow.sources`에 없으므로 **그래프 밖**이다
   `{"level": "dataset", "range": [0.0, 4.0], "target": [0.0, 255.0]}`을 든다.
   `level: sequence`면 시퀀스마다 한 줄씩. §「스크립트·config 층」에서 넣었다.
 
+#### 결정 — C는 별도 스크립트다 (`evaluate.py`)
+
+
+한때 `flow.root`가 null인지로 A·B와 C를 가르려 했다. 그러면 **config의 절반이 「때에 따라
+무시되는 키」가 된다.** hydra는 YAML이 선언한 키를 모드와 무관하게 합성하므로, C에서도
+`estimator`와 `target.flows`를 지정할 수 있는데 아무 일도 하지 않는다. 설정 파일을 읽는
+사람에게 가장 나쁜 종류의 모호함이다.
+
+`scripts/optical_flow/evaluate.py` + `configs/optical_flow/evaluate/config.yaml`로 나눈다.
+읽는 것도(흐름 트리) 쓰는 것도(문서만) 필요한 설정도 다르다.
+
+| | `estimate.py` (A·B) | `evaluate.py` (C) |
+| --- | --- | --- |
+| `source` | 위상 트리 | 위상 트리 |
+| `select`·`filter`·`compute` | 씀 | 씀 |
+| `flow` | 없음 | **흐름 캐시 트리** |
+| `normalize` | 씀 | 없음 — record에서 복원 |
+| `estimator` | 씀 | 없음 — FB error 축이 빠진다 |
+| `target.flows` | 씀 | 없음 |
+| `target.evaluations` | 씀 | 씀 |
+
+**`StageInputs`는 그대로 넷이다.** 한때 「C에서는 `filter`가 무의미하니 `kernel`을
+`StageInputs`에서 각 스테이지로 내려야 한다」고 보았으나 틀렸다. C도 프레임을 실제로 만들어야
+한다 — 평가가 `frame1`·`frame2`를 워프하므로 **흐름이 계산될 때와 같은 프레임**을 재현해야
+하고, `describe_filter_kernel`의 역방향이 없어 필터는 복원이 아니라 config로 다시 대는 수밖에
+없다. `kernel`은 C에서도 진짜 입력이고, 동시에 record와 대조할 값이다.
+
+```yaml
+# configs/optical_flow/evaluate/config.yaml — estimate 와 다른 부분만
+
+flow:
+  root: ??? # 평가할 흐름 트리
+  subpath: null # Flow/Float/Npy
+
+target:
+  evaluations: # flows 블록이 서지 않는다
+    save: true
+    file: flow_evaluation
+    if_present: error
+    if_unsourced: keep
+```
+
+`normalize`가 없는 것은 §「`normalize`를 읽을 것인가 대조할 것인가」의 (가)를 전제한다. (나)로
+가면 `evaluate.py`에도 `normalize` 블록이 서고, 대신 record와 대조하는 검사가 하나 는다.
+
 #### 그래서 C에 남은 것
 
 
@@ -1309,15 +1359,24 @@ C에서는 `normalize`가 `flow.sources`에 없으므로 **그래프 밖**이다
   파트에 적으므로 그대로 두면 C의 문서는 프레임을 `00000_flow.npy`로 부르고 A/B는
   `00000_phase.bin`으로 불러 **두 문서를 나란히 놓을 수 없다.** record의 `sources`를 들고
   그것을 돌려줘야 하며, 이것이 사이드카를 실제로 쓰는 자리다.
-- **`flow` config 블록.** `FlowCacheConfig(SourceConfig)`, `DEFAULT_SUBPATH =
-  FLOW_FLOAT_NPY`. `flow.root`가 null이면 A/B, 아니면 C.
+- **`FlowCacheConfig(SourceConfig)`**, `DEFAULT_SUBPATH = FLOW_FLOAT_NPY`. `evaluate.py`
+  전용이므로 `root`는 `???`이고 null 분기가 없다.
+- **`EvaluateInputs(StageInputs["PhaseSourceConfig"])`** — `flow`와 `target` 둘을 얹는다.
+  `FlowInputs`와 달리 `normalize`도 `estimator`도 없다. `EvaluateTargetConfig`는
+  `evaluations` 블록 하나뿐이라 `_validate_output`이 필요 없다: 쓰는 것이 문서 하나이고
+  소스 위에 떨어질 수 없다.
+- **`scripts/optical_flow/evaluate.py`의 `main`.** `estimate.py`와 같은 모양 — 스윕 가드,
+  로그 폴더, 드라이버. 스윕 가드가 무엇을 막는지는 다르다: 흐름을 쓰지 않으므로
+  `target.flows.save` 대신 막을 것이 없고, 문서만 내는 실행은 스윕이 성립한다.
 - **`CachedFlowStageRun`.** `StageRun`의 자식 하나. `FlowStage` 대신
   `SequenceStage(CachedFlowSequence)`를 만들고, `NormalizedFrameStage`는 소스가 아니라 옆에
   서서 `FlowSource.frames`로만 곁가지에 간다. `estimator=None`이라 FB error 축은 빠진다.
+- **`data_range`를 `EvaluationDocument`에 넘긴다.** record에서 복원한 `normalize.target`이
+  그 값이다. A·B의 `build_branches`가 이것을 넘기지 않고 있어 PSNR/SSIM이 프레임 dtype의
+  범위로 채점되는 결함이 있으므로(§「(2) 열린 것」), 같이 고친다.
 - **전제 조건 검사**, 프레임 한 장 읽기 전에 시퀀스마다: record의 `sources`가 이번 실행이
   owe하는 `names[:-1]`과 같은가(어긋난 짝), `.npy` 개수가 `len(frames)`와 같은가(반쯤 지워진
-  폴더), record의 `filter`가 이번 실행의 필터와 같은가. 그리고 C에서 `target.flows.save`는
-  거절한다.
+  폴더), record의 `filter`가 이번 실행의 필터와 같은가.
 
 #### 열린 것 — `normalize`를 읽을 것인가 대조할 것인가
 
@@ -1326,8 +1385,8 @@ C에서는 `normalize`가 `flow.sources`에 없으므로 **그래프 밖**이다
 **대조밖에** 안 된다. `normalize`는 record가 `[min, max]`와 `target`을 그대로 들고 있어
 `FrameNormalizer(source, target, dtype)`로 **복원된다.**
 
-**(가) record에서 읽고 C에서는 `normalize` 블록을 거절한다** — 어긋날 수가 없고 `range_file`을
-다시 가리킬 필요도 없다. `save_flows`를 거절하는 것과 같은 모양이다.
+**(가) record에서 읽고 `evaluate.py`의 config에는 `normalize`를 두지 않는다** — 어긋날 수가
+없고 `range_file`을 다시 가리킬 필요도 없다. 흐름을 쓰는 자리를 두지 않은 것과 같은 모양이다.
 **(나) config로 만들고 record와 대조해 어긋나면 거절한다** — 설정이 한 가지 읽는 방식을
 유지하지만, 같은 문서를 다시 가리켜야 하고 그 문서가 그새 다시 쓰였을 수 있다.
 
