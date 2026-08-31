@@ -48,6 +48,27 @@ def test_a_writer_is_opened_once(tmp_path: Path) -> None:
         pass
 
 
+def test_building_a_writer_makes_nothing(tmp_path: Path) -> None:
+    # The staging and the folders above it are the walk's to make. A branch asks
+    # every sequence for a hook before any of them runs, and one of those asks
+    # raising left the writers already built holding folders nothing would close.
+    out = tmp_path / "out"
+    out.mkdir()
+
+    FrameWriter(out / "TL_00" / "Phase" / "Float" / "Bin", _save_text, _source_name)
+
+    assert list(out.iterdir()) == []
+
+
+def test_a_writer_that_was_never_opened_refuses_a_frame(tmp_path: Path) -> None:
+    # It has nowhere to put one, where it used to have a staged folder that no
+    # close would ever commit: the frame went down and was never seen again.
+    writer = FrameWriter(tmp_path / "frames", _save_text, _source_name)
+
+    with pytest.raises(RuntimeError, match="is not open"):
+        writer.write(Step(0, "a"))
+
+
 def _write_all(
     dest: Path,
     steps: Iterable[Step[str]],
@@ -215,11 +236,19 @@ def test_a_failure_stops_climbing_at_what_it_did_not_empty(tmp_path: Path) -> No
     out = tmp_path / "out"
     out.mkdir()
     sequence = out / "TL_00"
-    writer = FrameWriter(sequence / "Phase" / "Float" / "Bin", _refuse, _source_name)
-    (sequence / "notes.txt").write_text("a neighbour", encoding="utf-8")
+
+    def land_a_neighbour_then_refuse(folder: Path, index: int, frame: str) -> None:
+        """Something lands beside the staging while the walk is still running."""
+        (sequence / "notes.txt").write_text("a neighbour", encoding="utf-8")
+        msg = "the disk gave up"
+        raise RuntimeError(msg)
 
     with pytest.raises(RuntimeError, match="the disk gave up"):
-        _drive(writer, [Step(0, "a")])
+        _write_all(
+            sequence / "Phase" / "Float" / "Bin",
+            [Step(0, "a")],
+            save=land_a_neighbour_then_refuse,
+        )
 
     assert not (sequence / "Phase").exists()
     assert _names(sequence) == ["notes.txt"]

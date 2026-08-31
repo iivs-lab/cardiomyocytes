@@ -63,7 +63,6 @@ class FrameWriter[T, E = Path]:
             extension. Defaults to `RECORD_FILE`.
 
     Raises:
-        FileExistsError: If the destination is there and `overwrite` is not set.
         ValueError: If `record_file` carries a directory part.
     """
 
@@ -77,24 +76,39 @@ class FrameWriter[T, E = Path]:
         record: Mapping[str, object] | None = None,
         record_file: str = RECORD_FILE,
     ) -> None:
-        record_file = ensure_json_name(record_file)  # before anything is made
+        self._dest = Path(dest)
+        self._overwrite = overwrite
 
-        # read before the staging makes them
-        self._untouched = next(p for p in Path(dest).parents if p.is_dir())
-        self._staged = StagedDirectory(dest, overwrite=overwrite, make_parents=True)
+        # read before opening makes them, which is the order the two methods keep
+        self._untouched = next(p for p in self._dest.parents if p.is_dir())
 
         self._save_fn = save_fn
         self._source_fn = source_fn
 
         self._record = record
-        self._record_file = record_file
+        self._record_file = ensure_json_name(record_file)
 
         self._sources: list[str] = []
         self._written = 0
         self._last_index: int | None = None
 
+        self._staged: StagedDirectory | None = None
         self._entered = False
         self._committed = False
+
+    @property
+    def _opened(self) -> StagedDirectory:
+        """The staging a walk gave this writer.
+
+        Raises:
+            RuntimeError: If it was never opened. A writer has nowhere to put a frame
+                until then, so writing to one is a frame lost rather than a file.
+        """
+        if self._staged is None:
+            msg = f"{self._dest} is not open: a writer fills its staging inside a walk"
+            raise RuntimeError(msg)
+
+        return self._staged
 
     def __call__(self, step: Step[T, E]) -> None:
         """Write `step`, so the writer can be registered as a hook directly."""
@@ -121,7 +135,7 @@ class FrameWriter[T, E = Path]:
         if self._record is not None:
             self._sources.append(self._source_fn(step.require_extra()))
 
-        self._save_fn(self._staged.workdir, self._written, step.value)
+        self._save_fn(self._opened.workdir, self._written, step.value)
 
         self._written += 1
         self._last_index = step.index
@@ -148,7 +162,7 @@ class FrameWriter[T, E = Path]:
 
         document = {**self._record, "sources": self._sources}
         written = json.dumps(document, allow_nan=False)
-        (self._staged.workdir / self._record_file).write_text(written, encoding="utf-8")
+        (self._opened.workdir / self._record_file).write_text(written, encoding="utf-8")
 
     def _abort(self) -> None:
         """Drop the staged folder, and the empty ones opening it made.
@@ -157,22 +171,31 @@ class FrameWriter[T, E = Path]:
         below what was already standing, and at the first folder something else landed
         in meanwhile.
         """
-        self._staged.abort()
+        staged = self._opened
+        staged.abort()
 
-        prune_upward(self._staged.path.parent, self._untouched)
+        prune_upward(staged.path.parent, self._untouched)
 
     def __enter__(self) -> Self:
-        """Take the writer, refusing one that has been through a walk already.
+        """Make the staging to fill, and the folders above it that are missing.
+
+        Nothing reaches the output tree until here, so a writer that is built and never
+        walked leaves it as it found it. The floor the abort climbs to was read at
+        construction, before this made anything for it to find instead.
 
         Raises:
+            FileExistsError: If the destination is there and `overwrite` is not set.
             RuntimeError: If it has been opened before. Closing takes the staged folder
                 away, so a second walk writes where nothing is.
         """
         if self._entered:
-            msg = f"{self._staged.path} was opened already: one writer per walk"
+            msg = f"{self._dest} was opened already: one writer per walk"
             raise RuntimeError(msg)
 
         self._entered = True
+        self._staged = StagedDirectory(
+            self._dest, overwrite=self._overwrite, make_parents=True
+        )
 
         return self
 
@@ -197,12 +220,12 @@ class FrameWriter[T, E = Path]:
 
         if not self._written:
             self._abort()
-            msg = f"no frame was written: nothing to commit at {self._staged.path}"
+            msg = f"no frame was written: nothing to commit at {self._dest}"
             raise ValueError(msg)
 
         try:
             self._save_record()
-            self._staged.commit()
+            self._opened.commit()
         except BaseException:
             self._abort()
             raise
