@@ -27,18 +27,30 @@ if TYPE_CHECKING:
 class FrameTree(FrameBranch["PhaseFilteredSequence", "Tensor"]):
     """The frame tree of a phase stage, which answers one frame per source.
 
-    Each writer takes the pixel size, height scale and unit from the sequence it
-    was made for, since a phase file carries them and a frame alone does not.
+    Each writer takes the pixel size, height scale and unit from the sequence it was
+    made for, since a phase file carries them and a frame alone does not.
 
     Attributes:
-        root: As `FrameBranch`.
-        subpath: As `FrameBranch`.
-        contents: As `FrameBranch`.
-        settings: As `FrameBranch`.
-        selected: As `FrameBranch`.
-        record_file: As `FrameBranch`.
-        if_present: As `FrameBranch`.
-        if_unsourced: As `FrameBranch`.
+        root: The directory the tree is written under.
+        subpath: The path to a sequence's frames inside its own folder. Empty reads back
+            only for a dataset whose names are one level deep, a sequence being
+            recognised by holding this.
+        contents: Every sequence the source holds, mapped to the frames it covers.
+            Filtering answers one frame per source frame, so a sequence is owed the
+            whole of its list and a folder holding fewer is written again.
+        settings: The settings that shaped the frames, filed inside each sequence's
+            folder beside the source names its writer collected. Defaults to `None`,
+            which files nothing.
+        selected: The sequences of the contents this run was given to write, repeats
+            counted once. Taking all of them when `None` is given.
+        record_file: The name each written folder keeps its own account under, given
+            `.json` if it has no extension. A folder is read back by this name too.
+            Defaults to `RECORD_FILE`.
+        if_present: The policy for a sequence that already has a folder here. `"reuse"`
+            keeps one whose record still describes this run and writes the rest.
+            Defaults to `"error"`.
+        if_unsourced: The policy for a folder whose sequence the source has lost.
+            Defaults to `"keep"`.
     """
 
     @override
