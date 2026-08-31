@@ -83,10 +83,13 @@ class FlowSourceConfig(PhaseSourceConfig):
     which of the two it is shows in `root` and in the filter, not here.
 
     Attributes:
-        DEFAULT_SUBPATH: As `PhaseSourceConfig`.
-        subpath: As `PhaseSourceConfig`.
-        root: As `PhaseSourceConfig`.
-        frames: As `PhaseSourceConfig`.
+        DEFAULT_SUBPATH: Koala's own layout, which is where a phase sequence comes off
+            the microscope. A tree holding another modality names its own `subpath`, and
+            one that names the wrong layout is found empty.
+        subpath: The path to a sequence's frames inside its own folder. Defaults to
+            `None`, which takes `DEFAULT_SUBPATH`.
+        root: The folder the sequences sit under.
+        frames: Which frames of each sequence to take. Defaults to all of them.
     """
 
 
@@ -99,12 +102,19 @@ class FlowBranchConfig(TreeBranchConfig):
             tree. Never followed off the source the way a frame tree's is: the source
             holds phase and this holds flows, so the two are different kinds and land in
             different folders by default.
-        save: As `TreeBranchConfig`, defaulting to `False` since a run that only scores
-            does not need them.
-        subpath: As `TreeBranchConfig`.
-        record_file: As `TreeBranchConfig`.
-        if_present: As `TreeBranchConfig`.
-        if_unsourced: As `TreeBranchConfig`.
+        save: Whether to write the flows at all. Defaults to `False`, since a run that
+            only scores does not need them.
+        subpath: The path a written sequence keeps its flows at inside its own folder.
+            Defaults to `None`, which takes `DEFAULT_SUBPATH`.
+        record_file: The name of the file each written folder keeps its own account in,
+            given `.json` if it has no extension. A later run reads it to decide whether
+            what is there still describes this run. Defaults to `"source"`.
+        if_present: The policy for a sequence this output already covers, judged by the
+            settings and the source frames' names rather than by what those frames hold.
+            `"reuse"` keeps what an earlier run left that still describes this one, and
+            writes the rest. Defaults to `"error"`.
+        if_unsourced: The policy for a folder whose sequence the source no longer holds.
+            Defaults to `"keep"`.
     """
 
     DEFAULT_SUBPATH: ClassVar[str] = FLOW_FLOAT_NPY
@@ -120,8 +130,11 @@ class EvaluationBranchConfig(BranchConfig):
         file: The name the document is given, given `.json` if it has no extension.
             Defaults to `"flow_evaluation"`, the prefix leaving room for a later stage
             writing its own document to the same root.
-        if_present: As `BranchConfig`.
-        if_unsourced: As `BranchConfig`.
+        if_present: The policy for a sequence the document already covers. `"reuse"`
+            keeps what an earlier run left that still describes this one, and scores the
+            rest. Defaults to `"error"`.
+        if_unsourced: The policy for an evaluation whose sequence the source no longer
+            holds. Defaults to `"keep"`.
     """
 
     save: bool = True
@@ -153,12 +166,13 @@ class FlowInputs(StageInputs["FlowSourceConfig"]):
     estimator whose dtype it is scaled onto.
 
     Attributes:
-        source: As `StageInputs`, which here is phase however it was written, whether an
-            acquisition or the cache preprocessing left.
-        select: As `StageInputs`.
-        kernel: As `StageInputs`, and a kernel that does nothing wherever the source was
-            filtered already.
-        compute: As `StageInputs`.
+        source: The tree the sequences are read from, which here is phase however it was
+            written, whether an acquisition or the cache preprocessing left.
+        select: Which of its sequences to take.
+        kernel: The filter each frame goes through, which is a kernel that does nothing
+            where the configuration named none, and wherever the source was filtered
+            already.
+        compute: The devices to run on, and what to report.
         normalize: Where the range the frames are scaled from comes from.
         estimator: The estimator the flows are computed with.
         target: What to write, one block per branch.
