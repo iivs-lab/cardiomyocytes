@@ -174,14 +174,13 @@ class Device:
         """
         devices = tuple(cls.resolve(spec, supported) for spec in specs)
 
-        wanted = {device.index for device in devices if device.is_cuda}
-        if wanted:
+        # only a cuda device carries an index
+        indices = {device.index for device in devices if device.index is not None}
+        if indices:
             count = _cuda_count()
-            beyond = sorted(
-                index for index in wanted if index is not None and index >= count
-            )
-            if beyond:
-                listed = ", ".join(str(index) for index in beyond)
+            missing = sorted(index for index in indices if index >= count)
+            if missing:
+                listed = ", ".join(str(index) for index in missing)
                 msg = f"no CUDA device at index {listed}: this host reports {count}"
                 raise ValueError(msg)
 
