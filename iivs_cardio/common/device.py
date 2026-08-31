@@ -12,24 +12,11 @@ from kaparoo.utils import literal_values, unwrap_or_default
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-type DeviceKind = Literal["cpu", "cuda"]
-
-# What a caller may write for a device; `Device` is the form it is stored as.
 type DeviceLike = str | torch.device | Device
 
-# Taken off the alias rather than written twice.
+type DeviceKind = Literal["cpu", "cuda"]
+
 DEVICE_KINDS: Final[frozenset[DeviceKind]] = frozenset(literal_values(DeviceKind))
-
-
-def _cuda_count() -> int:
-    """Count the CUDA devices the driver reports, 0 when there is no driver.
-
-    Deliberately not guarded by `torch.cuda.is_available()`, which initializes CUDA in
-    whichever process asks: a pool started by forking after that gives every worker a
-    context it cannot use. This answers without doing so, and already answers 0 where
-    the guard was there to.
-    """
-    return torch.cuda.device_count()
 
 
 # `slots=True` is deliberately absent: it removes the instance `__dict__` that
@@ -73,6 +60,58 @@ class Device:
         index = None if self.kind == "cpu" else unwrap_or_default(self.index, 0)
         if index != self.index:
             object.__setattr__(self, "index", index)  # frozen: normalize in place
+
+    def __str__(self) -> str:
+        return self.kind if self.index is None else f"{self.kind}:{self.index}"
+
+    @property
+    def is_cuda(self) -> bool:
+        """Whether this is a CUDA device."""
+        return self.kind == "cuda"
+
+    @cached_property
+    def as_torch(self) -> torch.device:
+        """This device as torch names it, for the calls that take one.
+
+        Named apart from the module rather than `torch`: a member of that name shadows
+        it for every annotation in this class body.
+        """
+        if self.index is None:
+            return torch.device(self.kind)
+        return torch.device(self.kind, self.index)
+
+    def activate(self) -> None:
+        """Point this process's CUDA libraries at this device.
+
+        torch takes the device from each tensor it is given, but `cv2.cuda` and CuPy
+        each read a process-global current device instead. Both default to device 0 and
+        nothing else here moves them, so on any GPU but the first they disagree with the
+        tensors they are handed: CuPy would label a pointer from device 1 as device 0's.
+        A `cpu` device has nothing to bind.
+
+        Cheap enough to repeat per item on a hot path rather than hoisted into worker
+        setup, which a lone in-process run would then have to duplicate.
+        """
+        if self.index is None:  # cpu, since only a cuda device carries an index
+            return
+
+        # Imported here rather than at module scope: this module is on the pure
+        # torch filtering path, which would otherwise pay to import both stacks.
+        import cupy as cp
+        import cv2
+
+        torch.cuda.set_device(self.index)
+        cv2.cuda.setDevice(self.index)
+        cp.cuda.Device(self.index).use()
+
+    @classmethod
+    def visible_cuda(cls) -> tuple[Device, ...]:
+        """Every CUDA device this process can see, in index order.
+
+        Empty when the driver reports none, which a caller asking to spread work across
+        GPUs should treat as a configuration error rather than as zero work.
+        """
+        return tuple(cls("cuda", index) for index in range(_cuda_count()))
 
     @classmethod
     def resolve(
@@ -152,57 +191,16 @@ class Device:
 
         return devices
 
-    @classmethod
-    def visible_cuda(cls) -> tuple[Device, ...]:
-        """Every CUDA device this process can see, in index order.
 
-        Empty when the driver reports none, which a caller asking to spread work across
-        GPUs should treat as a configuration error rather than as zero work.
-        """
-        return tuple(cls("cuda", index) for index in range(_cuda_count()))
+def _cuda_count() -> int:
+    """Count the CUDA devices the driver reports, 0 when there is no driver.
 
-    @cached_property
-    def as_torch(self) -> torch.device:
-        """This device as torch names it, for the calls that take one.
-
-        Named apart from the module rather than `torch`: a member of that name shadows
-        it for every annotation in this class body.
-        """
-        if self.index is None:
-            return torch.device(self.kind)
-        return torch.device(self.kind, self.index)
-
-    @property
-    def is_cuda(self) -> bool:
-        """Whether this is a CUDA device."""
-        return self.kind == "cuda"
-
-    def activate(self) -> None:
-        """Point this process's CUDA libraries at this device.
-
-        torch takes the device from each tensor it is given, but `cv2.cuda` and CuPy
-        each read a process-global current device instead. Both default to device 0 and
-        nothing else here moves them, so on any GPU but the first they disagree with the
-        tensors they are handed: CuPy would label a pointer from device 1 as device 0's.
-        A `cpu` device has nothing to bind.
-
-        Cheap enough to repeat per item on a hot path rather than hoisted into worker
-        setup, which a lone in-process run would then have to duplicate.
-        """
-        if self.index is None:  # cpu, since only a cuda device carries an index
-            return
-
-        # Imported here rather than at module scope: this module is on the pure
-        # torch filtering path, which would otherwise pay to import both stacks.
-        import cupy as cp
-        import cv2
-
-        torch.cuda.set_device(self.index)
-        cv2.cuda.setDevice(self.index)
-        cp.cuda.Device(self.index).use()
-
-    def __str__(self) -> str:
-        return self.kind if self.index is None else f"{self.kind}:{self.index}"
+    Deliberately not guarded by `torch.cuda.is_available()`, which initializes CUDA in
+    whichever process asks: a pool started by forking after that gives every worker a
+    context it cannot use. This answers without doing so, and already answers 0 where
+    the guard was there to.
+    """
+    return torch.cuda.device_count()
 
 
 def _parse(spec: str | torch.device) -> tuple[str, int | None]:
