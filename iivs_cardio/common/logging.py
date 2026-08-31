@@ -25,7 +25,7 @@ def log_indented(
     Args:
         logger: The logger the line goes to.
         message: The line, with placeholders for `args`.
-        args: The values those placeholders take.
+        *args: The values those placeholders take.
         indent: The number of spaces one step in is worth. Defaults to 2.
         depth: The number of steps in the line sits, where zero heads a block. Defaults
             to 1.

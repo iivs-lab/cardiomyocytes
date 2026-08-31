@@ -35,7 +35,7 @@ def _identity_grid(image: Tensor, scale: Tensor) -> Tensor:
     and device, so the two are built together.
 
     Args:
-        image: the field whose `(H, W)` and device the grid is built for.
+        image: The field whose `(H, W)` and device the grid is built for.
         scale: `_norm_scale(image)`, ordered `(x, y)` to match the stacked axes.
     """
     *_, height, width = image.shape
@@ -89,7 +89,7 @@ def backward_warp(
     *,
     padding_mode: PaddingMode = "border",
 ) -> ImageType:
-    """Sample `image` at ``grid + offset`` (bilinear pull sampling), batched.
+    """Sample `image` at `grid + offset` (bilinear pull sampling), batched.
 
     The output pixel at `x` takes `image[x + offset(x)]`, so `offset` says where to
     *read from*, not where to move content to. **Note the sign**: content ends up
@@ -108,7 +108,7 @@ def backward_warp(
             frame, a mask, or one channel of a multi-channel field.
         offset: `(*dim, 2, H, W)` float32 sampling offset (channel 0 = dx, 1 = dy),
             sharing `image`'s leading dims. Those dims warp together.
-        padding_mode: out-of-bounds policy (`border`, `zeros`, or `reflection`).
+        padding_mode: Out-of-bounds policy (`border`, `zeros`, or `reflection`).
 
     Returns:
         The sampled field, shaped and dtyped like `image`. Sampling runs in float32: a
@@ -135,7 +135,7 @@ class BackwardWarp(nn.Module):
     the same contract.
 
     Args:
-        padding_mode: out-of-bounds policy (`border`, `zeros`, or `reflection`).
+        padding_mode: Out-of-bounds policy (`border`, `zeros`, or `reflection`).
     """
 
     def __init__(self, *, padding_mode: PaddingMode = "border") -> None:
@@ -156,7 +156,7 @@ class BackwardWarp(nn.Module):
         return cache
 
     def forward(self, image: Tensor, offset: Tensor) -> Tensor:
-        """Return `image` sampled at ``grid + offset``, reusing the cached grid.
+        """Return `image` sampled at `grid + offset`, reusing the cached grid.
 
         Args:
             image: `(*dim, H, W)` field(s) to sample, any real integer or float dtype.

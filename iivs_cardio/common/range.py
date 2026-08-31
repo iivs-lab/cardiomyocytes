@@ -44,9 +44,8 @@ def finite_range(frame: Tensor) -> tuple[float, float] | None:
     if frame.numel() == 0:
         return None
 
-    # One fused pass, which also betrays a non-finite value: NaN propagates
-    # through both bounds and an infinity lands on the one it belongs to. Only
-    # then is the mask worth its second allocation and compacting copy.
+    # The fused pass first: only a frame it catches out is worth the mask below,
+    # which costs a second allocation and a compacting copy.
     low, high = torch.aminmax(frame)
     if low.isfinite() and high.isfinite():
         return float(low), float(high)
