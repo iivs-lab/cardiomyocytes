@@ -11,15 +11,18 @@ import torch
 if TYPE_CHECKING:
     from cupy.cuda import MemoryPointer
 
-_DEPTH_TO_DTYPE: Final[dict[int, type]] = {cv2.CV_8U: cp.uint8, cv2.CV_32F: cp.float32}
-_DTYPE_CHANNELS_TO_CVTYPE: Final[dict[tuple[type, int], int]] = {
+_DEPTH_TO_DTYPE: Final[dict[int, type[cp.generic]]] = {
+    cv2.CV_8U: cp.uint8,
+    cv2.CV_32F: cp.float32,
+}
+_DTYPE_CHANNELS_TO_CVTYPE: Final[dict[tuple[type[cp.generic], int], int]] = {
     (cp.uint8, 1): cv2.CV_8UC1,
     (cp.float32, 1): cv2.CV_32FC1,
     (cp.float32, 2): cv2.CV_32FC2,
 }
 
 
-def _cupy_dtype(depth: int) -> type:
+def _cupy_dtype(depth: int) -> type[cp.generic]:
     """The CuPy scalar dtype for a GpuMat `depth`.
 
     Raises:
@@ -32,7 +35,7 @@ def _cupy_dtype(depth: int) -> type:
         raise ValueError(msg) from None
 
 
-def _cv_type(dtype: type, channels: int) -> int:
+def _cv_type(dtype: type[cp.generic], channels: int) -> int:
     """The cv2 type code for a `(dtype, channels)` pair.
 
     Raises:
