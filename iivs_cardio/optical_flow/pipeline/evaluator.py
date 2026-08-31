@@ -48,14 +48,22 @@ class EvaluationWriter(ResultWriter[SequenceEvaluation]):
     so cannot have that axis at all.
 
     Args:
-        root: As `ResultWriter`.
-        source: As `ResultWriter`.
+        root: The folder the result is written into, created if it is not there.
+        source: The name the sequence has, used both in the record and as the name of
+            the file it is written to.
         frames: The stage the flows were computed from, held rather than rebuilt so that
             both consumers of an index share one computation.
         estimator: The estimator to take the reverse flow from, which doubles what a
             pair costs. Defaults to `None`, which leaves that axis out.
-        settings: As `ResultWriter`.
-        overwrite: As `ResultWriter`.
+        settings: The settings that shaped the scores, written into the result so it can
+            be told from one an earlier run left under different ones. The document
+            carries the same block, and a result outliving the document is the case that
+            needs its own copy. Defaults to `None`, which records nothing and so can
+            never be reused.
+        overwrite: Whether a result already filed under `source` may be replaced. Its
+            own run clears the folder on the way in, so one that is there belongs to
+            something else: two sequences whose names came out the same, most likely,
+            which is a mistake rather than a second attempt. Defaults to `False`.
         data_range: The value range SSIM and PSNR are scored against; taken from the
             frame dtype when omitted, which a float frame has none to give.
         padding_mode: `grid_sample` out-of-bounds policy for both warps.

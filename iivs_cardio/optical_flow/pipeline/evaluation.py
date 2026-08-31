@@ -229,8 +229,10 @@ class Spread(Measured):
     reader knows that where this cannot.
 
     Attributes:
-        scored: As `Measured`, summed over the sequences.
-        mean: As `Measured`, weighted by each sequence's own `scored`.
+        scored: How many pairs this metric was measured on, finitely, summed over the
+            sequences.
+        mean: The mean over those, weighted by each sequence's own `scored`, or `0`
+            where there were none.
         minimum: The lowest sequence mean, or `0` where none was scored.
         maximum: The highest, on the same terms.
         min_source: The sequence holding `minimum`, empty where none was.
