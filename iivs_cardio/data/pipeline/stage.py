@@ -24,9 +24,11 @@ class SequenceStageRun(StageRun["PhaseFilteredSequence"]):
     branches watch it directly.
 
     Args:
-        sequences: As `StageRun`.
-        branches: As `StageRun`, each asked for a hook with the sequence itself.
-        name: As `StageRun`.
+        sequences: The sequences to run, in the order they will be offered.
+        branches: The branches to watch each sequence with, such as a writer or a meter.
+            Each is asked for a hook with the sequence itself, a sequence being its own
+            stage here.
+        name: The run's name, which every line of it is filed under.
     """
 
     def __init__(
