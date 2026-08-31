@@ -290,10 +290,18 @@ class RangeWriter(ResultWriter[SequenceRange]):
     sequence's result.
 
     Args:
-        root: As `ResultWriter`.
-        source: As `ResultWriter`.
-        settings: As `ResultWriter`.
-        overwrite: As `ResultWriter`.
+        root: The folder the result is written into, created if it is not there.
+        source: The name the sequence has, used both in the record and as the name of
+            the file it is written to.
+        settings: The settings that shaped the ranges, written into the result so it can
+            be told from one an earlier run left under different ones. The document
+            carries the same block, and a result outliving the document is the case that
+            needs its own copy. Defaults to `None`, which records nothing and so can
+            never be reused.
+        overwrite: Whether a result already filed under `source` may be replaced. Its
+            own run clears the folder on the way in, so one that is there belongs to
+            something else: two sequences whose names came out the same, most likely,
+            which is a mistake rather than a second attempt. Defaults to `False`.
     """
 
     def __init__(
@@ -362,15 +370,21 @@ class RangeDocument(DocumentBranch["Named", SequenceRange, DatasetRange, RangeWr
     """The document a phase stage writes, gathering every sequence's range.
 
     Attributes:
-        RESULTS_SUFFIX: As `DocumentBranch`.
-        path: As `DocumentBranch`.
-        results_root: As `DocumentBranch`.
-        source: As `DocumentBranch`.
-        contents: As `DocumentBranch`.
-        settings: As `DocumentBranch`.
-        selected: As `DocumentBranch`.
-        if_present: As `DocumentBranch`.
-        if_unsourced: As `DocumentBranch`.
+        RESULTS_SUFFIX: What the folder of results beside the document is called.
+        path: The document itself, extension included.
+        results_root: The folder each sequence's range is written into.
+        source: The dataset root the run read, recorded so two documents can be told
+            apart before anyone merges them.
+        contents: Every sequence the source holds, each mapped to the frames its range
+            is measured over. A range is one frame in and one out, so a sequence is owed
+            a frame range for every name here.
+        settings: The block a later run would compare against this one, `None` where
+            nothing was recorded and so nothing can be reused.
+        selected: The sequences of the contents this run was given to cover, repeats
+            counted once.
+        if_present: The policy for a sequence that already has a range here. `"reuse"`
+            keeps one still describing this run and measures the rest.
+        if_unsourced: The policy for a range whose sequence the source has lost.
     """
 
     @override
