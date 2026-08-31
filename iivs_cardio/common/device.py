@@ -24,10 +24,10 @@ DEVICE_KINDS: Final[frozenset[DeviceKind]] = frozenset(literal_values(DeviceKind
 def _cuda_count() -> int:
     """Count the CUDA devices the driver reports, 0 when there is no driver.
 
-    Deliberately not guarded by `torch.cuda.is_available()`, which initializes
-    CUDA in whichever process asks: a pool started by forking after that gives
-    every worker a context it cannot use. This answers without doing so, and
-    already answers 0 where the guard was there to.
+    Deliberately not guarded by `torch.cuda.is_available()`, which initializes CUDA in
+    whichever process asks: a pool started by forking after that gives every worker a
+    context it cannot use. This answers without doing so, and already answers 0 where
+    the guard was there to.
     """
     return torch.cuda.device_count()
 
@@ -40,18 +40,18 @@ class Device:
     """One compute device, in the form every library in this stack must agree on.
 
     torch carries a device on each tensor, but `cv2.cuda` and CuPy each keep a
-    process-global current device instead. Naming a device is therefore not the
-    same as working on it, and this type separates the two: the value says which
-    device, and pointing the libraries at it is a distinct step.
+    process-global current device instead. Naming a device is therefore not the same as
+    working on it, and this type separates the two: the value says which device, and
+    pointing the libraries at it is a distinct step.
 
-    A `cuda` device always carries a concrete index, so it compares equal to what
-    a tensor reports; `cpu` is unnumbered. Construct through `resolve` to accept
-    what a caller writes; the constructor is for a kind and index already known.
+    A `cuda` device always carries a concrete index, so it compares equal to what a
+    tensor reports; `cpu` is unnumbered. Construct through `resolve` to accept what a
+    caller writes; the constructor is for a kind and index already known.
 
     Args:
         kind: The family of device.
-        index: The CUDA device to name. Ignored for `cpu`, which takes no
-            index. Defaults to `None`, which comes to `0` on cuda.
+        index: The CUDA device to name. Ignored for `cpu`, which takes no index.
+            Defaults to `None`, which comes to `0` on cuda.
 
     Raises:
         ValueError: If `kind` is not a known kind, or `index` is negative.
@@ -86,8 +86,8 @@ class Device:
         `torch.device` is read as-is, and a `Device` passes through, so a layer may
         re-resolve what it was handed without knowing which form it arrived in.
 
-        A CUDA index is not checked against the host here, since a caller naming
-        one device is describing what it already holds. `resolve_all` makes that check,
+        A CUDA index is not checked against the host here, since a caller naming one
+        device is describing what it already holds. `resolve_all` makes that check,
         since naming a set is planning work across it.
 
         Args:
@@ -122,9 +122,9 @@ class Device:
         """Resolve each spec, and check that every CUDA index is one this host has.
 
         The plural of `resolve`, plus the bound check a single spec cannot usefully
-        make: an index that is not there has to fail now rather than when a tensor
-        first moves. Duplicates are kept, so `["cpu", "cpu"]` is two workers on the
-        CPU. The driver is asked only when a CUDA device is actually named.
+        make: an index that is not there has to fail now rather than when a tensor first
+        moves. Duplicates are kept, so `["cpu", "cpu"]` is two workers on the CPU. The
+        driver is asked only when a CUDA device is actually named.
 
         Args:
             specs: The devices to resolve, in the order they are wanted.
@@ -134,8 +134,8 @@ class Device:
             The normalized devices, in the order given.
 
         Raises:
-            ValueError: If a spec is malformed, a kind is not in `supported`, or a
-                CUDA index is beyond what this host reports.
+            ValueError: If a spec is malformed, a kind is not in `supported`, or a CUDA
+                index is beyond what this host reports.
         """
         devices = tuple(cls.resolve(spec, supported) for spec in specs)
 
@@ -156,8 +156,8 @@ class Device:
     def visible_cuda(cls) -> tuple[Device, ...]:
         """Every CUDA device this process can see, in index order.
 
-        Empty when the driver reports none, which a caller asking to spread work
-        across GPUs should treat as a configuration error rather than as zero work.
+        Empty when the driver reports none, which a caller asking to spread work across
+        GPUs should treat as a configuration error rather than as zero work.
         """
         return tuple(cls("cuda", index) for index in range(_cuda_count()))
 
@@ -165,8 +165,8 @@ class Device:
     def as_torch(self) -> torch.device:
         """This device as torch names it, for the calls that take one.
 
-        Named apart from the module rather than `torch`: a member of that name
-        shadows it for every annotation in this class body.
+        Named apart from the module rather than `torch`: a member of that name shadows
+        it for every annotation in this class body.
         """
         if self.index is None:
             return torch.device(self.kind)
@@ -180,14 +180,14 @@ class Device:
     def activate(self) -> None:
         """Point this process's CUDA libraries at this device.
 
-        torch takes the device from each tensor it is given, but `cv2.cuda` and
-        CuPy each read a process-global current device instead. Both default to
-        device 0 and nothing else here moves them, so on any GPU but the first
-        they disagree with the tensors they are handed: CuPy would label a
-        pointer from device 1 as device 0's. A `cpu` device has nothing to bind.
+        torch takes the device from each tensor it is given, but `cv2.cuda` and CuPy
+        each read a process-global current device instead. Both default to device 0 and
+        nothing else here moves them, so on any GPU but the first they disagree with the
+        tensors they are handed: CuPy would label a pointer from device 1 as device 0's.
+        A `cpu` device has nothing to bind.
 
-        Cheap enough to repeat per item on a hot path rather than hoisted into
-        worker setup, which a lone in-process run would then have to duplicate.
+        Cheap enough to repeat per item on a hot path rather than hoisted into worker
+        setup, which a lone in-process run would then have to duplicate.
         """
         if self.index is None:  # cpu, since only a cuda device carries an index
             return

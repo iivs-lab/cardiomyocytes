@@ -45,13 +45,13 @@ def _hw_channels(shape: tuple[int, ...]) -> tuple[int, int, int]:
     """Read `(height, width, channels)` off a `(H, W)` or `(H, W, C)` shape.
 
     Channels come last because that is how a `GpuMat` lays them out, one pixel's
-    channels together. A tensor on its way into one is read in the destination's
-    layout, and a caller that wants torch's `(C, H, W)` permutes at the boundary
-    rather than here, where a permute would cost the copy this module avoids.
+    channels together. A tensor on its way into one is read in the destination's layout,
+    and a caller that wants torch's `(C, H, W)` permutes at the boundary rather than
+    here, where a permute would cost the copy this module avoids.
 
     Rejecting any other rank here is what keeps a wrong one from being read as a
-    plausible frame: a 4-D shape otherwise reaches `_cv_type` as a channel count
-    it never had, or the assignment below as a broadcast that cannot work.
+    plausible frame: a 4-D shape otherwise reaches `_cv_type` as a channel count it
+    never had, or the assignment below as a broadcast that cannot work.
 
     Raises:
         ValueError: If `shape` is neither 2-D nor 3-D.
@@ -69,14 +69,14 @@ def _hw_channels(shape: tuple[int, ...]) -> tuple[int, int, int]:
 def gpumat_to_cupy(gm: cv2.cuda.GpuMat) -> cp.ndarray:
     """Zero-copy view of a `cv2.cuda.GpuMat` as a CuPy array.
 
-    The GpuMat's device memory is wrapped (not copied); its row padding (`step`)
-    is honored through the CuPy strides. The view stays valid only while `gm`
-    lives, so `gm` is held as the memory's owner to keep it alive.
+    The GpuMat's device memory is wrapped (not copied); its row padding (`step`) is
+    honored through the CuPy strides. The view stays valid only while `gm` lives, so
+    `gm` is held as the memory's owner to keep it alive.
 
-    The memory is labelled with cv2's current device, since a GpuMat does not
-    report its own and CuPy would otherwise attribute the pointer to whichever
-    device CuPy happens to be on. That is only the right answer while one
-    process works on one GPU, which `Device.activate` is what establishes.
+    The memory is labelled with cv2's current device, since a GpuMat does not report its
+    own and CuPy would otherwise attribute the pointer to whichever device CuPy happens
+    to be on. That is only the right answer while one process works on one GPU, which
+    `Device.activate` is what establishes.
     """
     width, height = gm.size()
     channels = gm.channels()
@@ -103,9 +103,9 @@ def gpumat_to_cupy(gm: cv2.cuda.GpuMat) -> cp.ndarray:
 def cupy_to_gpumat(arr: cp.ndarray) -> cv2.cuda.GpuMat:
     """Copy a CuPy array into a fresh `cv2.cuda.GpuMat`, device-to-device.
 
-    Allocates a GpuMat of matching shape/dtype and copies `arr` into it on the
-    device (no host round-trip). Accepts `(H, W)` or `(H, W, C)` arrays, and
-    rejects any other rank.
+    Allocates a GpuMat of matching shape/dtype and copies `arr` into it on the device
+    (no host round-trip). Accepts `(H, W)` or `(H, W, C)` arrays, and rejects any other
+    rank.
     """
     height, width, channels = _hw_channels(arr.shape)
     gm = cv2.cuda.GpuMat(height, width, _cv_type(arr.dtype.type, channels))
@@ -119,10 +119,10 @@ def tensor_to_gpumat(
     """Copy a CUDA `torch.Tensor` into a `cv2.cuda.GpuMat`, device-to-device.
 
     Copies into `out` in place when given, sizing it to `tensor` (a no-op when it
-    already matches) so a reused buffer skips a per-call allocation. Without one
-    it allocates a fresh GpuMat. Accepts `(H, W)` or `(H, W, C)` tensors and rejects
-    any other rank; `tensor` must live on a CUDA device (else `cp.asarray` would
-    silently host->device copy).
+    already matches) so a reused buffer skips a per-call allocation. Without one it
+    allocates a fresh GpuMat. Accepts `(H, W)` or `(H, W, C)` tensors and rejects any
+    other rank; `tensor` must live on a CUDA device (else `cp.asarray` would silently
+    host->device copy).
     """
     if not tensor.is_cuda:
         msg = f"tensor_to_gpumat expects a CUDA tensor, got one on {tensor.device}"
@@ -142,7 +142,7 @@ def tensor_to_gpumat(
 def gpumat_to_tensor(gm: cv2.cuda.GpuMat) -> torch.Tensor:
     """Copy a `cv2.cuda.GpuMat` into a CUDA `torch.Tensor` that owns its memory.
 
-    The GpuMat is viewed as a CuPy array (zero-copy) and cloned into a tensor on
-    the same device, so the result stays valid after `gm` is freed or reused.
+    The GpuMat is viewed as a CuPy array (zero-copy) and cloned into a tensor on the
+    same device, so the result stays valid after `gm` is freed or reused.
     """
     return torch.as_tensor(gpumat_to_cupy(gm)).clone()
