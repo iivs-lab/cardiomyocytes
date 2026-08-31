@@ -44,9 +44,10 @@ class OpenCVConfig(EstimatorConfig, ABC):
     implementation for a device.
 
     Attributes:
-        SUPPORTED_DEVICES: As `EstimatorConfig`, narrowed by a subclass whose algorithm
-            does not run everywhere.
-        FRAME_DTYPE: As `EstimatorConfig`: cv2's dense algorithms read an 8-bit
+        SUPPORTED_DEVICES: The device kinds this algorithm has an implementation for,
+            narrowed by a subclass whose algorithm does not run everywhere.
+        FRAME_DTYPE: The dtype the built estimator takes its frames in, which is what a
+            normalizer upstream scales onto: cv2's dense algorithms read an 8-bit
             single-channel image, whatever the algorithm.
     """
 
@@ -193,7 +194,7 @@ class CPUBackend(Backend):
         algorithm: The cv2 algorithm to call.
         device: The CPU, which is not asked for: there is one of it, where a host with
             several GPUs has a CUDA device to choose between.
-        retained: As `Backend`.
+        retained: Whether a frame is retained, so the next `push` yields a flow.
     """
 
     algorithm: cv2.DenseOpticalFlow
@@ -237,8 +238,9 @@ class CUDABackend(Backend):
         algorithm: The cv2 algorithm to call.
         device: The device it and the buffers live on, which has to be a CUDA one and is
             refused otherwise.
-        retained: As `Backend`. Held as a flag of its own rather than read off an empty
-            buffer, so `reset` keeps the buffers it has.
+        retained: Whether a frame is retained, so the next `push` yields a flow. Held as
+            a flag of its own rather than read off an empty buffer, so `reset` keeps the
+            buffers it has.
 
     Raises:
         ValueError: If `device` is not a CUDA device.
@@ -324,8 +326,8 @@ class OpenCVEstimator(OpticalFlowEstimator):
     Attributes:
         algorithm: The cv2 algorithm itself, which is where the settings it was made
             with can be read back from.
-        device: As `OpticalFlowEstimator`, the device the algorithm was made on.
-        is_cuda: As `OpticalFlowEstimator`.
+        device: The device this estimator runs on, which the algorithm was made on.
+        is_cuda: Whether that device is a CUDA one.
     """
 
     def __init__(self, backend: Backend) -> None:

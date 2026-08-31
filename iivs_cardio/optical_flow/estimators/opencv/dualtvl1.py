@@ -24,7 +24,8 @@ class DualTVL1Config(OpenCVConfig):
     four on the other device runs to the end and reports no difference.
 
     Attributes:
-        SUPPORTED_DEVICES: As `EstimatorConfig`: cv2 implements TV-L1 for both.
+        SUPPORTED_DEVICES: The device kinds this algorithm has an implementation for,
+            which is both: cv2 implements TV-L1 for each.
         tau: The time step of the dual ascent.
         lambda_: The weight the data term carries against smoothness.
         theta: The tightness coupling the two variables.
