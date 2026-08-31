@@ -10,9 +10,9 @@ from jaxtyping import Float32, Real, jaxtyped
 from torch import Tensor, nn
 from torch.nn.functional import grid_sample
 
-ImageType = Real[Tensor, "*dim H W"]
-OffsetType = Float32[Tensor, "*dim 2 H W"]
-PaddingMode = Literal["border", "zeros", "reflection"]
+type ImageType = Real[Tensor, "*dim H W"]
+type OffsetType = Float32[Tensor, "*dim 2 H W"]
+type PaddingMode = Literal["border", "zeros", "reflection"]
 
 
 def _norm_scale(image: Tensor) -> Tensor:
@@ -59,6 +59,17 @@ def _warp_with_grid(
     scale: Tensor,
     padding_mode: PaddingMode,
 ) -> Tensor:
+    """Sample `image` at `grid + offset`, which is where both callers warp.
+
+    `grid` and `scale` are the caller's to have built for this `image`, freshly or from
+    a cache, and nothing here checks that they were: a grid of another size reaches
+    `grid_sample` as a shape error rather than as a wrong answer. The runtime typecheck
+    `backward_warp` carries does not reach here either, so `BackwardWarp.forward` holds
+    its callers to the same contract without one.
+
+    A float `image` keeps the fractional values sampling produces; an integer one is
+    rounded and clamped back to its own range.
+    """
     *batch, height, width = image.shape
     images = image.reshape(-1, 1, height, width)  # the (N, C, H, W) grid_sample wants
     offsets = offset.reshape(-1, 2, height, width)
