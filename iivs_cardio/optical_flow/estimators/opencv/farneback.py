@@ -30,7 +30,7 @@ class FarnebackConfig(OpenCVConfig):
         num_iters: The iterations run at each level.
         poly_n: The neighbourhood the polynomial is fitted over.
         poly_sigma: The gaussian weighting that fit uses.
-        flags: cv2's own flag word, passed through.
+        flags: The flag word cv2 reads, passed through rather than interpreted.
     """
 
     num_levels: int = 3

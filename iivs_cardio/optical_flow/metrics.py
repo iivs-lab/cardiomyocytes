@@ -121,7 +121,7 @@ def warp_consistency(
         padding_mode: `grid_sample` out-of-bounds policy. Sampling at `grid + flow`
             leaves the frame wherever the flow diverges, so this decides what those
             pixels contribute.
-        reduce: average over the batch to a 0-d scalar per metric. `False` keeps one
+        reduce: Average over the batch to a 0-d scalar per metric. `False` keeps one
             score per pair, shaped `(*dim)`.
     """
     warped = backward_warp(frame2, flow, padding_mode=padding_mode)
@@ -150,7 +150,7 @@ def identity_ssim(
         frame2: `(*dim, H, W)` frame(s) that a flow would have been warped from.
         data_range: SSIM value range; inferred from the frame dtype when omitted,
             required for float frames.
-        reduce: average over the batch to a 0-d scalar. `False` keeps one score per
+        reduce: Average over the batch to a 0-d scalar. `False` keeps one score per
             pair, shaped `(*dim)`.
 
     Returns:
@@ -190,7 +190,7 @@ def forward_backward_error(
         backward: `(*dim, 2, H, W)` float32 flow `frame2 -> frame1`, which is the same
             pair the other way round rather than a neighbouring pair.
         padding_mode: `grid_sample` out-of-bounds policy for the warp.
-        reduce: average over the batch to a 0-d scalar. `False` keeps one error per
+        reduce: Average over the batch to a 0-d scalar. `False` keeps one error per
             pair, shaped `(*dim)`.
 
     Returns:
@@ -214,7 +214,7 @@ def flow_magnitude(flow: FlowType, *, reduce: bool = True) -> Tensor:
 
     Args:
         flow: `(*dim, 2, H, W)` float32 flow.
-        reduce: average over the batch to a 0-d scalar. `False` keeps one magnitude per
+        reduce: Average over the batch to a 0-d scalar. `False` keeps one magnitude per
             pair, shaped `(*dim)`.
     """
     return _reduce_field(flow, reduce=reduce)
@@ -242,7 +242,7 @@ class WarpConsistency(nn.Module):
         data_range: PSNR/SSIM value range; inferred from the frame dtype when omitted,
             required for float frames.
         padding_mode: `grid_sample` out-of-bounds policy for the warp.
-        reduce: average over the batch to a 0-d scalar per metric. `False` keeps one
+        reduce: Average over the batch to a 0-d scalar per metric. `False` keeps one
             score per pair, shaped `(*dim)`.
 
     Attributes:
