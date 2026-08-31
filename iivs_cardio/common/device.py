@@ -82,11 +82,10 @@ class Device:
     def activate(self) -> None:
         """Point this process's CUDA libraries at this device.
 
-        torch takes the device from each tensor it is given, but `cv2.cuda` and CuPy
-        each read a process-global current device instead. Both default to device 0 and
-        nothing else here moves them, so on any GPU but the first they disagree with the
-        tensors they are handed: CuPy would label a pointer from device 1 as device 0's.
-        A `cpu` device has nothing to bind.
+        Both `cv2.cuda` and CuPy default to device 0 and nothing else here moves them,
+        so on any GPU but the first they disagree with the tensors they are handed: CuPy
+        would label a pointer from device 1 as device 0's. A `cpu` device has nothing to
+        bind.
 
         Cheap enough to repeat per item on a hot path rather than hoisted into worker
         setup, which a lone in-process run would then have to duplicate.
@@ -125,8 +124,7 @@ class Device:
         re-resolve what it was handed without knowing which form it arrived in.
 
         A CUDA index is not checked against the host here, since a caller naming one
-        device is describing what it already holds. `resolve_all` makes that check,
-        since naming a set is planning work across it.
+        device is describing what it already holds. `resolve_all` makes that check.
 
         Args:
             spec: The device to resolve, in any form a caller may write.
@@ -138,7 +136,6 @@ class Device:
         Raises:
             ValueError: If `spec` is malformed, or its kind is not in `supported`.
         """
-
         if isinstance(spec, Device):
             kind, index = spec.kind, spec.index
         else:
@@ -159,10 +156,10 @@ class Device:
     ) -> tuple[Device, ...]:
         """Resolve each spec, and check that every CUDA index is one this host has.
 
-        The plural of `resolve`, plus the bound check a single spec cannot usefully
-        make: an index that is not there has to fail now rather than when a tensor first
-        moves. Duplicates are kept, so `["cpu", "cpu"]` is two workers on the CPU. The
-        driver is asked only when a CUDA device is actually named.
+        The bound check is one a single spec cannot usefully make: an index that is not
+        there has to fail now rather than when a tensor first moves. Duplicates are
+        kept, so `["cpu", "cpu"]` is two workers on the CPU. The driver is asked only
+        when a CUDA device is actually named.
 
         Args:
             specs: The devices to resolve, in the order they are wanted.
@@ -195,8 +192,7 @@ def _cuda_count() -> int:
     """Count the CUDA devices the driver reports, 0 when there is no driver.
 
     Deliberately not guarded by `torch.cuda.is_available()`, which initializes CUDA in
-    whichever process asks: a pool started by forking after that gives every worker a
-    context it cannot use. This answers without doing so, and already answers 0 where
+    whichever process asks. This answers without doing so, and already answers 0 where
     the guard was there to.
     """
     return torch.cuda.device_count()
