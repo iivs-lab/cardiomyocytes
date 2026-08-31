@@ -61,10 +61,13 @@ class PreprocessSourceConfig(PhaseSourceConfig):
     """The tree this stage reads, which is phase as it comes off the microscope.
 
     Attributes:
-        DEFAULT_SUBPATH: As `PhaseSourceConfig`.
-        subpath: As `PhaseSourceConfig`.
-        root: As `PhaseSourceConfig`.
-        frames: As `PhaseSourceConfig`.
+        DEFAULT_SUBPATH: Koala's own layout, which is where a phase sequence comes off
+            the microscope. A tree holding another modality names its own `subpath`, and
+            one that names the wrong layout is found empty.
+        subpath: The path to a sequence's frames inside its own folder. Defaults to
+            `None`, which takes `DEFAULT_SUBPATH`.
+        root: The folder the sequences sit under.
+        frames: Which frames of each sequence to take. Defaults to all of them.
     """
 
 
@@ -75,11 +78,20 @@ class FrameBranchConfig(TreeBranchConfig):
     Attributes:
         DEFAULT_SUBPATH: Where the frames go for a branch that names no layout and is
             given nothing to follow.
-        save: As `TreeBranchConfig`.
-        subpath: As `TreeBranchConfig`.
-        record_file: As `TreeBranchConfig`.
-        if_present: As `TreeBranchConfig`.
-        if_unsourced: As `TreeBranchConfig`.
+        save: Whether to write the filtered frames at all. Defaults to `False`.
+        subpath: The path a written sequence keeps its frames at inside its own folder.
+            Naming one is what lets a run write beside the frames it read rather than
+            over them. Defaults to `None`, which puts them where the source keeps its
+            own.
+        record_file: The name of the file each written folder keeps its own account in,
+            given `.json` if it has no extension. A later run reads it to decide whether
+            what is there still describes this run. Defaults to `"source"`.
+        if_present: The policy for a sequence this output already covers, judged by the
+            settings and the source frames' names rather than by what those frames hold.
+            A source re-exported under the same names is kept rather than written again,
+            so a run that follows one takes `"overwrite"`. Defaults to `"error"`.
+        if_unsourced: The policy for a folder whose sequence the source no longer holds.
+            Defaults to `"keep"`.
     """
 
     DEFAULT_SUBPATH: ClassVar[str] = "frames"
@@ -93,9 +105,12 @@ class RangeBranchConfig(BranchConfig):
         save: Whether to write the document. Defaults to `True`.
         file: The name the document is given, given `.json` if it has no extension.
             Defaults to `"value_range"`.
-        if_present: As `BranchConfig`, judged by the settings and the source frames'
-            names rather than by what those frames hold.
-        if_unsourced: As `BranchConfig`.
+        if_present: The policy for a sequence the document already covers, judged by the
+            settings and the source frames' names rather than by what those frames hold.
+            `"reuse"` keeps what an earlier run left that still describes this one, and
+            measures the rest. Defaults to `"error"`.
+        if_unsourced: The policy for a range whose sequence the source no longer holds.
+            Defaults to `"keep"`.
     """
 
     save: bool = True
@@ -123,11 +138,12 @@ class PreprocessInputs(StageInputs["PreprocessSourceConfig"]):
     """The whole of what this stage's `main` reads out of its configuration.
 
     Attributes:
-        source: As `StageInputs`, which for this stage is phase as it comes off the
-            microscope.
-        select: As `StageInputs`.
-        kernel: As `StageInputs`.
-        compute: As `StageInputs`.
+        source: The tree the sequences are read from, which for this stage is phase as
+            it comes off the microscope.
+        select: Which of its sequences to take.
+        kernel: The filter each frame goes through, which is a kernel that does nothing
+            where the configuration named none.
+        compute: The devices to run on, and what to report.
         target: What to write, one block per branch.
     """
 
