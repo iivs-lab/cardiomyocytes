@@ -40,29 +40,27 @@ RECORD_FILE: Final = "source.json"
 class FrameWriter[T, E = Path]:
     """A hook that writes the frames it is given, one file each.
 
-    Frames are numbered from the first that arrives rather than from the
-    source, and staged until a clean close. What the renumbering loses,
-    `record` keeps.
+    Frames are numbered from the first that arrives rather than from the source, and
+    staged until a clean close. What the renumbering loses, `record` keeps.
 
     Type Parameters:
         T: The type of one frame, as `save_fn` expects it.
-        E: The type of what a step says about where its frame came from,
-            which `source_fn` reads. Defaults to `Path`.
+        E: The type of what a step says about where its frame came from, which
+            `source_fn` reads. Defaults to `Path`.
 
     Args:
         dest: The folder the finished frames go into.
-        save_fn: A function writing one frame into a folder, under the
-            number it is given. Naming it is the caller's, since the name a
-            format takes and the format itself are one choice.
-        source_fn: A function naming where one frame came from, from what its
-            step carries. Read only where a `record` is filed.
-        overwrite: Whether an existing folder may be replaced. Defaults to
-            False.
-        record: The block the folder should carry about itself, beside the
-            source names the writer collects. Defaults to `None`, which files
-            nothing and asks nothing of the steps.
-        record_file: The name that block is filed under, given `.json` if it
-            has no extension. Defaults to `RECORD_FILE`.
+        save_fn: A function writing one frame into a folder, under the number it is
+            given. Naming it is the caller's, since the name a format takes and the
+            format itself are one choice.
+        source_fn: A function naming where one frame came from, from what its step
+            carries. Read only where a `record` is filed.
+        overwrite: Whether an existing folder may be replaced. Defaults to False.
+        record: The block the folder should carry about itself, beside the source names
+            the writer collects. Defaults to `None`, which files nothing and asks
+            nothing of the steps.
+        record_file: The name that block is filed under, given `.json` if it has no
+            extension. Defaults to `RECORD_FILE`.
 
     Raises:
         FileExistsError: If the destination is there and `overwrite` is not set.
@@ -105,12 +103,12 @@ class FrameWriter[T, E = Path]:
     def write(self, step: Step[T, E]) -> None:
         """Write the frame in `step`, numbered after the last one written.
 
-        A step carrying no frame is passed over, which is what lets a sequence
-        start late or end early.
+        A step carrying no frame is passed over, which is what lets a sequence start
+        late or end early.
 
         Raises:
-            ValueError: If a frame does not follow the one before it at the
-                source, since the numbering here would close the gap.
+            ValueError: If a frame does not follow the one before it at the source,
+                since the numbering here would close the gap.
         """
         if step.value is None:
             return
@@ -131,8 +129,8 @@ class FrameWriter[T, E = Path]:
     def report(self) -> str | None:
         """Return one line naming how many frames landed, or `None` before any did.
 
-        Nothing is reported until the folder reaches its destination, since a
-        sequence that gave up has none to point at however many it staged.
+        Nothing is reported until the folder reaches its destination, since a sequence
+        that gave up has none to point at however many it staged.
         """
         if not self._committed:
             return None
@@ -142,8 +140,8 @@ class FrameWriter[T, E = Path]:
     def _save_record(self) -> None:
         """Write what the folder says about itself, into the staged folder.
 
-        Into the staged one, so the move that makes the frames visible makes
-        this visible with them.
+        Into the staged one, so the move that makes the frames visible makes this
+        visible with them.
         """
         if self._record is None:
             return
@@ -155,9 +153,9 @@ class FrameWriter[T, E = Path]:
     def _abort(self) -> None:
         """Drop the staged folder, and the empty ones opening it made.
 
-        Left behind, they put an empty sequence in the output tree. The climb
-        stops below what was already standing, and at the first folder
-        something else landed in meanwhile.
+        Left behind, they put an empty sequence in the output tree. The climb stops
+        below what was already standing, and at the first folder something else landed
+        in meanwhile.
         """
         self._staged.abort()
 
@@ -167,8 +165,8 @@ class FrameWriter[T, E = Path]:
         """Take the writer, refusing one that has been through a walk already.
 
         Raises:
-            RuntimeError: If it has been opened before. Closing takes the
-                staged folder away, so a second walk writes where nothing is.
+            RuntimeError: If it has been opened before. Closing takes the staged folder
+                away, so a second walk writes where nothing is.
         """
         if self._entered:
             msg = f"{self._staged.path} was opened already: one writer per walk"
@@ -186,12 +184,12 @@ class FrameWriter[T, E = Path]:
     ) -> None:
         """Move the folder into place, unless nothing was written or it failed.
 
-        A move that fails takes the staged folder with it, the only other
-        reference to it dying with the process.
+        A move that fails takes the staged folder with it, the only other reference to
+        it dying with the process.
 
         Raises:
-            ValueError: If the sequence ended without a single frame, an empty
-                folder reading as a finished one.
+            ValueError: If the sequence ended without a single frame, an empty folder
+                reading as a finished one.
         """
         if exc_type is not None:
             self._abort()
@@ -215,13 +213,13 @@ class FrameWriter[T, E = Path]:
 class FrameBranch[N: Named, T](DatasetBranch):
     """The side branch that writes each sequence back out under a new root.
 
-    A written sequence keeps the name and the layout it had in the source, so
-    the result can be read by whatever reads the source.
+    A written sequence keeps the name and the layout it had in the source, so the result
+    can be read by whatever reads the source.
 
-    A subclass says two things and inherits the rest: how to make the writer
-    for one sequence, and how many frames this stage owes that sequence. The
-    second is not always as many as the source holds, and a stage that gives
-    back fewer would otherwise never reuse anything it wrote.
+    A subclass says two things and inherits the rest: how to make the writer for one
+    sequence, and how many frames this stage owes that sequence. The second is not
+    always as many as the source holds, and a stage that gives back fewer would
+    otherwise never reuse anything it wrote.
 
     Type Parameters:
         N: The sequence a writer is made for, named the way the tree files it.
@@ -229,31 +227,31 @@ class FrameBranch[N: Named, T](DatasetBranch):
 
     Attributes:
         root: The directory the tree is written under.
-        subpath: The path to a sequence's frames inside its own folder. Empty
-            reads back only for a dataset whose names are one level deep, a
-            sequence being recognised by holding this.
-        contents: Every sequence the source holds, which is what tells a folder
-            with no sequence behind it from one this run did not take. An empty
-            one would leave every folder here unsourced.
-        settings: The settings that shaped the frames, filed inside each
-            sequence's folder beside the source names its writer collected.
-            Defaults to `None`, which files nothing.
-        selected: The sequences of the contents this run was given to write,
-            repeats counted once. Taking all of them when `None` is given.
-        record_file: The name each written folder keeps its own account under,
-            given `.json` if it has no extension. A folder is read back by this
-            name too. Defaults to `RECORD_FILE`.
-        if_present: The policy for a sequence that already has a folder here.
-            `"reuse"` keeps one whose record still describes this run and writes
-            the rest. Defaults to `"error"`.
+        subpath: The path to a sequence's frames inside its own folder. Empty reads back
+            only for a dataset whose names are one level deep, a sequence being
+            recognised by holding this.
+        contents: Every sequence the source holds, which is what tells a folder with no
+            sequence behind it from one this run did not take. An empty one would leave
+            every folder here unsourced.
+        settings: The settings that shaped the frames, filed inside each sequence's
+            folder beside the source names its writer collected. Defaults to `None`,
+            which files nothing.
+        selected: The sequences of the contents this run was given to write, repeats
+            counted once. Taking all of them when `None` is given.
+        record_file: The name each written folder keeps its own account under, given
+            `.json` if it has no extension. A folder is read back by this name too.
+            Defaults to `RECORD_FILE`.
+        if_present: The policy for a sequence that already has a folder here. `"reuse"`
+            keeps one whose record still describes this run and writes the rest.
+            Defaults to `"error"`.
         if_unsourced: The policy for a folder whose sequence the source has lost.
             Defaults to `"keep"`.
 
     Raises:
-        ValueError: If `subpath` is empty for a dataset whose names are
-            nested, if `if_present` or `if_unsourced` is not a policy a tree
-            offers, if `record_file` carries a directory part, or if `selected`
-            names something the contents does not hold.
+        ValueError: If `subpath` is empty for a dataset whose names are nested, if
+            `if_present` or `if_unsourced` is not a policy a tree offers, if
+            `record_file` carries a directory part, or if `selected` names something the
+            contents does not hold.
     """
 
     def __init__(
@@ -296,10 +294,9 @@ class FrameBranch[N: Named, T](DatasetBranch):
     def get_hook(self, source: N) -> FrameWriter[T] | None:
         """Return the writer for `source`, or `None` to keep what is there.
 
-        Whether a folder still stands for this run was settled when the tree
-        opened; this only looks the answer up. The record names the sequence as
-        the dataset does and leaves out the root, an absolute path not
-        surviving a move.
+        Whether a folder still stands for this run was settled when the tree opened;
+        this only looks the answer up. The record names the sequence as the dataset does
+        and leaves out the root, an absolute path not surviving a move.
         """
         if source.name in self._reused:
             return None
@@ -324,15 +321,15 @@ class FrameBranch[N: Named, T](DatasetBranch):
         """Return the writer that puts `source`'s frames under `dest`.
 
         Args:
-            source: The sequence the frames come from, for whatever the format
-                takes from it that a frame alone does not carry.
+            source: The sequence the frames come from, for whatever the format takes
+                from it that a frame alone does not carry.
         """
 
     def list_sequences(self) -> list[str]:
         """Return every sequence this tree already holds frames for, sorted.
 
-        A sequence is recognised by holding `subpath` rather than by the walk
-        reaching it, so nothing below one is ever listed.
+        A sequence is recognised by holding `subpath` rather than by the walk reaching
+        it, so nothing below one is ever listed.
         """
         if not self.root.is_dir():
             return []
@@ -350,9 +347,9 @@ class FrameBranch[N: Named, T](DatasetBranch):
     def _still_describes(self, name: str) -> bool:
         """Whether the folder already written for `name` stands for this run.
 
-        Three things can have moved and none shows in the folder's name: the
-        settings, which frames the source holds by name, and whether the folder
-        still holds all its record says.
+        Three things can have moved and none shows in the folder's name: the settings,
+        which frames the source holds by name, and whether the folder still holds all
+        its record says.
         """
         folder = Path(self.root, name, self.subpath)
 
@@ -378,25 +375,24 @@ class FrameBranch[N: Named, T](DatasetBranch):
     def _count_frames(self, folder: Path) -> int:
         """Count the files the folder holds beside the record it carries.
 
-        Only this tree's own record is set aside: one left under another name
-        counts as a frame, which stops a folder another run wrote from reading
-        as whole here.
+        Only this tree's own record is set aside: one left under another name counts as
+        a frame, which stops a folder another run wrote from reading as whole here.
         """
         return len(search_files(folder, max_depth=1, exclude=self.record_file))
 
     def list_unsourced(self) -> list[str]:
         """Return the sequences this tree holds that the source has lost, sorted.
 
-        A source that looks smaller than it is reads the same from here, so
-        acting on the list is `if_unsourced`'s to decide and naming it is not.
+        A source that looks smaller than it is reads the same from here, so acting on
+        the list is `if_unsourced`'s to decide and naming it is not.
         """
         return [name for name in self.list_sequences() if name not in self.contents]
 
     def drop_unsourced(self) -> list[str]:
         """Remove the folders of sequences the source has lost, and name them.
 
-        The folders a removal empties go with it, so a sequence dropped from a
-        nested dataset does not leave the path down to it standing.
+        The folders a removal empties go with it, so a sequence dropped from a nested
+        dataset does not leave the path down to it standing.
         """
         dropped = []
 
@@ -413,9 +409,8 @@ class FrameBranch[N: Named, T](DatasetBranch):
     def clear_staging(self) -> None:
         """Drop what a writer that did not live to clear up after itself left.
 
-        Only that shape is taken, a hidden name ending in `.tmp`, and only the
-        folders it leaves empty, since a run writes into the directory that
-        keeps its logs too.
+        Only that shape is taken, a hidden name ending in `.tmp`, and only the folders
+        it leaves empty, since a run writes into the directory that keeps its logs too.
         """
         if not self.root.is_dir():
             return
@@ -427,8 +422,8 @@ class FrameBranch[N: Named, T](DatasetBranch):
     def report(self) -> str | None:
         """Return one line naming what was kept and removed, or `None` if neither.
 
-        Not what was written, which the run's own summary already counts, but
-        the two a tree alone knows, both about folders it did not write.
+        Not what was written, which the run's own summary already counts, but the two a
+        tree alone knows, both about folders it did not write.
         """
         said = []
         if self._reused:
@@ -443,15 +438,15 @@ class FrameBranch[N: Named, T](DatasetBranch):
     def __enter__(self) -> Self:
         """Settle what is already here before a single frame is read.
 
-        Judging happens here, with the whole dataset in view and in one
-        process: a worker holds a copy of this branch and nothing it learns
-        comes home. The root is made here too, which a writer would otherwise
-        count among the folders it made and take away when it gave up.
+        Judging happens here, with the whole dataset in view and in one process: a
+        worker holds a copy of this branch and nothing it learns comes home. The root is
+        made here too, which a writer would otherwise count among the folders it made
+        and take away when it gave up.
 
         Raises:
-            FileExistsError: If `if_present` is `"error"` and a sequence this
-                run would write already has a folder here. Refused here rather
-                than at the writer, which meets them one at a time.
+            FileExistsError: If `if_present` is `"error"` and a sequence this run would
+                write already has a folder here. Refused here rather than at the writer,
+                which meets them one at a time.
         """
         ensure_dir_exists(self.root, make=True)
 
@@ -480,9 +475,8 @@ class FrameBranch[N: Named, T](DatasetBranch):
     ) -> None:
         """Clear up after the writers, whether or not the run reached the end.
 
-        Debris always goes, since it is this code's own unfinished business and
-        nothing else will collect it. Whole folders go only where the policy
-        says so.
+        Debris always goes, since it is this code's own unfinished business and nothing
+        else will collect it. Whole folders go only where the policy says so.
         """
         self.clear_staging()
 
