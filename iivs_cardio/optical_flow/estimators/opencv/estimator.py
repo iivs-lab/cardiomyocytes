@@ -27,12 +27,12 @@ if TYPE_CHECKING:
 
 OpenCVAlgorithm = cv2.DenseOpticalFlow | cv2.cuda.DenseOpticalFlow
 
-FrameType = UInt8[Tensor, "H W"]
-FlowType = Float32[Tensor, "2 H W"]
+type FrameType = UInt8[Tensor, "H W"]
+type FlowType = Float32[Tensor, "2 H W"]
 
-BatchFrameType = UInt8[Tensor, "N H W"]
-BatchFlowType = Float32[Tensor, "N 2 H W"]
-ChunkFlowType = Float32[Tensor, "M 2 H W"]
+type BatchFrameType = UInt8[Tensor, "N H W"]
+type BatchFlowType = Float32[Tensor, "N 2 H W"]
+type ChunkFlowType = Float32[Tensor, "M 2 H W"]
 
 
 class OpenCVConfig(EstimatorConfig, ABC):
