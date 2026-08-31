@@ -133,7 +133,8 @@ class SourceConfig(SequenceLayout):
     the one that stage's own trees keep their frames in.
 
     Attributes:
-        DEFAULT_SUBPATH: As `SequenceLayout`, supplied by the stage's subclass.
+        DEFAULT_SUBPATH: The layout this end keeps its frames in, for a config that
+            names none and follows nothing. Supplied by the stage's subclass.
         subpath: The path to a sequence's frames inside its own folder. Defaults to
             `None`, which takes `DEFAULT_SUBPATH`.
         root: The folder the sequences sit under.
@@ -193,10 +194,11 @@ class TreeBranchConfig(BranchConfig, SequenceLayout):
     is the one that stage's own trees keep their frames in.
 
     Attributes:
-        DEFAULT_SUBPATH: As `SequenceLayout`, supplied by the stage's subclass. Never
-            reached while the run has a source to follow, and there to keep a caller
-            without one from writing into the sequence folder itself.
-        save: As `BranchConfig`.
+        DEFAULT_SUBPATH: The layout this end keeps its frames in, supplied by the
+            stage's subclass. Never reached while the run has a source to follow, and
+            there to keep a caller without one from writing into the sequence folder
+            itself.
+        save: Whether to write this output at all. Defaults to `False`.
         subpath: The path a written sequence keeps its frames at inside its own folder.
             Naming one is what lets a run write beside the frames it read rather than
             over them. Defaults to `None`, which puts them where the source keeps its
@@ -204,11 +206,15 @@ class TreeBranchConfig(BranchConfig, SequenceLayout):
         record_file: The name of the file each written folder keeps its own account in,
             given `.json` if it has no extension. A later run reads it to decide whether
             what is there still describes this run. Defaults to `"source"`.
-        if_present: As `BranchConfig`, judged by the settings and the source frames'
-            names rather than by what those frames hold. A source re-exported under the
-            same names is kept rather than written again, so a run that follows one
-            takes `"overwrite"`.
-        if_unsourced: As `BranchConfig`.
+        if_present: The policy for a sequence this output already covers, judged by the
+            settings and the source frames' names rather than by what those frames hold.
+            `"reuse"` keeps what an earlier run left that still describes this one, and
+            writes the rest. A source re-exported under the same names is kept rather
+            than written again, so a run that follows one takes `"overwrite"`. Defaults
+            to `"error"`.
+        if_unsourced: The policy for part of this output whose sequence the source no
+            longer holds. Defaults to `"keep"`: the same absence is what a half mounted
+            share looks like, and what is kept is always said out loud.
     """
 
     record_file: str = "source"

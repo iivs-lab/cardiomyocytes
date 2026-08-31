@@ -53,9 +53,10 @@ class PhaseSourceConfig(SourceConfig):
         DEFAULT_SUBPATH: Koala's own layout, which is where a phase sequence comes off
             the microscope. A tree holding another modality names its own `subpath`, and
             one that names the wrong layout is found empty.
-        subpath: As `SourceConfig`.
-        root: As `SourceConfig`.
-        frames: As `SourceConfig`.
+        subpath: The path to a sequence's frames inside its own folder. Defaults to
+            `None`, which takes `DEFAULT_SUBPATH`.
+        root: The folder the sequences sit under.
+        frames: Which frames of each sequence to take. Defaults to all of them.
     """
 
     DEFAULT_SUBPATH: ClassVar[str] = PHASE_FLOAT_BIN
