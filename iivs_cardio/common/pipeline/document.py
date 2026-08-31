@@ -54,9 +54,9 @@ class Sourced(Protocol):
 class SequenceResult(Sourced, Protocol):
     """Whatever a document needs of one sequence's result.
 
-    Its own source, so a result filed under one name and holding another can be
-    caught, and the frames it covers, so a result written before the source
-    changed can be told from one that still describes it.
+    Its own source, so a result filed under one name and holding another can be caught,
+    and the frames it covers, so a result written before the source changed can be told
+    from one that still describes it.
     """
 
     @property
@@ -83,32 +83,30 @@ class DatasetResult(Protocol):
 class Coverage:
     """How much of the dataset a document accounts for, and how it got there.
 
-    Measured against the whole dataset rather than against what one run was
-    given, since a document may combine results an earlier run left: counting
-    against the selection would say `31 of 31` while the numbers came from 121.
-    Every sequence the source holds is in exactly one of `covered`, `skipped`
-    and `unselected`.
+    Measured against the whole dataset rather than against what one run was given, since
+    a document may combine results an earlier run left: counting against the selection
+    would say `31 of 31` while the numbers came from 121. Every sequence the source
+    holds is in exactly one of `covered`, `skipped` and `unselected`.
 
-    The two names it misses are kept apart because they call for different
-    things. One was given to the run and left no result, which is what a retry is
-    built from; the other was never given, which is what `include` and
-    `exclude` do and needs nothing.
+    The two names it misses are kept apart because they call for different things. One
+    was given to the run and left no result, which is what a retry is built from; the
+    other was never given, which is what `include` and `exclude` do and needs nothing.
 
     Attributes:
         found: How many sequences the source holds.
         selected: How many of those the run was given to cover.
         covered: How many the document has a result for.
-        reused: How many of those came from a result the run did not measure.
-            Defaults to none of them.
-        skipped: The selected names the document has no result for. Defaults to
+        reused: How many of those came from a result the run did not measure. Defaults
+            to none of them.
+        skipped: The selected names the document has no result for. Defaults to no
+            names.
+        unselected: The names the run was not given and has no result for. Defaults to
             no names.
-        unselected: The names the run was not given and has no result for.
-            Defaults to no names.
 
     Raises:
-        ValueError: If the three groups do not add up to what the source holds,
-            if more was selected than found, or if more was reused than
-            covered. None is a coverage a run can have had.
+        ValueError: If the three groups do not add up to what the source holds, if more
+            was selected than found, or if more was reused than covered. None is a
+            coverage a run can have had.
     """
 
     found: int
@@ -156,28 +154,26 @@ def save_document(
 ) -> Path:
     """Write one document, with what was combined and how it was made.
 
-    `coverage` comes before `dataset` so that whoever opens the file to read the
-    numbers meets the statement of what they cover first.
+    `coverage` comes before `dataset` so that whoever opens the file to read the numbers
+    meets the statement of what they cover first.
 
     Args:
         path: The file to write, given `.json` if it has no extension.
-        dataset: The combine the document is written to carry, or `None` when
-            nothing was combined. Combining nothing has no numbers to invent, so
-            the document then carries what it covers and no more.
-        settings: The block a later run would compare to decide whether this
-            document still describes it, such as the filter and the frame step.
-            Defaults to `None`, which records nothing.
-        coverage: The statement of how much of the dataset the combine accounts
-            for. Defaults to `None`, which leaves the document silent on it.
-        overwrite: Whether an existing document may be replaced. Defaults to
-            `False`.
+        dataset: The combine the document is written to carry, or `None` when nothing
+            was combined. Combining nothing has no numbers to invent, so the document
+            then carries what it covers and no more.
+        settings: The block a later run would compare to decide whether this document
+            still describes it, such as the filter and the frame step. Defaults to
+            `None`, which records nothing.
+        coverage: The statement of how much of the dataset the combine accounts for.
+            Defaults to `None`, which leaves the document silent on it.
+        overwrite: Whether an existing document may be replaced. Defaults to `False`.
 
     Returns:
         The path actually written, extension included.
 
     Raises:
-        FileExistsError: If the document is already there and `overwrite` is
-            not set.
+        FileExistsError: If the document is already there and `overwrite` is not set.
     """
     path = ensure_file_extension(path, JSON_EXT, add=True)
 
@@ -208,35 +204,33 @@ def save_document(
 class ResultWriter[S: SequenceResult](ABC):
     """Measure one sequence as its frames go by, then write down the result.
 
-    This is the hook a document hands to a sequence. Writing is how the result
-    gets home: a sequence may be measured in a worker process of its own, and
-    nothing it keeps in memory comes back.
+    This is the hook a document hands to a sequence. Writing is how the result gets
+    home: a sequence may be measured in a worker process of its own, and nothing it
+    keeps in memory comes back.
 
-    A close that follows an error writes nothing, so a result on disk always
-    stands for a sequence that finished. Another hook of the same sequence
-    failing to commit is that same thing seen a moment later, and `revert` is
-    how the result goes with it.
+    A close that follows an error writes nothing, so a result on disk always stands for
+    a sequence that finished. Another hook of the same sequence failing to commit is
+    that same thing seen a moment later, and `revert` is how the result goes with it.
 
-    A subclass says one thing and inherits the rest: what the frames it watched
-    combine into.
+    A subclass says one thing and inherits the rest: what the frames it watched combine
+    into.
 
     Type Parameters:
         S: What this sequence's result holds.
 
     Args:
         root: The folder the result is written into, created if it is not there.
-        source: The name the sequence has, used both in the record and as the
-            name of the file it is written to.
-        settings: The settings that shaped the numbers, written into the result so
-            it can be told from one an earlier run left under different ones.
-            The document carries the same block, and a result outliving the
-            document is the case that needs its own copy. Defaults to `None`,
-            which records nothing and so can never be reused.
-        overwrite: Whether a result already filed under `source` may be replaced.
-            Its own run clears the folder on the way in, so one that is there
-            belongs to something else: two sequences whose names came out the
-            same, most likely, which is a mistake rather than a second attempt.
-            Defaults to `False`.
+        source: The name the sequence has, used both in the record and as the name of
+            the file it is written to.
+        settings: The settings that shaped the numbers, written into the result so it
+            can be told from one an earlier run left under different ones. The document
+            carries the same block, and a result outliving the document is the case that
+            needs its own copy. Defaults to `None`, which records nothing and so can
+            never be reused.
+        overwrite: Whether a result already filed under `source` may be replaced. Its
+            own run clears the folder on the way in, so one that is there belongs to
+            something else: two sequences whose names came out the same, most likely,
+            which is a mistake rather than a second attempt. Defaults to `False`.
     """
 
     def __init__(
@@ -263,8 +257,8 @@ class ResultWriter[S: SequenceResult](ABC):
         """Combine what has been measured so far into this sequence's result.
 
         Raises:
-            ValueError: If nothing has been measured, since a result standing for
-                a sequence that said nothing would count as covered.
+            ValueError: If nothing has been measured, since a result standing for a
+                sequence that said nothing would count as covered.
         """
 
     def __enter__(self) -> Self:
@@ -279,8 +273,8 @@ class ResultWriter[S: SequenceResult](ABC):
         """Write the sequence's result, unless the sequence ended in an error.
 
         Raises:
-            FileExistsError: If a result is already filed under this name and
-                this writer was not told it may replace it.
+            FileExistsError: If a result is already filed under this name and this
+                writer was not told it may replace it.
         """
         if exc_type is not None:
             return
@@ -304,9 +298,9 @@ class ResultWriter[S: SequenceResult](ABC):
         """Take back the result, if this writer got as far as writing one.
 
         A result on disk stands for a sequence that finished, and one whose other
-        outputs could not be committed did not. Taking it back is what puts the
-        sequence back among the skipped rather than leaving the document
-        counting it as covered while its frames are nowhere.
+        outputs could not be committed did not. Taking it back is what puts the sequence
+        back among the skipped rather than leaving the document counting it as covered
+        while its frames are nowhere.
         """
         if not self._saved:
             return
@@ -323,41 +317,40 @@ class ResultWriter[S: SequenceResult](ABC):
 class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBranch):
     """The side branch that gathers a dataset's results into one document.
 
-    It hands each sequence a writer, and each writer leaves its own result in a
-    folder beside the document. Closing it combines the results that belong to the
-    dataset and writes the document, together with a statement of how much of
-    that dataset those results account for.
+    It hands each sequence a writer, and each writer leaves its own result in a folder
+    beside the document. Closing it combines the results that belong to the dataset and
+    writes the document, together with a statement of how much of that dataset those
+    results account for.
 
-    Since the results are read off disk rather than passed back, it does not
-    matter which process measured them.
+    Since the results are read off disk rather than passed back, it does not matter
+    which process measured them.
 
-    A subclass says four things and inherits the rest: what writer to hand a
-    sequence, how to read one result back, how to combine them, and how many values
-    this stage owes a sequence. The last is not always as many as the source
-    holds, and a stage that gives back fewer would otherwise never reuse a result
-    it wrote.
+    A subclass says four things and inherits the rest: what writer to hand a sequence,
+    how to read one result back, how to combine them, and how many values this stage
+    owes a sequence. The last is not always as many as the source holds, and a stage
+    that gives back fewer would otherwise never reuse a result it wrote.
 
     Type Parameters:
-        N: The thing a writer is made for, which is one sequence of a dataset,
-            named the way the document files it.
+        N: The thing a writer is made for, which is one sequence of a dataset, named the
+            way the document files it.
         S: What one sequence's result holds, once read back.
         D: What the results combine into.
         W: The writer itself, as the branch hands it out.
 
     Args:
         path: The file to write the document to, given `.json` if it has none.
-        source: The dataset root the run read, recorded so two documents can be
-            told apart before anyone merges them.
-        contents: Every sequence the source holds, each mapped to the frames it
-            would be measured over. The whole dataset rather than the run's own
-            selection, since a document may combine results an earlier run left and
-            coverage counted against the selection would call that complete.
-        settings: The block a later run would compare against this one. Defaults
-            to `None`, which records nothing and so can never be reused.
-        selected: The sequences of the contents this run was given to cover.
-            Repeats count once. Defaults to `None`, which takes all of them.
-        if_present: The policy for a sequence that already has a result here.
-            Defaults to `"error"`.
+        source: The dataset root the run read, recorded so two documents can be told
+            apart before anyone merges them.
+        contents: Every sequence the source holds, each mapped to the frames it would be
+            measured over. The whole dataset rather than the run's own selection, since
+            a document may combine results an earlier run left and coverage counted
+            against the selection would call that complete.
+        settings: The block a later run would compare against this one. Defaults to
+            `None`, which records nothing and so can never be reused.
+        selected: The sequences of the contents this run was given to cover. Repeats
+            count once. Defaults to `None`, which takes all of them.
+        if_present: The policy for a sequence that already has a result here. Defaults
+            to `"error"`.
         if_unsourced: The policy for a result whose sequence the source has lost.
             Defaults to `"keep"`.
 
@@ -373,10 +366,10 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
         if_unsourced: As given.
 
     Raises:
-        ValueError: If `if_present` or `if_unsourced` is not a policy a document
-            offers, if `contents` is empty, since coverage would then have nothing
-            to be measured against, or if `selected` names something the contents
-            does not hold.
+        ValueError: If `if_present` or `if_unsourced` is not a policy a document offers,
+            if `contents` is empty, since coverage would then have nothing to be
+            measured against, or if `selected` names something the contents does not
+            hold.
     """
 
     RESULTS_SUFFIX = ".results"
@@ -418,8 +411,8 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
     def _make_writer(self, source: N) -> W:
         """Return the writer that will measure `source` and leave its own result.
 
-        Called only for a sequence this run has to measure, so nothing here has
-        to ask again whether it does.
+        Called only for a sequence this run has to measure, so nothing here has to ask
+        again whether it does.
 
         Args:
             source: The sequence the writer is to be made for.
@@ -438,9 +431,8 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
         """Combine the results of this dataset into the value the document carries.
 
         Args:
-            results: What each sequence left, ordered by the sequence it belongs
-                to and never empty: combining nothing is answered before it
-                gets here.
+            results: What each sequence left, ordered by the sequence it belongs to and
+                never empty: combining nothing is answered before it gets here.
         """
 
     @property
@@ -451,14 +443,13 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
     def get_hook(self, source: N) -> W | None:
         """Return the writer that will measure `source`, or `None` to reuse.
 
-        Whether a result still stands for this run was settled when the document
-        opened, where the whole dataset was in view; this only looks the answer
-        up. A sequence nothing has to measure costs no frames at all, which is
-        what reuse is for.
+        Whether a result still stands for this run was settled when the document opened,
+        where the whole dataset was in view; this only looks the answer up. A sequence
+        nothing has to measure costs no frames at all, which is what reuse is for.
 
         Returns:
-            The writer, filed under the sequence's name, or `None` when a result
-            already there was found to still describe this run.
+            The writer, filed under the sequence's name, or `None` when a result already
+            there was found to still describe this run.
         """
         if source.name in self._reused:
             return None
@@ -478,11 +469,11 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
     def _list_staging(self) -> list[Path]:
         """Return the staging files an interrupted run left among the results.
 
-        A result is written beside its destination under a hidden name ending in
-        `.tmp` and moved into place on a clean close, so anything of that shape
-        still here belongs to a run that never got to close. Nothing else
-        collects them: they are hidden from `list_results`, and the only other
-        hand on them dies with the process that staged them.
+        A result is written beside its destination under a hidden name ending in `.tmp`
+        and moved into place on a clean close, so anything of that shape still here
+        belongs to a run that never got to close. Nothing else collects them: they are
+        hidden from `list_results`, and the only other hand on them dies with the
+        process that staged them.
         """
         return search_files(self.results_root, name_filter=STAGING)
 
@@ -500,15 +491,15 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
     def _still_describes(self, document: Mapping[str, Any], result: S) -> bool:
         """Whether a result on disk stands for what this run would measure.
 
-        Two things can have moved since it was written, and neither shows in
-        the result's own name: the settings that shaped its numbers, and which
-        frames the source holds by name. A result failing either is stale rather
-        than broken, so it is passed over rather than refused.
+        Two things can have moved since it was written, and neither shows in the
+        result's own name: the settings that shaped its numbers, and which frames the
+        source holds by name. A result failing either is stale rather than broken, so it
+        is passed over rather than refused.
 
         Args:
             document: The result as it was read, for the settings it records.
-            result: What that result holds. Its source is one the contents holds,
-                which `_read_valid` has established by the time it asks.
+            result: What that result holds. Its source is one the contents holds, which
+                `_read_valid` has established by the time it asks.
         """
         if document.get("settings") != self._recorded:
             return False
@@ -536,23 +527,22 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
         """Yield each result that still stands for this run, with what it holds.
 
         The one place a result is judged, so opening and closing cannot come to
-        different answers. A result reused on the way in that the combine then
-        passed over would leave a sequence nothing measured and nothing counted.
+        different answers. A result reused on the way in that the combine then passed
+        over would leave a sequence nothing measured and nothing counted.
 
         Args:
-            strict: Whether a result that cannot be read, or that is filed under
-                a sequence other than the one it holds, stops the run. Judging
-                is not reading, so opening passes over such a result and only the
-                combine refuses it.
+            strict: Whether a result that cannot be read, or that is filed under a
+                sequence other than the one it holds, stops the run. Judging is not
+                reading, so opening passes over such a result and only the combine
+                refuses it.
 
         Yields:
             Each result and what it holds, in the order `list_results` gives.
 
         Raises:
-            ValueError: Under `strict`, if a result cannot be read or is filed
-                under the wrong sequence. The result is named, since the folder
-                holds one file per sequence and only the name says which to go
-                and look at.
+            ValueError: Under `strict`, if a result cannot be read or is filed under the
+                wrong sequence. The result is named, since the folder holds one file per
+                sequence and only the name says which to go and look at.
         """
         for result in self.list_results():
             name = self._source_of(result)
@@ -580,37 +570,34 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
     def to_dataset(self, *, strict: bool = True) -> D | None:
         """Combine every result on disk into the one value the document carries.
 
-        Only the results of sequences the source still holds, and only those a run
-        with these settings could have written. One left by a run whose dataset
-        was larger describes a sequence that is not there, and one left under a
-        different filter describes numbers this run would not produce; combining
-        either would move the answer by something nothing here accounts for.
-        Both stay on disk, since a source that looks smaller than it is makes
-        exactly the same absence as one that shrank.
+        Only the results of sequences the source still holds, and only those a run with
+        these settings could have written. One left by a run whose dataset was larger
+        describes a sequence that is not there, and one left under a different filter
+        describes numbers this run would not produce; combining either would move the
+        answer by something nothing here accounts for. Both stay on disk, since a source
+        that looks smaller than it is makes exactly the same absence as one that shrank.
 
-        A result is filed under the sequence it belongs to and says so again
-        inside, and the two must agree. Nothing else compares them, so a result
-        that disagrees would be sorted under one name and counted under
-        another, which no number in the finished document would show.
+        A result is filed under the sequence it belongs to and says so again inside, and
+        the two must agree. Nothing else compares them, so a result that disagrees would
+        be sorted under one name and counted under another, which no number in the
+        finished document would show.
 
         Args:
             strict: Whether a result that cannot be read stops the combine. `False`
-                passes over it, which leaves its sequence out of the dataset and
-                so among the coverage's `skipped`, where a retry will find it.
-                Defaults to `True`.
+                passes over it, which leaves its sequence out of the dataset and so
+                among the coverage's `skipped`, where a retry will find it. Defaults to
+                `True`.
 
         Returns:
-            The combine, or `None` when no result is there. A run whose sequences
-            all failed has nothing to combine, and that is what `coverage` is for:
-            the document says it covers none of them rather than not being
-            written at all.
+            The combine, or `None` when no result is there. A run whose sequences all
+            failed has nothing to combine, and that is what `coverage` is for: the
+            document says it covers none of them rather than not being written at all.
 
         Raises:
-            ValueError: Under `strict`, if one of the results cannot be read, or
-                one is filed under a sequence other than the one it holds. A
-                result that cannot be read is named, since the folder holds one
-                file per sequence and only the name says which to go and look
-                at.
+            ValueError: Under `strict`, if one of the results cannot be read, or one is
+                filed under a sequence other than the one it holds. A result that cannot
+                be read is named, since the folder holds one file per sequence and only
+                the name says which to go and look at.
         """
         results = tuple(held for _, held in self._read_valid(strict=strict))
         if not results:
@@ -621,14 +608,13 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
     def get_coverage(self, dataset: D | None) -> Coverage:
         """Measure `dataset` against the whole dataset this document describes.
 
-        What is missing is worked out from the lists rather than reported by
-        the run, so a sequence counts as missing whether it failed, went down
-        with its worker, or was never given to this run at all. Which of those
-        it was is what the two lists keep apart.
+        What is missing is worked out from the lists rather than reported by the run, so
+        a sequence counts as missing whether it failed, went down with its worker, or
+        was never given to this run at all. Which of those it was is what the two lists
+        keep apart.
 
-        Every number is read off the contents, so the three groups always add up
-        to it. Counting one from the contents and another from disk let the two
-        disagree.
+        Every number is read off the contents, so the three groups always add up to it.
+        Counting one from the contents and another from disk let the two disagree.
         """
         combined = set() if dataset is None else {s.source for s in dataset.sequences}
         given = set(self.selected)
@@ -646,9 +632,9 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
     def save(self, *, strict: bool = True) -> Path:
         """Combine the results and write the document, coverage included.
 
-        What was combined is remembered once the file is on disk and not before,
-        so a write that failed leaves this branch with nothing to report rather
-        than a line about a document that is not there.
+        What was combined is remembered once the file is on disk and not before, so a
+        write that failed leaves this branch with nothing to report rather than a line
+        about a document that is not there.
 
         Args:
             strict: Whether a result that cannot be read stops the combine, as for
@@ -659,8 +645,8 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
 
         Raises:
             ValueError: Under `strict`, if one of the results cannot be read.
-            FileExistsError: If the document is already there and this one was
-                not told it may replace it.
+            FileExistsError: If the document is already there and this one was not told
+                it may replace it.
         """
         dataset = self.to_dataset(strict=strict)
 
@@ -679,12 +665,12 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
     def report(self) -> str | None:
         """Return one line naming what was written, or `None` before it was.
 
-        The line counts against the dataset rather than against what this run
-        was given, so a document combined over result of one cannot be mistaken for
-        one combined over all of it. What is missing is split the way `coverage`
-        splits it, since a sequence that failed and one nobody asked for call
-        for different things. A document that covered none has nothing combined
-        to name and says only what it covers.
+        The line counts against the dataset rather than against what this run was given,
+        so a document combined over result of one cannot be mistaken for one combined
+        over all of it. What is missing is split the way `coverage` splits it, since a
+        sequence that failed and one nobody asked for call for different things. A
+        document that covered none has nothing combined to name and says only what it
+        covers.
         """
         if self._written is None:
             return None
@@ -713,33 +699,31 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
     def __enter__(self) -> Self:
         """Take the document's place, then settle what an earlier run left.
 
-        In that order, since what follows is not undoable: the document is
-        written once every sequence has run, so a run that may not replace it
-        would otherwise pay for the whole dataset and be refused at the end,
-        having already dropped the results an earlier run left behind.
+        In that order, since what follows is not undoable: the document is written once
+        every sequence has run, so a run that may not replace it would otherwise pay for
+        the whole dataset and be refused at the end, having already dropped the results
+        an earlier run left behind.
 
-        What an earlier run staged and never committed always goes, since
-        nothing else is in a position to collect it. What it committed depends
-        on the policy: `"reuse"` keeps every result still describing this run and
-        leaves the rest where they are, `"overwrite"` clears the folder so that
-        everything combined at the end is this run's own, and `"error"` refuses.
+        What an earlier run staged and never committed always goes, since nothing else
+        is in a position to collect it. What it committed depends on the policy:
+        `"reuse"` keeps every result still describing this run and leaves the rest where
+        they are, `"overwrite"` clears the folder so that everything combined at the end
+        is this run's own, and `"error"` refuses.
 
-        `"error"` refuses here rather than leaving it to the writer that meets
-        the result, the way the frame tree does with a folder: a writer meets them
-        one at a time, so a run whose hundredth sequence is already measured
-        pays for ninety-nine of them first. Refusing is also what a run killed
-        outright leaves behind, since its results are committed and its document
-        is not, and clearing them would spend its whole measurement again
-        without saying so.
+        `"error"` refuses here rather than leaving it to the writer that meets the
+        result, the way the frame tree does with a folder: a writer meets them one at a
+        time, so a run whose hundredth sequence is already measured pays for ninety-nine
+        of them first. Refusing is also what a run killed outright leaves behind, since
+        its results are committed and its document is not, and clearing them would spend
+        its whole measurement again without saying so.
 
-        Judging happens here, with the whole dataset in view and in one process.
-        A worker holds a copy of this branch and nothing it learns comes home,
-        so a result judged there could not be counted.
+        Judging happens here, with the whole dataset in view and in one process. A
+        worker holds a copy of this branch and nothing it learns comes home, so a result
+        judged there could not be counted.
 
         Raises:
-            FileExistsError: If the document is already there, or a sequence
-                already has a result here, and this one was not told it may
-                replace them.
+            FileExistsError: If the document is already there, or a sequence already has
+                a result here, and this one was not told it may replace them.
             RuntimeError: If this document has been opened before.
         """
         if self._entered:
@@ -771,9 +755,9 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
     def list_unsourced(self) -> list[str]:
         """Return the sequences a result is filed under that the source has lost.
 
-        Named rather than acted on: the same absence is what a half mounted
-        share and a misspelt subpath produce, so what to do with them is the
-        caller's policy and saying they are there is not.
+        Named rather than acted on: the same absence is what a half mounted share and a
+        misspelt subpath produce, so what to do with them is the caller's policy and
+        saying they are there is not.
         """
         filed = map(self._source_of, self.list_results())
 
@@ -782,13 +766,13 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
     def drop_unsourced(self) -> list[str]:
         """Remove the results of sequences the source has lost, and name them.
 
-        The folders a removal empties go with it, the same way opening prunes
-        the ones it emptied: a sequence dropped from a nested dataset would
-        otherwise leave the path down to it standing.
+        The folders a removal empties go with it, the same way opening prunes the ones
+        it emptied: a sequence dropped from a nested dataset would otherwise leave the
+        path down to it standing.
 
         Returns:
-            The sequences whose results were removed, in the order they were
-            filed under.
+            The sequences whose results were removed, in the order they were filed
+            under.
         """
         dropped = []
 
@@ -808,26 +792,24 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
     ) -> None:
         """Write the document, whether or not the run reached the end.
 
-        A run that gave up part way still measured what it measured, and the
-        results it left are of sequences that finished. Writing them is what
-        `coverage` is for: the document says which of the dataset it accounts
-        for and names the rest, where refusing to write leaves the healthy
-        results on disk with nothing to read them by.
+        A run that gave up part way still measured what it measured, and the results it
+        left are of sequences that finished. Writing them is what `coverage` is for: the
+        document says which of the dataset it accounts for and names the rest, where
+        refusing to write leaves the healthy results on disk with nothing to read them
+        by.
 
-        A result that cannot be read is the one thing that could take the whole
-        document with it, since the combine refuses such a result rather than
-        passing it over. It is written from what does read instead, which
-        leaves that sequence out of the dataset and so among the coverage's
-        `skipped`, where a retry will find it, and the refusal is raised once
-        the document is on disk rather than instead of it.
+        A result that cannot be read is the one thing that could take the whole document
+        with it, since the combine refuses such a result rather than passing it over. It
+        is written from what does read instead, which leaves that sequence out of the
+        dataset and so among the coverage's `skipped`, where a retry will find it, and
+        the refusal is raised once the document is on disk rather than instead of it.
 
-        Parts of sequences the source has lost go afterwards where the policy
-        says so. The combine passes over them either way, so removing them is
-        tidying rather than part of the answer, and one that cannot be removed
-        must not cost the document.
+        Parts of sequences the source has lost go afterwards where the policy says so.
+        The combine passes over them either way, so removing them is tidying rather than
+        part of the answer, and one that cannot be removed must not cost the document.
 
-        The failure itself is not this branch's to report. It reaches the
-        driver, which is what decides the run's verdict.
+        The failure itself is not this branch's to report. It reaches the driver, which
+        is what decides the run's verdict.
 
         Raises:
             ValueError: If one of the results cannot be read, after the document
