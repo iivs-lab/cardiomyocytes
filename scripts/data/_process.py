@@ -73,8 +73,8 @@ class FrameBranchConfig(TreeBranchConfig):
     """The branch that writes each sequence back out as a tree of frames.
 
     Attributes:
-        DEFAULT_SUBPATH: Where the frames go for a branch that names no layout
-            and is given nothing to follow.
+        DEFAULT_SUBPATH: Where the frames go for a branch that names no layout and is
+            given nothing to follow.
         save: As `TreeBranchConfig`.
         subpath: As `TreeBranchConfig`.
         record_file: As `TreeBranchConfig`.
@@ -91,10 +91,10 @@ class RangeBranchConfig(BranchConfig):
 
     Attributes:
         save: Whether to write the document. Defaults to `True`.
-        file: The name the document is given, given `.json` if it has no
-            extension. Defaults to `"value_range"`.
-        if_present: As `BranchConfig`, judged by the settings and the source
-            frames' names rather than by what those frames hold.
+        file: The name the document is given, given `.json` if it has no extension.
+            Defaults to `"value_range"`.
+        if_present: As `BranchConfig`, judged by the settings and the source frames'
+            names rather than by what those frames hold.
         if_unsourced: As `BranchConfig`.
     """
 
@@ -106,8 +106,8 @@ class RangeBranchConfig(BranchConfig):
 class PreprocessTargetConfig:
     """What a run writes, one block per branch.
 
-    Where they land is not here: `run_root` places the job's directory, and the
-    folder a branch actually writes under is the one hydra made for the job.
+    Where they land is not here: `run_root` places the job's directory, and the folder a
+    branch actually writes under is the one hydra made for the job.
 
     Attributes:
         frames: The branch writing the filtered frames.
@@ -123,8 +123,8 @@ class PreprocessInputs(StageInputs["PreprocessSourceConfig"]):
     """The whole of what this stage's `main` reads out of its configuration.
 
     Attributes:
-        source: As `StageInputs`, which for this stage is phase as it comes off
-            the microscope.
+        source: As `StageInputs`, which for this stage is phase as it comes off the
+            microscope.
         select: As `StageInputs`.
         kernel: As `StageInputs`.
         compute: As `StageInputs`.
@@ -155,8 +155,8 @@ def _validate_output(
     """Raise unless the target names an output this run can safely write.
 
     Raises:
-        ValueError: If the target writes nothing, or the frames it writes would
-            land on the source they are read from.
+        ValueError: If the target writes nothing, or the frames it writes would land on
+            the source they are read from.
     """
     if not target_config.frames.save:
         if not target_config.ranges.save:
@@ -185,9 +185,9 @@ def _range_file(target_config: PreprocessTargetConfig) -> str:
     """Return what the range document is called, given `.json` if it has none.
 
     Raises:
-        ValueError: If the name is a path or carries some other extension. The
-            library's own refusal says what is wrong with the name but not
-            which setting holds it, which is where a reader has to go.
+        ValueError: If the name is a path or carries some other extension. The library's
+            own refusal says what is wrong with the name but not which setting holds it,
+            which is where a reader has to go.
     """
     try:
         return ensure_json_name(target_config.ranges.file)
@@ -208,12 +208,12 @@ def log_target_config(
     Args:
         target_config: The settings saying what the run was told to write.
         logger: The logger the lines go to.
-        output_root: The folder the branches write under, which hydra made for
-            this job. A sweep gives each of its jobs one of its own beneath
-            `run_root`, so the two are the same path only in a lone run.
-        follow: The layout the source reads at, which the frames branch takes
-            where it names none of its own. Defaults to `None`, which leaves
-            the branch to its own.
+        output_root: The folder the branches write under, which hydra made for this job.
+            A sweep gives each of its jobs one of its own beneath `run_root`, so the two
+            are the same path only in a lone run.
+        follow: The layout the source reads at, which the frames branch takes where it
+            names none of its own. Defaults to `None`, which leaves the branch to its
+            own.
     """
     log_indented(logger, "target: %s", PurePath(output_root).as_posix(), depth=0)
 
@@ -244,13 +244,13 @@ def log_configs(
 ) -> None:
     """Log the whole configuration of a run, as one block per part.
 
-    A run that writes nothing has no target to describe, which is what an
-    absent `target_config` means.
+    A run that writes nothing has no target to describe, which is what an absent
+    `target_config` means.
 
-    One pairing gets a warning of its own: a stride makes the two outputs name
-    the same frame differently, since the ranges are filed under the source and
-    a cache numbers its own frames from zero. Both are right on their own, so
-    the run says which of them a reader should join by.
+    One pairing gets a warning of its own: a stride makes the two outputs name the same
+    frame differently, since the ranges are filed under the source and a cache numbers
+    its own frames from zero. Both are right on their own, so the run says which of them
+    a reader should join by.
     """
     logger = logging.getLogger(name)
 
@@ -283,30 +283,28 @@ def build_branches(
 ) -> list[SideBranch[PhaseFilteredSequence, Tensor, Path]]:
     """Build the branches a target describes, in the order they will watch.
 
-    Which sequences a run took is not recorded, since it changes what the run
-    covers rather than what any sequence's numbers mean, and `coverage` reports
-    it already. Recording it would refuse reuse to a run that narrowed itself,
-    and the signature is what keeps it out: no selection reaches here.
+    Which sequences a run took is not recorded, since it changes what the run covers
+    rather than what any sequence's numbers mean, and `coverage` reports it already.
+    Recording it would refuse reuse to a run that narrowed itself, and the signature is
+    what keeps it out: no selection reaches here.
 
     Args:
-        source_config: The tree the run reads, recorded in what the branches
-            write.
+        source_config: The tree the run reads, recorded in what the branches write.
         target_config: The settings saying what the run writes.
         kernel_config: The filter, recorded for a later run to compare against.
         output_root: The folder the branches write under.
-        contents: Every sequence the source holds, against the frames each
-            would be measured over.
-        selected: The sequences of those this run was given. Defaults to `None`,
-            which takes all of them.
+        contents: Every sequence the source holds, against the frames each would be
+            measured over.
+        selected: The sequences of those this run was given. Defaults to `None`, which
+            takes all of them.
 
     Returns:
         The branches, empty of neither output when the target asks for both.
 
     Raises:
-        ValueError: If the target writes nothing, which is a mistake rather
-            than a way to ask for a run that only reads, if the frames it
-            writes would land on the source they are read from, or if a policy
-            names something no branch offers.
+        ValueError: If the target writes nothing, which is a mistake rather than a way
+            to ask for a run that only reads, if the frames it writes would land on the
+            source they are read from, or if a policy names something no branch offers.
     """
     _validate_output(source_config, target_config, output_root)
 
@@ -368,18 +366,18 @@ def build_preprocess_stages(
 ) -> SequenceStageRun:
     """Assemble everything a run needs from the configuration it was given.
 
-    The configuration is logged before the sources are searched, so a run says
-    what it was asked to do even when it cannot do it. A target that writes
-    nothing, or that would write over the source, is refused at the same point,
-    before the search costs anything.
+    The configuration is logged before the sources are searched, so a run says what it
+    was asked to do even when it cannot do it. A target that writes nothing, or that
+    would write over the source, is refused at the same point, before the search costs
+    anything.
 
     Args:
         source_config: The tree the sequences are read from.
         sequence_config: Which of its sequences to read.
-        target_config: The settings saying what to write. Defaults to `None`,
-            for a run that only reads.
-        kernel_config: The filter to apply. Defaults to `None`, which leaves the
-            frames as they are.
+        target_config: The settings saying what to write. Defaults to `None`, for a run
+            that only reads.
+        kernel_config: The filter to apply. Defaults to `None`, which leaves the frames
+            as they are.
         output_root: The folder the branches write under.
         name: The name the run is called by.
 
@@ -387,8 +385,8 @@ def build_preprocess_stages(
         The factory a driver runs the sequences through.
 
     Raises:
-        ValueError: If the target writes nothing, if it would write over the
-            source, or if the source search finds nothing to run.
+        ValueError: If the target writes nothing, if it would write over the source, or
+            if the source search finds nothing to run.
     """
     kernel_config = unwrap_or_factory(kernel_config, IdentityConfig)
 
