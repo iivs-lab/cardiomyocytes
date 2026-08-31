@@ -18,9 +18,7 @@ from typing import TYPE_CHECKING, ClassVar, Self
 from kaparoo.utils import unwrap_or_factory
 
 from iivs_cardio.common.logging import log_indented
-from iivs_cardio.common.pipeline.branch import (
-    ensure_json_name,
-)
+from iivs_cardio.common.pipeline.branch import ensure_json_name
 from iivs_cardio.data.pipeline import FrameTree, RangeDocument, SequenceStageRun
 from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig
 from scripts._common.dataset import (
