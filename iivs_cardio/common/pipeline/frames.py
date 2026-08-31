@@ -367,6 +367,14 @@ class FrameBranch[N: Named, T](DatasetBranch):
 
         return sorted(folder.relative_to(self.root).as_posix() for folder in found)
 
+    def _count_frames(self, folder: Path) -> int:
+        """Count the files the folder holds beside the record it carries.
+
+        Only this tree's own record is set aside: one left under another name counts as
+        a frame, which stops a folder another run wrote from reading as whole here.
+        """
+        return len(search_files(folder, max_depth=1, exclude=self.record_file))
+
     def _still_describes(self, name: str) -> bool:
         """Whether the folder already written for `name` stands for this run.
 
@@ -395,13 +403,9 @@ class FrameBranch[N: Named, T](DatasetBranch):
 
         return self._count_frames(folder) == len(sources)
 
-    def _count_frames(self, folder: Path) -> int:
-        """Count the files the folder holds beside the record it carries.
-
-        Only this tree's own record is set aside: one left under another name counts as
-        a frame, which stops a folder another run wrote from reading as whole here.
-        """
-        return len(search_files(folder, max_depth=1, exclude=self.record_file))
+    def _already_written(self) -> list[str]:
+        """Return the sequences this run would write that already have a folder."""
+        return [name for name in self.list_sequences() if name in self._wanted]
 
     def list_unsourced(self) -> list[str]:
         """Return the sequences this tree holds that the source has lost, sorted.
@@ -485,10 +489,6 @@ class FrameBranch[N: Named, T](DatasetBranch):
             raise FileExistsError(msg)
 
         return self
-
-    def _already_written(self) -> list[str]:
-        """Return the sequences this run would write that already have a folder."""
-        return [name for name in self.list_sequences() if name in self._wanted]
 
     def __exit__(
         self,
