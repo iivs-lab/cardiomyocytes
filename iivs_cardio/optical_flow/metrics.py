@@ -21,8 +21,8 @@ from torchmetrics.functional.image import (
 
 from iivs_cardio.common.warp import BackwardWarp, PaddingMode, backward_warp
 
-FrameType = Real[Tensor, "*dim H W"]
-FlowType = Float32[Tensor, "*dim 2 H W"]
+type FrameType = Real[Tensor, "*dim H W"]
+type FlowType = Float32[Tensor, "*dim 2 H W"]
 
 
 def _resolve_data_range(frame: Tensor, data_range: float | None) -> float:
