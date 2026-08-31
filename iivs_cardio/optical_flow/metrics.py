@@ -91,40 +91,38 @@ def warp_consistency(
 ) -> dict[str, Tensor]:
     """Warp-consistency metrics of `flow`: warp `frame2` back, score it on `frame1`.
 
-    The standard proxy when there is no ground-truth flow. Returns
-    `{"ssim", "psnr", "mse", "mae"}` on the frames' device; a perfect match
-    gives mse/mae 0, ssim 1, psnr inf.
+    The standard proxy when there is no ground-truth flow. Returns `{"ssim", "psnr",
+    "mse", "mae"}` on the frames' device; a perfect match gives mse/mae 0, ssim 1, psnr
+    inf.
 
-    **Direction.** `flow` is the forward flow `frame1 -> frame2`, so it is
-    defined on `frame1`'s grid: the material point at `x` in `frame1` sits at
-    `x + flow(x)` in `frame2`. Sampling `frame2` there reconstructs `frame1`
-    **exactly**: the output grid *is* the grid the flow is defined on, so no
-    inverse is needed. Going the other way, reconstructing `frame2` from
-    `frame1`, requires inverting the map, and `x - flow(x)` only approximates it,
-    with an error growing as `|flow| * |grad flow|`.
+    **Direction.** `flow` is the forward flow `frame1 -> frame2`, so it is defined on
+    `frame1`'s grid: the material point at `x` in `frame1` sits at `x + flow(x)` in
+    `frame2`. Sampling `frame2` there reconstructs `frame1` **exactly**: the output grid
+    *is* the grid the flow is defined on, so no inverse is needed. Going the other way,
+    reconstructing `frame2` from `frame1`, requires inverting the map, and `x - flow(x)`
+    only approximates it, with an error growing as `|flow| * |grad flow|`.
 
-    Under a *uniform* flow the two coincide, `x - flow(x)` inverting a constant
-    map exactly, so no amount of testing on a rigid translation can tell them
-    apart. Pin this choice with a non-uniform flow instead. (A flipped *sign* is
-    a different error, and a uniform translation does catch that one.)
+    Under a *uniform* flow the two coincide, `x - flow(x)` inverting a constant map
+    exactly, so no amount of testing on a rigid translation can tell them apart. Pin
+    this choice with a non-uniform flow instead. (A flipped *sign* is a different error,
+    and a uniform translation does catch that one.)
 
-    Gradients reach `flow` for float frames, so this doubles as a photometric
-    training loss, which is also the form the unsupervised-flow literature
-    uses. Integer
-    frames break the graph (the warp rounds and clamps them back to their dtype),
-    so training must use float frames.
+    Gradients reach `flow` for float frames, so this doubles as a photometric training
+    loss, which is also the form the unsupervised-flow literature uses. Integer frames
+    break the graph (the warp rounds and clamps them back to their dtype), so training
+    must use float frames.
 
     Args:
         frame1: `(*dim, H, W)` frame(s) to score against, any real dtype.
         frame2: `(*dim, H, W)` frame(s) to warp back onto `frame1`.
         flow: `(*dim, 2, H, W)` float32 forward flow `frame1 -> frame2`.
-        data_range: PSNR/SSIM value range; inferred from the frame dtype when
-            omitted, required for float frames.
-        padding_mode: `grid_sample` out-of-bounds policy. Sampling at
-            `grid + flow` leaves the frame wherever the flow diverges, so this
-            decides what those pixels contribute.
-        reduce: average over the batch to a 0-d scalar per metric. `False` keeps
-            one score per pair, shaped `(*dim)`.
+        data_range: PSNR/SSIM value range; inferred from the frame dtype when omitted,
+            required for float frames.
+        padding_mode: `grid_sample` out-of-bounds policy. Sampling at `grid + flow`
+            leaves the frame wherever the flow diverges, so this decides what those
+            pixels contribute.
+        reduce: average over the batch to a 0-d scalar per metric. `False` keeps one
+            score per pair, shaped `(*dim)`.
     """
     warped = backward_warp(frame2, flow, padding_mode=padding_mode)
     return _metrics(warped, frame1, data_range, reduce=reduce)
@@ -140,26 +138,25 @@ def identity_ssim(
 ) -> Tensor:
     """SSIM of a zero flow: the floor every real flow's score is read against.
 
-    Inter-frame motion here is sub-pixel, so two consecutive frames are already
-    nearly alike and a flow of exactly zero scores around 0.95. Raw SSIM
-    therefore says almost nothing, and what a search compares is the gain above
-    this.
+    Inter-frame motion here is sub-pixel, so two consecutive frames are already nearly
+    alike and a flow of exactly zero scores around 0.95. Raw SSIM therefore says almost
+    nothing, and what a search compares is the gain above this.
 
-    No warp is done. Sampling at `grid + 0` gives the frame back unchanged, so
-    the floor is `frame2` scored against `frame1` as they stand.
+    No warp is done. Sampling at `grid + 0` gives the frame back unchanged, so the floor
+    is `frame2` scored against `frame1` as they stand.
 
     Args:
         frame1: `(*dim, H, W)` frame(s) to score against, any real dtype.
         frame2: `(*dim, H, W)` frame(s) that a flow would have been warped from.
-        data_range: SSIM value range; inferred from the frame dtype when
-            omitted, required for float frames.
-        reduce: average over the batch to a 0-d scalar. `False` keeps one score
-            per pair, shaped `(*dim)`.
+        data_range: SSIM value range; inferred from the frame dtype when omitted,
+            required for float frames.
+        reduce: average over the batch to a 0-d scalar. `False` keeps one score per
+            pair, shaped `(*dim)`.
 
     Returns:
-        The floor, which is `1` where the two frames are identical. A duplicated
-        frame reaches that exactly, so a caller folding these has a value that
-        no gain can be earned above rather than one that is merely high.
+        The floor, which is `1` where the two frames are identical. A duplicated frame
+        reaches that exactly, so a caller folding these has a value that no gain can be
+        earned above rather than one that is merely high.
     """
     return _metrics(frame2, frame1, data_range, reduce=reduce)["ssim"]
 
@@ -174,27 +171,27 @@ def forward_backward_error(
 ) -> Tensor:
     """Mean `|f_fwd(x) + f_bwd(x + f_fwd(x))|` in pixels; `0` for a consistent flow.
 
-    Following a correspondence forward and then back should return where it
-    started, and the residual says how far it does not. This is what a flow that
-    won its photometric score by fitting noise fails: the noise it latched onto
-    is not a correspondence, so following it back lands somewhere else.
+    Following a correspondence forward and then back should return where it started, and
+    the residual says how far it does not. This is what a flow that won its photometric
+    score by fitting noise fails: the noise it latched onto is not a correspondence, so
+    following it back lands somewhere else.
 
-    It cannot be read alone either. **A zero flow scores a perfect `0`**, having
-    nothing to be inconsistent about, so this and the gain over
-    `identity_ssim` are read together or neither is worth reading.
+    It cannot be read alone either. **A zero flow scores a perfect `0`**, having nothing
+    to be inconsistent about, so this and the gain over `identity_ssim` are read
+    together or neither is worth reading.
 
-    `backward_warp` samples at `grid + offset`, so warping the backward field by
-    the forward one evaluates it exactly where the forward field claims the
-    pixel went. The forward field is broadcast over the backward field's own two
-    channels, which warp together.
+    `backward_warp` samples at `grid + offset`, so warping the backward field by the
+    forward one evaluates it exactly where the forward field claims the pixel went. The
+    forward field is broadcast over the backward field's own two channels, which warp
+    together.
 
     Args:
         forward: `(*dim, 2, H, W)` float32 flow `frame1 -> frame2`.
-        backward: `(*dim, 2, H, W)` float32 flow `frame2 -> frame1`, which is
-            the same pair the other way round rather than a neighbouring pair.
+        backward: `(*dim, 2, H, W)` float32 flow `frame2 -> frame1`, which is the same
+            pair the other way round rather than a neighbouring pair.
         padding_mode: `grid_sample` out-of-bounds policy for the warp.
-        reduce: average over the batch to a 0-d scalar. `False` keeps one error
-            per pair, shaped `(*dim)`.
+        reduce: average over the batch to a 0-d scalar. `False` keeps one error per
+            pair, shaped `(*dim)`.
 
     Returns:
         The error in pixels, which is the unit the flow itself is in.
@@ -210,15 +207,15 @@ def forward_backward_error(
 def flow_magnitude(flow: FlowType, *, reduce: bool = True) -> Tensor:
     """Mean `|flow|` in pixels, which is how much motion was found.
 
-    On its own this says only that something moved. What it is for is the
-    spread of it across a sequence: a beating cell's displacement rises and
-    falls, and a filter reaching too far through time flattens that while
-    leaving the photometric score intact.
+    On its own this says only that something moved. What it is for is the spread of it
+    across a sequence: a beating cell's displacement rises and falls, and a filter
+    reaching too far through time flattens that while leaving the photometric score
+    intact.
 
     Args:
         flow: `(*dim, 2, H, W)` float32 flow.
-        reduce: average over the batch to a 0-d scalar. `False` keeps one
-            magnitude per pair, shaped `(*dim)`.
+        reduce: average over the batch to a 0-d scalar. `False` keeps one magnitude per
+            pair, shaped `(*dim)`.
     """
     return _reduce_field(flow, reduce=reduce)
 
@@ -234,24 +231,23 @@ def _reduce_field(field: Tensor, *, reduce: bool) -> Tensor:
 class WarpConsistency(nn.Module):
     """Warp-consistency scoring with a cached warp grid.
 
-    `forward(frame1, frame2, flow)` takes two `(*dim, H, W)` frames of any real
-    dtype and a `(*dim, 2, H, W)` float32 forward flow `frame1 -> frame2`, samples
-    `frame2` at `grid + flow` to reconstruct `frame1`, and scores the two,
-    returning `{"ssim", "psnr", "mse", "mae"}` on the frames' device. See
-    `warp_consistency` for why that direction and not the reverse. The warp grid
-    is built once and reused across same-size calls, so scoring a fixed-size
-    sequence skips the rebuild.
+    `forward(frame1, frame2, flow)` takes two `(*dim, H, W)` frames of any real dtype
+    and a `(*dim, 2, H, W)` float32 forward flow `frame1 -> frame2`, samples `frame2` at
+    `grid + flow` to reconstruct `frame1`, and scores the two, returning `{"ssim",
+    "psnr", "mse", "mae"}` on the frames' device. See `warp_consistency` for why that
+    direction and not the reverse. The warp grid is built once and reused across
+    same-size calls, so scoring a fixed-size sequence skips the rebuild.
 
     Args:
-        data_range: PSNR/SSIM value range; inferred from the frame dtype when
-            omitted, required for float frames.
+        data_range: PSNR/SSIM value range; inferred from the frame dtype when omitted,
+            required for float frames.
         padding_mode: `grid_sample` out-of-bounds policy for the warp.
-        reduce: average over the batch to a 0-d scalar per metric. `False` keeps
-            one score per pair, shaped `(*dim)`.
+        reduce: average over the batch to a 0-d scalar per metric. `False` keeps one
+            score per pair, shaped `(*dim)`.
 
     Attributes:
-        data_range: The value range PSNR and SSIM are scored against, or `None`
-            to take it from the frame dtype.
+        data_range: The value range PSNR and SSIM are scored against, or `None` to take
+            it from the frame dtype.
         reduce: Whether each call averages over the batch.
     """
 

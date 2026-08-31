@@ -21,8 +21,7 @@ class FarnebackConfig(OpenCVConfig):
     """Farneback's settings, every one of which either device reads.
 
     Attributes:
-        SUPPORTED_DEVICES: As `EstimatorConfig`: cv2 implements Farneback for
-            both.
+        SUPPORTED_DEVICES: As `EstimatorConfig`: cv2 implements Farneback for both.
         num_levels: The pyramid levels to build.
         pyr_scale: The scale between one level and the next.
         fast_pyramids: Whether to build the pyramid the cheaper way.

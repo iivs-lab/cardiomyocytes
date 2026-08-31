@@ -33,32 +33,31 @@ if TYPE_CHECKING:
 class EvaluationWriter(ResultWriter[SequenceEvaluation]):
     """Score every flow of one sequence, then write the result.
 
-    This is the hook an evaluation document hands to a sequence. Unlike the
-    range writer it is not a consumer of what the step carries: warp consistency
-    wants the two frames the flow was computed from, and a step carries the flow
-    alone. So it holds the stage those frames came from and pulls `i` and `i+1`
-    when it fires, which costs nothing where the flow stage has just read them.
+    This is the hook an evaluation document hands to a sequence. Unlike the range writer
+    it is not a consumer of what the step carries: warp consistency wants the two frames
+    the flow was computed from, and a step carries the flow alone. So it holds the stage
+    those frames came from and pulls `i` and `i+1` when it fires, which costs nothing
+    where the flow stage has just read them.
 
-    Both frames come from that stage rather than from anywhere else, so what is
-    scored is what the flow was computed on. Normalising a second time here
-    would be a second definition of the same thing, and two that agreed only by
-    coincidence.
+    Both frames come from that stage rather than from anywhere else, so what is scored
+    is what the flow was computed on. Normalising a second time here would be a second
+    definition of the same thing, and two that agreed only by coincidence.
 
-    An estimator is what the reverse flow needs, and without one the
-    forward-backward axis is simply not measured: a run reading flows from a
-    cache has no estimator, and so cannot have that axis at all.
+    An estimator is what the reverse flow needs, and without one the forward-backward
+    axis is simply not measured: a run reading flows from a cache has no estimator, and
+    so cannot have that axis at all.
 
     Args:
         root: As `ResultWriter`.
         source: As `ResultWriter`.
-        frames: The stage the flows were computed from, held rather than
-            rebuilt so that both consumers of an index share one computation.
-        estimator: The estimator to take the reverse flow from, which doubles
-            what a pair costs. Defaults to `None`, which leaves that axis out.
+        frames: The stage the flows were computed from, held rather than rebuilt so that
+            both consumers of an index share one computation.
+        estimator: The estimator to take the reverse flow from, which doubles what a
+            pair costs. Defaults to `None`, which leaves that axis out.
         settings: As `ResultWriter`.
         overwrite: As `ResultWriter`.
-        data_range: The value range SSIM and PSNR are scored against; taken from
-            the frame dtype when omitted, which a float frame has none to give.
+        data_range: The value range SSIM and PSNR are scored against; taken from the
+            frame dtype when omitted, which a float frame has none to give.
         padding_mode: `grid_sample` out-of-bounds policy for both warps.
     """
 
@@ -92,18 +91,18 @@ class EvaluationWriter(ResultWriter[SequenceEvaluation]):
     def evaluate(self, step: Step[Tensor, Path]) -> None:
         """Score the flow in `step` against the pair it was computed from.
 
-        The pair is `i` and `i + 1` of the frame stage, which is the labelling a
-        flow carries: `flow[i]` runs from frame `i`, so the frame with nothing
-        to pair with is the last rather than the first.
+        The pair is `i` and `i + 1` of the frame stage, which is the labelling a flow
+        carries: `flow[i]` runs from frame `i`, so the frame with nothing to pair with
+        is the last rather than the first.
 
-        Every score is kept as it came. A duplicated frame reconstructs exactly
-        and sends PSNR to infinity, which the combine leaves out and counts rather
-        than something here quietly rounding away.
+        Every score is kept as it came. A duplicated frame reconstructs exactly and
+        sends PSNR to infinity, which the combine leaves out and counts rather than
+        something here quietly rounding away.
 
         Raises:
             ValueError: If the step carries no flow or no path.
-            IndexError: If the frame stage has nothing at `i + 1`, which means
-                it is not the stage this flow was computed from.
+            IndexError: If the frame stage has nothing at `i + 1`, which means it is not
+                the stage this flow was computed from.
         """
         flow = step.require()
         path = step.require_extra()
@@ -130,11 +129,10 @@ class EvaluationWriter(ResultWriter[SequenceEvaluation]):
     def _reverse(self, first: Tensor, second: Tensor, flow: Tensor) -> float | None:
         """How far the flow fails to come back, or `None` with no estimator.
 
-        The reverse is the same pair the other way round rather than a
-        neighbouring flow, so there is nothing to reuse and it costs a second
-        call. Taken from the estimator the flow itself came from: measuring one
-        estimator's self-consistency with another's answer is a different
-        question.
+        The reverse is the same pair the other way round rather than a neighbouring
+        flow, so there is nothing to reuse and it costs a second call. Taken from the
+        estimator the flow itself came from: measuring one estimator's self-consistency
+        with another's answer is a different question.
         """
         if self._estimator is None:
             return None

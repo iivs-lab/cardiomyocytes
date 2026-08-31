@@ -27,11 +27,11 @@ if TYPE_CHECKING:
 class Evaluated(Named, Protocol):
     """Whatever an evaluation document needs of a sequence.
 
-    Its name, to file the result under; the frames its flows were computed from,
-    which no step carries and nothing here could rebuild, since reading them a
-    second time would scale them a second time and two definitions of one thing
-    agree only by coincidence; and the estimator those flows came from, which
-    is bound to a device and so cannot be settled once for a whole run.
+    Its name, to file the result under; the frames its flows were computed from, which
+    no step carries and nothing here could rebuild, since reading them a second time
+    would scale them a second time and two definitions of one thing agree only by
+    coincidence; and the estimator those flows came from, which is bound to a device and
+    so cannot be settled once for a whole run.
     """
 
     @property
@@ -49,18 +49,17 @@ class EvaluationDocument(
     Args:
         path: As `DocumentBranch`.
         source: As `DocumentBranch`.
-        contents: As `DocumentBranch`, holding the frames each sequence was
-            read over rather than the flows: what a sequence owes is worked out
-            from them, so the same contents describes both branches of a stage.
+        contents: As `DocumentBranch`, holding the frames each sequence was read over
+            rather than the flows: what a sequence owes is worked out from them, so the
+            same contents describes both branches of a stage.
         settings: As `DocumentBranch`.
         selected: As `DocumentBranch`.
         if_present: As `DocumentBranch`.
         if_unsourced: As `DocumentBranch`.
-        data_range: The value range SSIM and PSNR are scored against; taken
-            from the frame dtype when omitted, which a float frame has none to
-            give. The reverse flow each writer measures comes from the
-            estimator its own sequence carries, since that is what is bound to
-            the device the sequence ran on.
+        data_range: The value range SSIM and PSNR are scored against; taken from the
+            frame dtype when omitted, which a float frame has none to give. The reverse
+            flow each writer measures comes from the estimator its own sequence carries,
+            since that is what is bound to the device the sequence ran on.
         padding_mode: `grid_sample` out-of-bounds policy for every warp.
 
     Attributes:
@@ -129,7 +128,7 @@ class EvaluationDocument(
     def _expected(self, names: Sequence[str]) -> Sequence[str]:
         """Every frame but the last, a pair being two frames in and one out.
 
-        Start labelling, so the frame with nothing to pair with is the last
-        rather than the first.
+        Start labelling, so the frame with nothing to pair with is the last rather than
+        the first.
         """
         return names[:-1]

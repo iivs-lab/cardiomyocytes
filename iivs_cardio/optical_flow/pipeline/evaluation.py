@@ -47,9 +47,9 @@ def _entry[T](
 def _number(document: Mapping[str, Any], key: str) -> float:
     """Read `key` as a score, refusing what only looks like one.
 
-    `bool` is an `int` to `isinstance`, so `true` would otherwise read as 1.0.
-    A non-finite score is refused because what is written was already folded
-    over the finite ones: one here means the document was not written by this.
+    `bool` is an `int` to `isinstance`, so `true` would otherwise read as 1.0. A
+    non-finite score is refused because what is written was already folded over the
+    finite ones: one here means the document was not written by this.
 
     Raises:
         ValueError: If the value is absent, not a number, or not finite.
@@ -76,30 +76,29 @@ def _score(document: Mapping[str, Any], key: str) -> float | None:
 class FrameEvaluation:
     """What one pair of frames scored, and the flow between them.
 
-    A score is a finite number or it is absent, and nothing in between: JSON has
-    no infinity to write and the fold has nothing to do with one, so a
-    non-finite score is taken as absent here rather than carried to be dropped
-    later. What is lost is only why it is absent, and what a metric that is
-    always computed cannot say is that it was not.
+    A score is a finite number or it is absent, and nothing in between: JSON has no
+    infinity to write and the fold has nothing to do with one, so a non-finite score is
+    taken as absent here rather than carried to be dropped later. What is lost is only
+    why it is absent, and what a metric that is always computed cannot say is that it
+    was not.
 
-    A duplicated frame is how that happens: the reconstruction is exact, `mse`
-    is zero, and `psnr` has nowhere to go. The count survives as the difference
-    between a fold's `pairs` and its `scored`, and which pair it was survives as
-    the absence here.
+    A duplicated frame is how that happens: the reconstruction is exact, `mse` is zero,
+    and `psnr` has nowhere to go. The count survives as the difference between a fold's
+    `pairs` and its `scored`, and which pair it was survives as the absence here.
 
     Attributes:
-        source: The frame this pair starts from, which is what a flow is
-            labelled by and so what names the score.
+        source: The frame this pair starts from, which is what a flow is labelled by and
+            so what names the score.
         ssim: Structural similarity of the reconstruction against `frame1`.
-        ssim_floor: What a zero flow would have scored, which `ssim` is read
-            above rather than on its own.
-        psnr: Peak signal-to-noise ratio of the same reconstruction, in dB,
-            which an exact reconstruction leaves absent.
+        ssim_floor: What a zero flow would have scored, which `ssim` is read above
+            rather than on its own.
+        psnr: Peak signal-to-noise ratio of the same reconstruction, in dB, which an
+            exact reconstruction leaves absent.
         mse: Mean squared error of it.
         mae: Mean absolute error of it.
         magnitude: Mean `|flow|` in pixels, which is how much motion was found.
-        fb_error: Mean forward-backward inconsistency in pixels, absent where
-            no estimator was there to compute the reverse flow.
+        fb_error: Mean forward-backward inconsistency in pixels, absent where no
+            estimator was there to compute the reverse flow.
     """
 
     source: str
@@ -147,8 +146,8 @@ class FrameEvaluation:
     def from_dict(cls, document: Mapping[str, Any]) -> Self:
         """Rebuild one pair's scores from what `to_dict` produced.
 
-        A non-finite score is refused rather than read as absent: what wrote
-        it was not this, and taking it for an absence would be a guess.
+        A non-finite score is refused rather than read as absent: what wrote it was not
+        this, and taking it for an absence would be a guess.
 
         Raises:
             ValueError: If a key it needs is absent or unreadable.
@@ -167,11 +166,10 @@ class FrameEvaluation:
 class Measured:
     """One metric folded over what was actually scored on it.
 
-    `scored` is not the same as how many pairs there were, and the difference is
-    the point of keeping both: a metric that was never measured scores none, and
-    one a duplicated frame sent to infinity scores one fewer than its
-    neighbours. Weighting a fold by anything else counts what was left out as a
-    zero.
+    `scored` is not the same as how many pairs there were, and the difference is the
+    point of keeping both: a metric that was never measured scores none, and one a
+    duplicated frame sent to infinity scores one fewer than its neighbours. Weighting a
+    fold by anything else counts what was left out as a zero.
 
     Attributes:
         scored: How many pairs this metric was measured on, finitely.
@@ -185,8 +183,8 @@ class Measured:
         """Refuse a count that cannot have been reached.
 
         Raises:
-            ValueError: If `scored` is negative, or the mean of nothing is not
-                the zero that stands for it.
+            ValueError: If `scored` is negative, or the mean of nothing is not the zero
+                that stands for it.
         """
         if self.scored < 0:
             msg = f"negative score count {self.scored}: expected 0 or more"
@@ -221,15 +219,14 @@ class Measured:
 class Spread(Measured):
     """One metric folded across sequences, with the ends and who reached them.
 
-    A mean alone cannot show the shape this search is most likely to produce: a
-    setting that lifts most sequences and collapses a few. Naming the ends is
-    what settles the next move, since a worst that differs per setting means the
-    setting breaks something and one that stays the same means the sequence
-    does.
+    A mean alone cannot show the shape this search is most likely to produce: a setting
+    that lifts most sequences and collapses a few. Naming the ends is what settles the
+    next move, since a worst that differs per setting means the setting breaks something
+    and one that stays the same means the sequence does.
 
-    Both ends rather than the worse of them, so nothing here has to know which
-    end is bad for each metric: low is bad for `ssim`, high for `mse` and
-    `fb_error`, and the reader knows that where this cannot.
+    Both ends rather than the worse of them, so nothing here has to know which end is
+    bad for each metric: low is bad for `ssim`, high for `mse` and `fb_error`, and the
+    reader knows that where this cannot.
 
     Attributes:
         scored: As `Measured`, summed over the sequences.
@@ -249,14 +246,12 @@ class Spread(Measured):
     def across(cls, folded: Mapping[str, Measured]) -> Self:
         """Fold one metric across sequences, weighting each by what it scored.
 
-        The weight is the sequence's own `scored` for this metric rather than
-        the pairs it held, which makes the two-level fold exactly the mean over
-        every finite score: weighting by pairs would count what was left out as
-        a zero.
+        The weight is the sequence's own `scored` for this metric rather than the pairs
+        it held, which makes the two-level fold exactly the mean over every finite
+        score: weighting by pairs would count what was left out as a zero.
 
-        Sequences that scored none are left out of the ends as well as the mean,
-        so a metric nobody measured reads as absent rather than as zero
-        everywhere.
+        Sequences that scored none are left out of the ends as well as the mean, so a
+        metric nobody measured reads as absent rather than as zero everywhere.
 
         Args:
             folded: What each sequence scored on this metric, by sequence name.
@@ -305,22 +300,20 @@ class Spread(Measured):
 class SequenceEvaluation:
     """What one sequence scored, over the pairs it was measured on.
 
-    The pairs are kept, not only the fold of them, so a document carries what
-    it was folded from. That is what lets a run split into chunks be folded
-    again from its parts, and what a reader goes to when a mean is not the
-    whole story.
+    The pairs are kept, not only the fold of them, so a document carries what it was
+    folded from. That is what lets a run split into chunks be folded again from its
+    parts, and what a reader goes to when a mean is not the whole story.
 
     Attributes:
         source: The name the sequence has in its dataset.
         frames: What each pair scored, in the order they were measured.
-        pairs: How many flows the sequence answered, which is one fewer than
-            the frames it holds and is what every `scored` is read against.
+        pairs: How many flows the sequence answered, which is one fewer than the frames
+            it holds and is what every `scored` is read against.
         metrics: What each metric scored, by name, over the finite ones.
 
     Raises:
-        ValueError: If there are no pairs, since a sequence that answered
-            nothing has nothing to say and a part standing for it would count
-            as covered.
+        ValueError: If there are no pairs, since a sequence that answered nothing has
+            nothing to say and a part standing for it would count as covered.
     """
 
     source: str
@@ -358,8 +351,8 @@ class SequenceEvaluation:
     def from_dict(cls, document: Mapping[str, Any]) -> Self:
         """Rebuild one sequence's evaluation from its `source` and its `frames`.
 
-        The fold is taken again rather than read back, so a document whose
-        numbers were edited by hand cannot disagree with the pairs under them.
+        The fold is taken again rather than read back, so a document whose numbers were
+        edited by hand cannot disagree with the pairs under them.
 
         Raises:
             ValueError: If either key is absent, or a pair cannot be read.
@@ -376,21 +369,21 @@ class SequenceEvaluation:
 class DatasetEvaluation:
     """What a dataset scored, over the sequences it covers.
 
-    Folding the parts in one pass rather than merging folded documents is what
-    keeps this exact: every sequence is in view at once, so the ends are the
-    real ends and the weights the real weights however the run was split.
+    Folding the parts in one pass rather than merging folded documents is what keeps
+    this exact: every sequence is in view at once, so the ends are the real ends and the
+    weights the real weights however the run was split.
 
     Attributes:
-        source: The dataset root the run read, which is what tells two
-            documents apart when someone comes to merge them.
+        source: The dataset root the run read, which is what tells two documents apart
+            when someone comes to merge them.
         sequences: What each sequence scored, in the order they were folded.
         pairs: The flows every sequence answered together.
-        metrics: What each metric scored across them, with the ends and who
-            reached them.
+        metrics: What each metric scored across them, with the ends and who reached
+            them.
 
     Raises:
-        ValueError: If there are no sequences, or if two are filed under one
-            name, which would leave one out of every fold without saying so.
+        ValueError: If there are no sequences, or if two are filed under one name, which
+            would leave one out of every fold without saying so.
     """
 
     source: str
@@ -426,8 +419,8 @@ class DatasetEvaluation:
     def __str__(self) -> str:
         """The one axis the document exists for, shortened for reading.
 
-        Reconstruction alone says little without what the pair scored against
-        each other, so the gain over that floor is given beside it.
+        Reconstruction alone says little without what the pair scored against each
+        other, so the gain over that floor is given beside it.
         """
         ssim = self.metrics["ssim"].mean
         gain = ssim - self.metrics["ssim_floor"].mean
@@ -437,8 +430,8 @@ class DatasetEvaluation:
     def dropped(self, metric: str) -> int:
         """How many pairs this metric did not come back finite for.
 
-        Summed over the dataset, this is how many duplicated frames and empty
-        fields it holds: an exact reconstruction is the only way to reach one.
+        Summed over the dataset, this is how many duplicated frames and empty fields it
+        holds: an exact reconstruction is the only way to reach one.
         """
         return self.pairs - self.metrics[metric].scored
 

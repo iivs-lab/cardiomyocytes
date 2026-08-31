@@ -38,14 +38,14 @@ ChunkFlowType = Float32[Tensor, "M 2 H W"]
 class OpenCVConfig(EstimatorConfig, ABC):
     """The settings of one cv2 flow algorithm, and how to make it on a device.
 
-    Every OpenCV estimator is built through this one `build`, so an algorithm is
-    added here rather than beside `OpenCVEstimator`: a subclass carries the
-    parameters, makes the algorithm that reads them, and narrows
-    `SUPPORTED_DEVICES` where cv2 has no implementation for a device.
+    Every OpenCV estimator is built through this one `build`, so an algorithm is added
+    here rather than beside `OpenCVEstimator`: a subclass carries the parameters, makes
+    the algorithm that reads them, and narrows `SUPPORTED_DEVICES` where cv2 has no
+    implementation for a device.
 
     Attributes:
-        SUPPORTED_DEVICES: As `EstimatorConfig`, narrowed by a subclass whose
-            algorithm does not run everywhere.
+        SUPPORTED_DEVICES: As `EstimatorConfig`, narrowed by a subclass whose algorithm
+            does not run everywhere.
         FRAME_DTYPE: As `EstimatorConfig`: cv2's dense algorithms read an 8-bit
             single-channel image, whatever the algorithm.
     """
@@ -56,8 +56,8 @@ class OpenCVConfig(EstimatorConfig, ABC):
     def _algorithm(self, device: Device) -> OpenCVAlgorithm:
         """Make the cv2 algorithm these settings describe, for `device`.
 
-        Called with `device` resolved and already current, so an implementation
-        asks cv2 for the factory it wants rather than binding anything itself.
+        Called with `device` resolved and already current, so an implementation asks cv2
+        for the factory it wants rather than binding anything itself.
         """
 
     def _backend(self, device: DeviceLike = "cpu") -> Backend:
@@ -67,8 +67,8 @@ class OpenCVConfig(EstimatorConfig, ABC):
             device: The device to make it for, in any form a caller may write.
 
         Returns:
-            A backend of its own, so two estimators built from one config share
-            no state.
+            A backend of its own, so two estimators built from one config share no
+            state.
 
         Raises:
             ValueError: If `device` is not one of `SUPPORTED_DEVICES`, or if
@@ -113,15 +113,15 @@ class OpenCVConfig(EstimatorConfig, ABC):
 class Backend(ABC):
     """The flow calls of one device, once a frame is in a form cv2 reads.
 
-    The two implementations differ in where a frame is put, how cv2 is called on
-    it, and how the answer comes back. Everything above them, the validation and
-    the streaming and the batching, is one.
+    The two implementations differ in where a frame is put, how cv2 is called on it, and
+    how the answer comes back. Everything above them, the validation and the streaming
+    and the batching, is one.
 
     Attributes:
-        algorithm: The cv2 algorithm this calls, which is the one an estimator
-            reads its settings back from.
-        device: Where it runs. Carried here because an algorithm does not say
-            which device cv2 made it on, and whoever runs it has to know.
+        algorithm: The cv2 algorithm this calls, which is the one an estimator reads its
+            settings back from.
+        device: Where it runs. Carried here because an algorithm does not say which
+            device cv2 made it on, and whoever runs it has to know.
         retained: Whether a frame is retained, so the next `push` yields a flow.
     """
 
@@ -141,15 +141,15 @@ class Backend(ABC):
         """Return the flow from the retained frame, and retain `frame`.
 
         Args:
-            frame: The frame to retain, copied, so a caller may write over its
-                own afterwards.
-            out: Where to put the flow, sparing the allocation a caller that
-                already has somewhere to put it would only copy out of. Taken on
-                trust to be the flow's own shape, dtype and device.
+            frame: The frame to retain, copied, so a caller may write over its own
+                afterwards.
+            out: Where to put the flow, sparing the allocation a caller that already has
+                somewhere to put it would only copy out of. Taken on trust to be the
+                flow's own shape, dtype and device.
 
         Returns:
-            The flow, or `None` where nothing was retained yet, in which case
-            `out` is left untouched.
+            The flow, or `None` where nothing was retained yet, in which case `out` is
+            left untouched.
         """
 
     @abstractmethod
@@ -170,11 +170,11 @@ class Backend(ABC):
         """Return cv2's `(H, W, 2)` flow as the `(2, H, W)` torch ops consume.
 
         Args:
-            flow: The flow as cv2 wrote it, which may be a view of a buffer the
-                next call writes over.
-            out: Where to put it, or `None` to allocate. A `copy_` casts to
-                another dtype and crosses to another device without a word, so
-                a wrong one is silently honoured rather than refused.
+            flow: The flow as cv2 wrote it, which may be a view of a buffer the next
+                call writes over.
+            out: Where to put it, or `None` to allocate. A `copy_` casts to another
+                dtype and crosses to another device without a word, so a wrong one is
+                silently honoured rather than refused.
 
         Returns:
             A flow of the caller's own either way, so it outlives the buffer.
@@ -191,8 +191,8 @@ class CPUBackend(Backend):
 
     Attributes:
         algorithm: The cv2 algorithm to call.
-        device: The CPU, which is not asked for: there is one of it, where a
-            host with several GPUs has a CUDA device to choose between.
+        device: The CPU, which is not asked for: there is one of it, where a host with
+            several GPUs has a CUDA device to choose between.
         retained: As `Backend`.
     """
 
@@ -235,10 +235,10 @@ class CUDABackend(Backend):
 
     Attributes:
         algorithm: The cv2 algorithm to call.
-        device: The device it and the buffers live on, which has to be a CUDA
-            one and is refused otherwise.
-        retained: As `Backend`. Held as a flag of its own rather than read off
-            an empty buffer, so `reset` keeps the buffers it has.
+        device: The device it and the buffers live on, which has to be a CUDA one and is
+            refused otherwise.
+        retained: As `Backend`. Held as a flag of its own rather than read off an empty
+            buffer, so `reset` keeps the buffers it has.
 
     Raises:
         ValueError: If `device` is not a CUDA device.
@@ -303,27 +303,27 @@ class CUDABackend(Backend):
 class OpenCVEstimator(OpticalFlowEstimator):
     """Optical-flow estimation backed by one OpenCV `cv2` / `cv2.cuda` algorithm.
 
-    Takes `(H, W)` uint8 frames and returns `(2, H, W)` float32 flow (channel 0 =
-    dx, channel 1 = dy) as `torch.Tensor`s on `self.device`. cv2 computes flow in
-    `(H, W, 2)`; the output is transposed once to the channel-first layout that
-    torch spatial ops (`grid_sample`, `conv2d`) consume natively. A CUDA estimator
-    keeps the whole computation on the device, so its output chains into the next
-    GPU stage without a host transfer.
+    Takes `(H, W)` uint8 frames and returns `(2, H, W)` float32 flow (channel 0 = dx,
+    channel 1 = dy) as `torch.Tensor`s on `self.device`. cv2 computes flow in `(H, W,
+    2)`; the output is transposed once to the channel-first layout that torch spatial
+    ops (`grid_sample`, `conv2d`) consume natively. A CUDA estimator keeps the whole
+    computation on the device, so its output chains into the next GPU stage without a
+    host transfer.
 
-    One class serves every algorithm and every device, what differs between
-    them being the backend's business rather than the streaming this holds.
-    Build one through `OpenCVConfig.build`.
+    One class serves every algorithm and every device, what differs between them being
+    the backend's business rather than the streaming this holds. Build one through
+    `OpenCVConfig.build`.
 
-    Separate from `OpticalFlowEstimator` so a future PyTorch (`nn.Module`)
-    backend can extend the neutral base directly.
+    Separate from `OpticalFlowEstimator` so a future PyTorch (`nn.Module`) backend can
+    extend the neutral base directly.
 
     Args:
-        backend: What runs the flow calls, holding the cv2 algorithm and the
-            device it was made on. `OpenCVConfig.build` is what makes one.
+        backend: What runs the flow calls, holding the cv2 algorithm and the device it
+            was made on. `OpenCVConfig.build` is what makes one.
 
     Attributes:
-        algorithm: The cv2 algorithm itself, which is where the settings it was
-            made with can be read back from.
+        algorithm: The cv2 algorithm itself, which is where the settings it was made
+            with can be read back from.
         device: As `OpticalFlowEstimator`, the device the algorithm was made on.
         is_cuda: As `OpticalFlowEstimator`.
     """
@@ -355,8 +355,8 @@ class OpenCVEstimator(OpticalFlowEstimator):
     def push_chunk(self, frames: BatchFrameType) -> ChunkFlowType:
         """Stream a chunk of frames, returning stacked flows continuing the sequence.
 
-        Each flow is written into the batch as it comes, rather than collected
-        and stacked afterwards, which would hold the whole chunk twice over.
+        Each flow is written into the batch as it comes, rather than collected and
+        stacked afterwards, which would hold the whole chunk twice over.
         """
         self._validate_device(frames)
 
@@ -400,9 +400,8 @@ class OpenCVEstimator(OpticalFlowEstimator):
         """Raise if `frame` is not on this estimator's device.
 
         Raises:
-            ValueError: If `frame` sits on another device. The algorithm names
-                itself in the refusal, the estimator being one class for all of
-                them.
+            ValueError: If `frame` sits on another device. The algorithm names itself in
+                the refusal, the estimator being one class for all of them.
         """
         if frame.device != self.device.as_torch:
             name = type(self.algorithm).__name__
@@ -412,7 +411,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
     def _flow_batch(self, count: int, frames: Tensor) -> Tensor:
         """An uninitialized `(count, 2, H, W)` float32 batch beside `frames`.
 
-        `count` is the flows a caller is about to write, not the frames it was
-        given, which is what keeps a row of noise from ever being returned.
+        `count` is the flows a caller is about to write, not the frames it was given,
+        which is what keeps a row of noise from ever being returned.
         """
         return frames.new_empty((count, 2, *frames.shape[1:]), dtype=torch.float32)

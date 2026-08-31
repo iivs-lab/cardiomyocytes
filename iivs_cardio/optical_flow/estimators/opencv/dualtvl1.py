@@ -20,8 +20,8 @@ if TYPE_CHECKING:
 class DualTVL1Config(OpenCVConfig):
     """TV-L1's settings, the last four of which only one device each reads.
 
-    cv2 offers no way to ask an algorithm what it ignored, so a sweep over one of
-    those four on the other device runs to the end and reports no difference.
+    cv2 offers no way to ask an algorithm what it ignored, so a sweep over one of those
+    four on the other device runs to the end and reports no difference.
 
     Attributes:
         SUPPORTED_DEVICES: As `EstimatorConfig`: cv2 implements TV-L1 for both.

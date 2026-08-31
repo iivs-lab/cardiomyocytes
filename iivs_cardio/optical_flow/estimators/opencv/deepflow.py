@@ -18,8 +18,8 @@ from iivs_cardio.optical_flow.estimators.opencv.estimator import (
 class DeepFlowConfig(OpenCVConfig):
     """DeepFlow's settings, of which it exposes none.
 
-    Held anyway so every algorithm is built the same way, from a value that
-    crosses a process boundary where a live algorithm cannot.
+    Held anyway so every algorithm is built the same way, from a value that crosses a
+    process boundary where a live algorithm cannot.
 
     Attributes:
         SUPPORTED_DEVICES: CPU alone, cv2 shipping no CUDA DeepFlow.
@@ -32,9 +32,9 @@ class DeepFlowConfig(OpenCVConfig):
         """Make the DeepFlow algorithm, which takes no settings.
 
         Raises:
-            ValueError: If `device` is a CUDA one. `build` refuses that first,
-                so this answers whoever reached past it, who would otherwise
-                hold a CPU algorithm labelled CUDA.
+            ValueError: If `device` is a CUDA one. `build` refuses that first, so this
+                answers whoever reached past it, who would otherwise hold a CPU
+                algorithm labelled CUDA.
         """
         if device.is_cuda:
             msg = "DeepFlow is not available on CUDA devices"

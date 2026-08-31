@@ -63,15 +63,15 @@ def _validate_flow_shape(shape: tuple[int, ...], path: Path) -> tuple[int, int, 
 def read_flow_npy_header(path: StrPath) -> tuple[tuple[int, int, int], np.dtype[Any]]:
     """Read a flow `.npy`'s shape and dtype without decoding its pixels.
 
-    Reads the `.npy` header block alone, so the cost does not scale with the
-    frame. Pickle is never reached, since only the header is parsed.
+    Reads the `.npy` header block alone, so the cost does not scale with the frame.
+    Pickle is never reached, since only the header is parsed.
 
     Args:
         path: The `.npy` file to inspect.
 
     Returns:
-        The `(2, H, W)` shape and the stored dtype, left for the caller to judge. A
-        flow folder wants float32, but reading a foreign dtype is not itself an error.
+        The `(2, H, W)` shape and the stored dtype, left for the caller to judge. A flow
+        folder wants float32, but reading a foreign dtype is not itself an error.
 
     Raises:
         FileNotFoundError: If `path` does not exist.
@@ -139,9 +139,9 @@ def save_flow_npy(
             (default), or `"raise"`.
 
     Raises:
-        ValueError: If `path` has a non-`.npy` extension, `flow` is not a
-            `(2, H, W)` float32 field, or it holds non-finite values while
-            `on_nonfinite` is `"raise"`.
+        ValueError: If `path` has a non-`.npy` extension, `flow` is not a `(2, H, W)`
+            float32 field, or it holds non-finite values while `on_nonfinite` is
+            `"raise"`.
         FileExistsError: If `path` exists and `overwrite` is False.
         FileNotFoundError: If the parent directory of `path` does not exist.
     """
@@ -163,8 +163,8 @@ def save_flow_folder(
     """Write `flows` into `dest` as a numbered folder `OpticalFlowFolder` reads back.
 
     `flows` is consumed one field at a time, so a whole sequence is never held in
-    memory, and the folder is built atomically. A failure part-way leaves any
-    existing `dest` untouched rather than a half-written folder.
+    memory, and the folder is built atomically. A failure part-way leaves any existing
+    `dest` untouched rather than a half-written folder.
 
     Args:
         dest: The folder to create and fill.
