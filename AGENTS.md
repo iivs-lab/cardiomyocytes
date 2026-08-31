@@ -164,6 +164,14 @@ and contracts, not mechanism*:
 - Fill the line limit rather than wrapping early, but never at the cost of
   an awkward break. Keep the body short: a summary plus what a caller
   cannot infer, and no walk through the implementation.
+- Nothing enforces that fill. `ruff`'s `line-length` governs code, and
+  `docstring-code-format` reaches only the code inside a docstring, so
+  prose keeps whatever width it was first written at and a whole file can
+  settle a column short without a check failing. A line was wrapped early
+  when the next line's first word would still have fit; a section item's
+  continuation indents four from the item. Refilling a file mechanically
+  gets it there; the awkward break the rule above reserves is the rare
+  case, not the ordinary one, so read the result but expect to keep it.
 - **No module-level docstring** unless one is asked for, and none under a
   constant or a type alias. Those take a `#` comment above the statement.
 - **No em dash** (two hyphens) anywhere in a docstring or a comment.
