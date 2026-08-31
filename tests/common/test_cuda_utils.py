@@ -134,12 +134,12 @@ def test_cv_type_names_every_pair_it_supports():
     # leave the message claiming a set that is no longer the real one.
     import cupy as cp
 
-    from iivs_cardio.common.cuda_utils import _DTYPE_CH_TO_CVTYPE, _cv_type
+    from iivs_cardio.common.cuda_utils import _DTYPE_CHANNELS_TO_CVTYPE, _cv_type
 
     with pytest.raises(ValueError, match="unsupported") as raised:
         _cv_type(cp.float64, 3)
 
-    for dtype, channels in _DTYPE_CH_TO_CVTYPE:
+    for dtype, channels in _DTYPE_CHANNELS_TO_CVTYPE:
         assert f"({dtype.__name__}, {channels})" in str(raised.value)
 
 

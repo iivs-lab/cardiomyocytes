@@ -11,10 +11,8 @@ import torch
 if TYPE_CHECKING:
     from cupy.cuda import MemoryPointer
 
-# cv2.cuda.GpuMat exposes `cudaPtr()` (a cudawarped extension) and a padded row
-# `step`, so a GpuMat is wrapped as a strided CuPy view rather than copied.
 _DEPTH_TO_DTYPE: Final[dict[int, type]] = {cv2.CV_8U: cp.uint8, cv2.CV_32F: cp.float32}
-_DTYPE_CH_TO_CVTYPE: Final[dict[tuple[type, int], int]] = {
+_DTYPE_CHANNELS_TO_CVTYPE: Final[dict[tuple[type, int], int]] = {
     (cp.uint8, 1): cv2.CV_8UC1,
     (cp.float32, 1): cv2.CV_32FC1,
     (cp.float32, 2): cv2.CV_32FC2,
@@ -22,7 +20,11 @@ _DTYPE_CH_TO_CVTYPE: Final[dict[tuple[type, int], int]] = {
 
 
 def _cupy_dtype(depth: int) -> type:
-    """The CuPy scalar dtype for a GpuMat `depth`, or raise on an unsupported one."""
+    """The CuPy scalar dtype for a GpuMat `depth`.
+
+    Raises:
+        ValueError: If `depth` is neither `CV_8U` nor `CV_32F`.
+    """
     try:
         return _DEPTH_TO_DTYPE[depth]
     except KeyError:
@@ -31,12 +33,16 @@ def _cupy_dtype(depth: int) -> type:
 
 
 def _cv_type(dtype: type, channels: int) -> int:
-    """The cv2 type code for a `(dtype, channels)` pair; raises if unsupported."""
+    """The cv2 type code for a `(dtype, channels)` pair.
+
+    Raises:
+        ValueError: If the pair is not one this module writes.
+    """
     try:
-        return _DTYPE_CH_TO_CVTYPE[dtype, channels]
+        return _DTYPE_CHANNELS_TO_CVTYPE[dtype, channels]
     except KeyError:
         pair = f"({dtype.__name__}, {channels})"
-        listed = ", ".join(f"({d.__name__}, {c})" for d, c in _DTYPE_CH_TO_CVTYPE)
+        listed = ", ".join(f"({d.__name__}, {c})" for d, c in _DTYPE_CHANNELS_TO_CVTYPE)
         msg = f"unsupported dtype/channels {pair}: expected {listed}"
         raise ValueError(msg) from None
 
@@ -69,9 +75,10 @@ def _hw_channels(shape: tuple[int, ...]) -> tuple[int, int, int]:
 def gpumat_to_cupy(gm: cv2.cuda.GpuMat) -> cp.ndarray:
     """Zero-copy view of a `cv2.cuda.GpuMat` as a CuPy array.
 
-    The GpuMat's device memory is wrapped (not copied); its row padding (`step`) is
-    honored through the CuPy strides. The view stays valid only while `gm` lives, so
-    `gm` is held as the memory's owner to keep it alive.
+    The memory is reached through `cudaPtr()`, which the cudawarped build adds and a
+    stock OpenCV does not carry. It is wrapped rather than copied, and the row padding
+    (`step`) is honored through the CuPy strides. The view stays valid only while `gm`
+    lives, so `gm` is held as the memory's owner to keep it alive.
 
     The memory is labelled with cv2's current device, since a GpuMat does not report its
     own and CuPy would otherwise attribute the pointer to whichever device CuPy happens
@@ -104,8 +111,11 @@ def cupy_to_gpumat(arr: cp.ndarray) -> cv2.cuda.GpuMat:
     """Copy a CuPy array into a fresh `cv2.cuda.GpuMat`, device-to-device.
 
     Allocates a GpuMat of matching shape/dtype and copies `arr` into it on the device
-    (no host round-trip). Accepts `(H, W)` or `(H, W, C)` arrays, and rejects any other
-    rank.
+    (no host round-trip).
+
+    Raises:
+        ValueError: If `arr` is neither 2-D nor 3-D, or its dtype and channel count are
+            not a pair this module writes.
     """
     height, width, channels = _hw_channels(arr.shape)
     gm = cv2.cuda.GpuMat(height, width, _cv_type(arr.dtype.type, channels))
@@ -120,12 +130,15 @@ def tensor_to_gpumat(
 
     Copies into `out` in place when given, sizing it to `tensor` (a no-op when it
     already matches) so a reused buffer skips a per-call allocation. Without one it
-    allocates a fresh GpuMat. Accepts `(H, W)` or `(H, W, C)` tensors and rejects any
-    other rank; `tensor` must live on a CUDA device (else `cp.asarray` would silently
-    host->device copy).
+    allocates a fresh GpuMat. A host tensor is refused rather than moved, since
+    `cp.asarray` would copy it across silently.
+
+    Raises:
+        ValueError: If `tensor` is not on a CUDA device, is neither 2-D nor 3-D, or its
+            dtype and channel count are not a pair this module writes.
     """
     if not tensor.is_cuda:
-        msg = f"tensor_to_gpumat expects a CUDA tensor, got one on {tensor.device}"
+        msg = f"unsupported device {tensor.device}: expected a CUDA tensor"
         raise ValueError(msg)
 
     # Read off the tensor, so a bad rank fails before any device work is done.
