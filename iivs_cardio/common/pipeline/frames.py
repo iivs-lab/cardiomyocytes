@@ -310,8 +310,9 @@ class FrameBranch[N: Named, T](DatasetBranch):
         # settled here, read from every sequence
         self._wanted = frozenset(self.selected)
 
-        # what the run leaves behind, which `report` counts
+        # what this run does to folders already here, which `report` counts
         self._reused: set[str] = set()
+        self._replaced: list[str] = []
         self._dropped: list[str] = []
 
     def get_hook(self, source: N) -> FrameWriter[T] | None:
@@ -447,15 +448,20 @@ class FrameBranch[N: Named, T](DatasetBranch):
             prune_upward(folder.parent, self.root)
 
     def report(self) -> str | None:
-        """Return one line naming what was kept and removed, or `None` if neither.
+        """Return one line naming what this run settled about the folders already here.
 
-        Not what was written, which the run's own summary already counts, but the two a
-        tree alone knows, both about folders it did not write.
+        Not what it wrote, which the run's own summary counts, but what it found when it
+        opened and what it decided for each: kept, taken to write again, or removed.
+        Taking one is the decision and not the outcome, since a sequence that then gave
+        up leaves the folder that was here standing.
         """
         said = []
         if self._reused:
             kept = quantify(len(self._reused), "sequence")
             said.append(f"kept {kept} already written")
+        if self._replaced:
+            over = quantify(len(self._replaced), "sequence")
+            said.append(f"took {over} already here to write again")
         if self._dropped:
             gone = quantify(len(self._dropped), "folder")
             said.append(f"removed {gone} with no source")
@@ -479,10 +485,14 @@ class FrameBranch[N: Named, T](DatasetBranch):
 
         self.clear_staging()
 
+        written = self._already_written()
+
         if self.if_present == "reuse":
-            written = self._already_written()
-            self._reused.update(n for n in written if self._still_describes(n))
-        elif self.if_present == "error" and (written := self._already_written()):
+            self._reused.update(name for name in written if self._still_describes(name))
+            self._replaced = [name for name in written if name not in self._reused]
+        elif self.if_present == "overwrite":
+            self._replaced = written
+        elif written:
             sequences = quantify(len(written), "sequence")
             fix = "set `if_present` to 'overwrite' or 'reuse'"
             msg = f"{sequences} already written, from {written[0]!r}: {fix}"

@@ -119,7 +119,7 @@ def test_a_record_that_cannot_be_believed_is_written_again(tmp_path, written, wh
     with tree:
         pass
 
-    assert tree.report() is None, why
+    assert tree.report() == "took 1 sequence already here to write again", why
 
 
 def test_a_folder_holding_fewer_frames_than_its_record_is_written_again(tmp_path):
@@ -139,7 +139,7 @@ def test_a_folder_holding_fewer_frames_than_its_record_is_written_again(tmp_path
         pass
 
     assert kept.report() == "kept 1 sequence already written"
-    assert short.report() is None
+    assert short.report() == "took 1 sequence already here to write again"
 
 
 def test_something_that_is_not_a_frame_cannot_stand_in_for_one(tmp_path):
@@ -159,7 +159,7 @@ def test_something_that_is_not_a_frame_cannot_stand_in_for_one(tmp_path):
     with tree:
         pass
 
-    assert tree.report() is None
+    assert tree.report() == "took 1 sequence already here to write again"
 
 
 def test_a_tree_reads_its_record_back_under_the_name_it_was_given(tmp_path):
@@ -195,7 +195,7 @@ def test_a_record_left_under_another_name_counts_as_a_frame(tmp_path):
     with tree:
         pass
 
-    assert tree.report() is None
+    assert tree.report() == "took 1 sequence already here to write again"
 
 
 @pytest.mark.parametrize("named", ("../up", "sub/down", "source.bin"))
@@ -290,11 +290,46 @@ def test_a_removal_is_said_to_have_happened_and_not_only_to_have_been_due(tmp_pa
     with tree:
         pass
 
-    assert tree.report() == "removed 1 folder with no source"
+    assert tree.report() == (
+        "took 1 sequence already here to write again, removed 1 folder with no source"
+    )
+
+
+def test_writing_over_what_is_here_is_said_and_not_only_settled(tmp_path):
+    # `overwrite` was the one policy that left no count behind. `error` names
+    # what it refuses and `reuse` names what it keeps, so the destructive one
+    # was the quietest of the three and a run said nothing of what it replaced.
+    _sequence(tmp_path, "TL_00")
+    tree = _tree(tmp_path, "TL_00", if_present="overwrite")
+
+    with tree:
+        pass
+
+    assert tree.report() == "took 1 sequence already here to write again"
+
+
+def test_reuse_counts_what_it_kept_apart_from_what_it_takes_again(tmp_path):
+    # `reuse` keeps what still describes the run and writes the rest, so both
+    # halves of what it found are the tree's to say: a run that kept one and
+    # takes one reads nothing like a run that kept both.
+    contents = {"TL_00": ("00000_phase.bin",), "TL_01": ("00000_phase.bin",)}
+    believed = _sequence(tmp_path, "TL_00")
+    record = {"settings": None, "sources": list(contents["TL_00"])}
+    (believed / RECORD_FILE).write_text(json.dumps(record), encoding="utf-8")
+    _sequence(tmp_path, "TL_01")  # no record, so it cannot be believed
+
+    tree = FrameTree(tmp_path, PHASE_FLOAT_BIN, contents, if_present="reuse")
+    with tree:
+        pass
+
+    assert tree.report() == (
+        "kept 1 sequence already written, took 1 sequence already here to write again"
+    )
 
 
 def test_a_tree_that_took_nothing_away_reports_nothing(tmp_path):
-    _sequence(tmp_path, "kept")
+    # Nothing is here to keep, take again or remove, so the three counts
+    # `report` reads are all empty and it has no line to give.
     tree = _tree(tmp_path, "kept", if_present="overwrite", if_unsourced="delete")
 
     with tree:
