@@ -12,9 +12,8 @@ from kaparoo.utils import literal_values, unwrap_or_default
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
-type DeviceLike = str | torch.device | Device
-
 type DeviceKind = Literal["cpu", "cuda"]
+type DeviceLike = str | torch.device | Device
 
 DEVICE_KINDS: Final[frozenset[DeviceKind]] = frozenset(literal_values(DeviceKind))
 
