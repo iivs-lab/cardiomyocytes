@@ -42,9 +42,9 @@ JSON_EXT: Final = ".json"
 def ensure_json_name(name: str) -> str:
     """Return `name` as a JSON file, given `.json` if it carries no extension.
 
-    A branch takes the name of what it files from configuration, so the name it
-    is given has to be one it can write beside the output rather than anywhere
-    a path could reach.
+    A branch takes the name of what it files from configuration, so the name it is given
+    has to be one it can write beside the output rather than anywhere a path could
+    reach.
 
     Args:
         name: The name the setting holds.
@@ -66,15 +66,15 @@ def ensure_json_name(name: str) -> str:
 def as_json_value(settings: Mapping[str, object] | None) -> object:
     """Return `settings` as the value JSON would give them back as.
 
-    Writing changes nothing: `json.dumps` puts a tuple down as an array
-    faithfully. Reading is where the asymmetry appears, since that array comes
-    back a list, and a list is not equal to the tuple that went in. Comparing
-    what is held against what was written finds every output stale, this run's
-    own included, and nothing is ever reused.
+    Writing changes nothing: `json.dumps` puts a tuple down as an array faithfully.
+    Reading is where the asymmetry appears, since that array comes back a list, and a
+    list is not equal to the tuple that went in. Comparing what is held against what was
+    written finds every output stale, this run's own included, and nothing is ever
+    reused.
 
-    Shared because both branches record the same block and both compare it
-    back, so a difference between the two ways of reading it would show up as
-    one output reusing what the other rewrote.
+    Shared because both branches record the same block and both compare it back, so a
+    difference between the two ways of reading it would show up as one output reusing
+    what the other rewrote.
     """
     if settings is None:
         return None
@@ -85,12 +85,12 @@ def as_json_value(settings: Mapping[str, object] | None) -> object:
 def ensure_policy[T: str](value: str, allowed: Sequence[T], key: str) -> T:
     """Read a policy a caller wrote as plain text, refusing one nobody offers.
 
-    Configuration arrives as strings whatever the field is annotated as, so
-    this is where a value becomes one of the policies the code branches on.
+    Configuration arrives as strings whatever the field is annotated as, so this is
+    where a value becomes one of the policies the code branches on.
 
-    The check is `ensure_one_of`'s. What is kept here is the shape of the
-    refusal, which every other one in this package matches and which names the
-    setting rather than the argument that carried it.
+    The check is `ensure_one_of`'s. What is kept here is the shape of the refusal, which
+    every other one in this package matches and which names the setting rather than the
+    argument that carried it.
 
     Args:
         value: The text the caller wrote.
@@ -129,27 +129,26 @@ def ensure_branch_policies(
 class DatasetBranch(ABC):
     """What a side branch judging a whole dataset holds, whatever it writes.
 
-    A branch settles what to write again by measuring what it was given against
-    what an earlier run left. The inputs that measurement rests on are the same
-    whether the branch writes frames or a document, so they are read here and
-    the two cannot drift apart.
+    A branch settles what to write again by measuring what it was given against what an
+    earlier run left. The inputs that measurement rests on are the same whether the
+    branch writes frames or a document, so they are read here and the two cannot drift
+    apart.
 
     Args:
-        contents: Every sequence the source holds, each mapped to the frames it
-            covers and kept as a tuple. The whole dataset rather than the run's
-            own selection.
-        settings: The settings a later run would compare against this one.
-            Defaults to `None`, which records nothing.
-        selected: The sequences of the contents this run was given, repeats
-            dropped. Defaults to `None`, which takes all of them.
-        if_present: The policy for a sequence this branch already holds
-            something for. Defaults to `"error"`.
-        if_unsourced: The policy for what the branch holds and the source has
-            lost. Defaults to `"keep"`.
+        contents: Every sequence the source holds, each mapped to the frames it covers
+            and kept as a tuple. The whole dataset rather than the run's own selection.
+        settings: The settings a later run would compare against this one. Defaults to
+            `None`, which records nothing.
+        selected: The sequences of the contents this run was given, repeats dropped.
+            Defaults to `None`, which takes all of them.
+        if_present: The policy for a sequence this branch already holds something for.
+            Defaults to `"error"`.
+        if_unsourced: The policy for what the branch holds and the source has lost.
+            Defaults to `"keep"`.
 
     Raises:
-        ValueError: If `if_present` or `if_unsourced` is not a policy a branch
-            offers, or if `selected` names something the contents does not hold.
+        ValueError: If `if_present` or `if_unsourced` is not a policy a branch offers,
+            or if `selected` names something the contents does not hold.
     """
 
     def __init__(
@@ -180,8 +179,8 @@ class DatasetBranch(ABC):
     def _replacing(self) -> bool:
         """Whether what a branch already holds may be written over.
 
-        `"reuse"` replaces as readily as `"overwrite"`: what it keeps it keeps
-        by never making a writer for it.
+        `"reuse"` replaces as readily as `"overwrite"`: what it keeps it keeps by never
+        making a writer for it.
         """
         return self.if_present != "error"
 
@@ -189,7 +188,7 @@ class DatasetBranch(ABC):
     def _expected(self, names: Sequence[str]) -> Sequence[str]:
         """Return the sources of what this stage owes for `names`.
 
-        A stage answering once per source returns what it was given; one reading
-        a pair to answer once returns fewer, and saying so is what lets what it
-        wrote be recognised again.
+        A stage answering once per source returns what it was given; one reading a pair
+        to answer once returns fewer, and saying so is what lets what it wrote be
+        recognised again.
         """

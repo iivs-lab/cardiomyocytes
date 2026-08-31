@@ -28,8 +28,8 @@ if TYPE_CHECKING:
 class Releasable(Named, Protocol):
     """Something that can be told to let go of what it kept while it worked.
 
-    Every item of a run is held for the whole of it, so anything an item keeps
-    while it is being worked on would otherwise be kept to the end.
+    Every item of a run is held for the whole of it, so anything an item keeps while it
+    is being worked on would otherwise be kept to the end.
     """
 
     def release(self) -> None: ...
@@ -38,22 +38,22 @@ class Releasable(Named, Protocol):
 class StageRun[S: Releasable](ABC):
     """The items of one run, and how to carry out and report on each of them.
 
-    The name is the caller's to give rather than the machinery's to assume: the
-    same filtering run is preprocessing under one pipeline and postprocessing
-    behind another, so a machine that named itself would be lying in the second
-    case. Every line of the run is filed under it.
+    The name is the caller's to give rather than the machinery's to assume: the same
+    filtering run is preprocessing under one pipeline and postprocessing behind another,
+    so a machine that named itself would be lying in the second case. Every line of the
+    run is filed under it.
 
-    A subclass says two things and inherits the rest: what stage graph to build
-    for an item, and what one line to say about the work before it starts.
+    A subclass says two things and inherits the rest: what stage graph to build for an
+    item, and what one line to say about the work before it starts.
 
     Type Parameters:
         S: The type of one item, which is one sequence of a dataset.
 
     Args:
         items: The items to run, in the order they will be offered.
-        branches: The branches to watch each item with, such as a writer or a
-            meter. Each is asked for a hook per item, which is the subclass's
-            to do since only it knows what a branch is given.
+        branches: The branches to watch each item with, such as a writer or a meter.
+            Each is asked for a hook per item, which is the subclass's to do since only
+            it knows what a branch is given.
         name: The run's name.
     """
 
@@ -93,18 +93,17 @@ class StageRun[S: Releasable](ABC):
     def get_stage(self, index: int, device: Device) -> Stage[Any, Any] | None:
         """Build the stage for the item at `index`, running on `device`.
 
-        Every branch is asked for a hook, so a branch that cannot make one
-        refuses before any frame is read, and one that has nothing to do for
-        this item says so before it costs anything.
+        Every branch is asked for a hook, so a branch that cannot make one refuses
+        before any frame is read, and one that has nothing to do for this item says so
+        before it costs anything.
 
         Args:
             index: The item to build the stage for.
             device: The device the item is to be computed on.
 
         Returns:
-            The stage, or `None` when no branch wants this item. Reading it
-            would then produce nothing anyone had asked for, so the device is
-            left alone too.
+            The stage, or `None` when no branch wants this item. Reading it would then
+            produce nothing anyone had asked for, so the device is left alone too.
         """
         raise NotImplementedError
 
@@ -112,8 +111,8 @@ class StageRun[S: Releasable](ABC):
     def _work_label(self, index: int) -> str:
         """Return what this run does to the item at `index`, without the device.
 
-        Sits under the item's name with the device appended, so it reads as a
-        phrase rather than as a sentence.
+        Sits under the item's name with the device appended, so it reads as a phrase
+        rather than as a sentence.
         """
         raise NotImplementedError
 
@@ -123,18 +122,18 @@ class StageRun[S: Releasable](ABC):
         Args:
             message: The format string to log.
             *args: What it interpolates, left to the logger to apply.
-            head: Whether the line heads a block rather than sitting under one.
-                Defaults to False.
+            head: Whether the line heads a block rather than sitting under one. Defaults
+                to False.
         """
         log_indented(self._logger, message, *args, depth=0 if head else 1)
 
     def _log_unsourced(self) -> None:
         """Say which outputs have no item behind them any more, once each.
 
-        Said whatever the branch then does with them, and before the run rather
-        than after: a dataset that shrank and a share that came up half read
-        the same from here, and only whoever started the run can tell them
-        apart. Waiting until the end would say it after the frames were spent.
+        Said whatever the branch then does with them, and before the run rather than
+        after: a dataset that shrank and a share that came up half read the same from
+        here, and only whoever started the run can tell them apart. Waiting until the
+        end would say it after the frames were spent.
         """
         named: set[str] = set()
         for branch in self._branches:
@@ -152,9 +151,9 @@ class StageRun[S: Releasable](ABC):
     def _log_unchanged(self) -> None:
         """Say why an item is being passed over, which is not always reuse.
 
-        A run given no target has no branch to ask, so nothing is held and
-        nothing was declined: there is simply nothing this run wants. Saying
-        the branches already hold it would name a cause that is not there.
+        A run given no target has no branch to ask, so nothing is held and nothing was
+        declined: there is simply nothing this run wants. Saying the branches already
+        hold it would name a cause that is not there.
         """
         if not self._branches:
             self._log("nothing to do: this run writes nothing")
@@ -165,23 +164,23 @@ class StageRun[S: Releasable](ABC):
     def run_stage(self, index: int, device: Device) -> bool:
         """Carry out the item at `index` on `device`, and log what happened.
 
-        The item's name heads a block and everything else hangs under it, so a
-        reader skimming the left margin sees one entry per item. Every branch
-        that has something to say says it after it committed.
+        The item's name heads a block and everything else hangs under it, so a reader
+        skimming the left margin sees one entry per item. Every branch that has
+        something to say says it after it committed.
 
-        The item lets go of what it held afterwards, whether it finished or
-        gave up. Every item of the run is held for the whole of it, so a window
-        kept past the item it belongs to is held to the end: once per item, on
-        the device, and again in each worker's own copy.
+        The item lets go of what it held afterwards, whether it finished or gave up.
+        Every item of the run is held for the whole of it, so a window kept past the
+        item it belongs to is held to the end: once per item, on the device, and again
+        in each worker's own copy.
 
         Args:
             index: The item to carry out.
             device: The device to carry it out on.
 
         Returns:
-            Whether the item was computed. One that no branch wants a hook for
-            is not read at all, and the frames that would have cost are the
-            whole point of asking first.
+            Whether the item was computed. One that no branch wants a hook for is not
+            read at all, and the frames that would have cost are the whole point of
+            asking first.
         """
         item = self._items[index]
 
@@ -211,14 +210,14 @@ class StageRun[S: Releasable](ABC):
     def running(self) -> Iterator[Self]:
         """Open the branches that outlive one item, for the whole run.
 
-        A branch that gathers across the dataset commits when this closes, and
-        says what it committed afterwards. One whose work ends with the item it
-        watched needs nothing here.
+        A branch that gathers across the dataset commits when this closes, and says what
+        it committed afterwards. One whose work ends with the item it watched needs
+        nothing here.
 
-        Each branch is closed against the run's own outcome and never against
-        what another raised, which is the rule the hooks of one item are closed
-        by a level down. What committed still says so even when the next one
-        could not, since a branch that committed nothing reports nothing anyway.
+        Each branch is closed against the run's own outcome and never against what
+        another raised, which is the rule the hooks of one item are closed by a level
+        down. What committed still says so even when the next one could not, since a
+        branch that committed nothing reports nothing anyway.
         """
         opened: list[AbstractContextManager[object]] = []
 
