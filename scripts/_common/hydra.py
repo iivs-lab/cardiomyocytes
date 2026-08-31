@@ -15,8 +15,8 @@ if TYPE_CHECKING:
 def apply_schema[T](schema: type[T], node: DictConfig) -> T:
     """Read a configuration node as `schema`, checking it against the fields.
 
-    What comes back holds plain values rather than configuration containers,
-    so the rest of the code never has to know where its settings came from.
+    What comes back holds plain values rather than configuration containers, so the rest
+    of the code never has to know where its settings came from.
 
     Returns:
         The node as an instance of `schema`.
@@ -31,10 +31,10 @@ def apply_schema[T](schema: type[T], node: DictConfig) -> T:
 def output_directory() -> str:
     """Return Hydra's own directory for this job, which a run writes into.
 
-    `hydra.run.dir` for a single run, and `hydra.sweep.dir/<subdir>` for each job
-    of a `--multirun`. A sweep runs every job in one process, so a script naming
-    its output file after the run gives every job that same name; writing them to
-    one configured directory would then leave only the last.
+    `hydra.run.dir` for a single run, and `hydra.sweep.dir/<subdir>` for each job of a
+    `--multirun`. A sweep runs every job in one process, so a script naming its output
+    file after the run gives every job that same name; writing them to one configured
+    directory would then leave only the last.
     """
     return HydraConfig.get().runtime.output_dir
 
@@ -42,9 +42,9 @@ def output_directory() -> str:
 def is_multirun() -> bool:
     """Test whether this job is one of a `--multirun` sweep, not a lone run.
 
-    What `output_directory` already accounts for, made answerable: a step that
-    writes somewhere every job shares cannot be repeated per job, and has to
-    refuse the sweep rather than let the jobs race for it.
+    What `output_directory` already accounts for, made answerable: a step that writes
+    somewhere every job shares cannot be repeated per job, and has to refuse the sweep
+    rather than let the jobs race for it.
     """
     return HydraConfig.get().mode is RunMode.MULTIRUN
 
@@ -59,11 +59,11 @@ def _sweep_parameters() -> tuple[str, ...]:
 def ensure_sweep_runs() -> None:
     """Raise where a sweep was composed that this run will not perform.
 
-    An experiment names its jobs under `hydra.sweeper.params`, which only the
-    sweeper reads. Written without `--multirun` it runs once on the defaults,
-    sweeping nothing and saying nothing, which is the one way of getting this
-    wrong that costs a whole run to notice. Asked off the invocation rather
-    than the configuration, so a script may call it before reading anything.
+    An experiment names its jobs under `hydra.sweeper.params`, which only the sweeper
+    reads. Written without `--multirun` it runs once on the defaults, sweeping nothing
+    and saying nothing, which is the one way of getting this wrong that costs a whole
+    run to notice. Asked off the invocation rather than the configuration, so a script
+    may call it before reading anything.
 
     Raises:
         ValueError: If an experiment named a sweep and this is a lone run.

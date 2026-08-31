@@ -61,12 +61,12 @@ class ComputeConfig:
 
     Attributes:
         device: The kind of device to run on, `"cpu"` or `"cuda"`.
-        workers: The division of work, in the shape the device reads. A count
-            on cpu, where `0` stays in this process; the gpu ids to take one
-            worker each on cuda. Defaults to None, which lets the machine
-            answer: every core on cpu, every visible gpu on cuda.
-        tasks_per_worker: How many items a worker takes before it is replaced.
-            Defaults to None, which keeps it for the whole run.
+        workers: The division of work, in the shape the device reads. A count on cpu,
+            where `0` stays in this process; the gpu ids to take one worker each on
+            cuda. Defaults to None, which lets the machine answer: every core on cpu,
+            every visible gpu on cuda.
+        tasks_per_worker: How many items a worker takes before it is replaced. Defaults
+            to None, which keeps it for the whole run.
         measure_workers: Whether to ask the pool how each worker spent its time.
             Defaults to False.
         show_progress: Whether to draw a progress bar, when there is a terminal to draw
@@ -106,11 +106,11 @@ class Outcome(NamedTuple):
     """What one item came back with.
 
     Attributes:
-        index: The item this outcome belongs to. Carried back so a result can
-            be recognised whatever order it arrives in.
+        index: The item this outcome belongs to. Carried back so a result can be
+            recognised whatever order it arrives in.
         reason: The reason the item failed, or `None` if it did not.
-        computed: Whether anything was read and computed for it. Defaults to
-            False, which is also what an item that failed comes back with.
+        computed: Whether anything was read and computed for it. Defaults to False,
+            which is also what an item that failed comes back with.
     """
 
     index: int
@@ -122,13 +122,12 @@ class Outcome(NamedTuple):
 class RunRecord:
     """What a run has learned about its items, as they come back.
 
-    Filled as the results arrive rather than returned at the end: a pool that
-    dies part way never returns, and what came back before it did is the
-    grounds for a retry.
+    Filled as the results arrive rather than returned at the end: a pool that dies part
+    way never returns, and what came back before it did is the grounds for a retry.
 
     Attributes:
-        returned: The items that came back at all, which separates one nobody
-            ran from one that ran and failed.
+        returned: The items that came back at all, which separates one nobody ran from
+            one that ran and failed.
         unchanged: The items this run did not compute.
         failed: The reason each failed item failed, keyed by its name.
     """
@@ -160,17 +159,17 @@ class RunRecord:
 def plan_devices(config: ComputeConfig) -> tuple[Device, ...]:
     """Turn the compute settings into one device per worker.
 
-    There is always at least one, since a run with no worker has nowhere to
-    happen. A gpu id may repeat, which puts two workers on that device.
+    There is always at least one, since a run with no worker has nowhere to happen. A
+    gpu id may repeat, which puts two workers on that device.
 
     Returns:
         The device each worker will take, in worker order.
 
     Raises:
-        TypeError: If `workers` is not the shape the device reads: a count on
-            cpu, gpu ids on cuda.
-        ValueError: If the count is negative, or no CUDA device is visible when
-            one was asked for.
+        TypeError: If `workers` is not the shape the device reads: a count on cpu, gpu
+            ids on cuda.
+        ValueError: If the count is negative, or no CUDA device is visible when one was
+            asked for.
     """
     workers = config.workers
 
@@ -204,8 +203,8 @@ def plan_devices(config: ComputeConfig) -> tuple[Device, ...]:
 def pin_threads(max_workers: int) -> None:
     """Hold this process to its share of the machine's compute threads.
 
-    Every process otherwise sizes its thread pool to the whole machine, and
-    they then contend. A lone worker keeps the machine to itself.
+    Every process otherwise sizes its thread pool to the whole machine, and they then
+    contend. A lone worker keeps the machine to itself.
     """
     if max_workers <= 1:
         return
@@ -216,22 +215,21 @@ def pin_threads(max_workers: int) -> None:
 class WorkerLogFolder:
     """The folder a run's workers write their own log files into.
 
-    One file per worker rather than one shared file: several processes appending
-    to the same file interleave, and on Windows they tear. A worker keeps its id
-    across a restart, so its file is appended to rather than replaced, and
-    clearing is the job's to do once before the run.
+    One file per worker rather than one shared file: several processes appending to the
+    same file interleave, and on Windows they tear. A worker keeps its id across a
+    restart, so its file is appended to rather than replaced, and clearing is the job's
+    to do once before the run.
 
-    The files are named for the run, as `<name>.worker0.log` beside the parent's
-    own `<name>.log`. Two runs may be pointed at one folder, and the deliberate
-    pairing is why they must not be pointed at one file: a stage that filters
-    and a stage that estimates hold different configurations, so what a reader
-    goes looking for is one run's lines rather than both in the order they
-    happened.
+    The files are named for the run, as `<name>.worker0.log` beside the parent's own
+    `<name>.log`. Two runs may be pointed at one folder, and the deliberate pairing is
+    why they must not be pointed at one file: a stage that filters and a stage that
+    estimates hold different configurations, so what a reader goes looking for is one
+    run's lines rather than both in the order they happened.
 
     Args:
         root: An existing folder to write the files into.
-        name: The run's name, which the files are named after and which the
-            parent's own lines are filed under.
+        name: The run's name, which the files are named after and which the parent's own
+            lines are filed under.
     """
 
     STEM: ClassVar[str] = "worker"
@@ -248,8 +246,8 @@ class WorkerLogFolder:
     def path_for(self, worker_id: int, num_workers: int) -> Path:
         """Return where worker `worker_id` of `num_workers` writes.
 
-        The number is padded to the width the largest id needs, so the files of
-        one run sort the way their workers are numbered.
+        The number is padded to the width the largest id needs, so the files of one run
+        sort the way their workers are numbered.
         """
         width = len(str(num_workers - 1))
         return self.root / f"{self.name}.{self.STEM}{worker_id:0{width}d}.log"
@@ -257,8 +255,8 @@ class WorkerLogFolder:
     def list_logs(self) -> list[Path]:
         """Return the files this run's workers would write, that are here now.
 
-        Only this run's are listed, so a folder holding another run's files
-        reports none of them: they are that run's to clear.
+        Only this run's are listed, so a folder holding another run's files reports none
+        of them: they are that run's to clear.
         """
         return sorted(self.root.glob(f"{self.name}.{self.STEM}*.log"))
 
@@ -272,10 +270,10 @@ class WorkerLogFolder:
     ) -> None:
         """Send everything this process logs to its own file, at `level`.
 
-        This replaces the process's root handlers, so that every module's lines
-        land in the worker's file and not only those of one logger. A worker
-        process starts with none of the parent's logging, which is why the
-        level has to be given rather than inherited.
+        This replaces the process's root handlers, so that every module's lines land in
+        the worker's file and not only those of one logger. A worker process starts with
+        none of the parent's logging, which is why the level has to be given rather than
+        inherited.
         """
         log_file = self.path_for(worker_id, num_workers)
 
@@ -292,17 +290,17 @@ class WorkerLogFolder:
 class SharedContext:
     """Everything a worker is handed, sent out once when the pool starts.
 
-    It travels one way. A worker gets its own copy, so what it changes there is
-    never seen again by the parent or by any other worker.
+    It travels one way. A worker gets its own copy, so what it changes there is never
+    seen again by the parent or by any other worker.
 
     Attributes:
         name: The run's name, which its log lines are filed under.
         stages: The items to run, and how to run one.
         devices: One device per worker, indexed by worker id.
-        log_folder: The folder a worker writes its own file into.
-            Defaults to None, which leaves the process's logging alone.
-        log_level: The level a worker logs at, taken from the parent.
-            Defaults to `logging.INFO`.
+        log_folder: The folder a worker writes its own file into. Defaults to None,
+            which leaves the process's logging alone.
+        log_level: The level a worker logs at, taken from the parent. Defaults to
+            `logging.INFO`.
     """
 
     name: str
@@ -322,10 +320,10 @@ def _init_worker(worker_id: int, context: SharedContext) -> None:
 def _run_on_worker(worker_id: int, context: SharedContext, index: int) -> Outcome:
     """Run one item on this worker and report what happened.
 
-    A raised task tears the pool down and takes every item still to come with
-    it, so anything that goes wrong here comes back as a value instead. That
-    covers binding the device as well as running the item: binding happens per
-    task rather than once, so its failure belongs to the task it happened on.
+    A raised task tears the pool down and takes every item still to come with it, so
+    anything that goes wrong here comes back as a value instead. That covers binding the
+    device as well as running the item: binding happens per task rather than once, so
+    its failure belongs to the task it happened on.
 
     Args:
         worker_id: The worker this is running on, which is how it picks its device.
@@ -359,9 +357,9 @@ def _run_on_worker(worker_id: int, context: SharedContext, index: int) -> Outcom
 def log_compute_config(config: ComputeConfig, logger: Logger) -> None:
     """Log the compute settings a run was given, before it resolves them.
 
-    Only settings that were moved get a line, so a run that changed nothing
-    beyond its device says only that. What the run then actually planned is
-    reported by `run_all`, which is the one that knows it.
+    Only settings that were moved get a line, so a run that changed nothing beyond its
+    device says only that. What the run then actually planned is reported by `run_all`,
+    which is the one that knows it.
     """
     log_indented(logger, "compute: %s", config.device, depth=0)
 
@@ -382,8 +380,8 @@ def log_insights(insights: dict[str, Any], name: str, *, unit: str = "it") -> No
     is the cost of being a worker at all: starting, setting up, and stopping.
 
     Args:
-        insights: The measurements the pool collected, empty if it was not
-            asked for them.
+        insights: The measurements the pool collected, empty if it was not asked for
+            them.
         name: The run's name, so the lines are filed with the rest.
         unit: The name for one item, used in the per worker counts. Defaults to `"it"`.
     """
@@ -417,8 +415,8 @@ def _collect_outcomes(
         outcomes: The outcome of each item, in the order they arrive.
         stages: The run's items, for naming an index.
         logger: The logger the per item verdict goes to.
-        record: The record to fill as the results arrive. Given rather than returned,
-            so a pool that dies part way leaves behind what came back before it did.
+        record: The record to fill as the results arrive. Given rather than returned, so
+            a pool that dies part way leaves behind what came back before it did.
     """
     total = len(stages)
 
@@ -438,10 +436,9 @@ def _collect_outcomes(
 def _drawing(*, progress: bool) -> AbstractContextManager[None]:
     """Return a context in which a log line does not tear the bar it lands on.
 
-    Console handlers are routed through `tqdm.write`, which clears the bar
-    before the line and draws it again after. File handlers are left alone, so
-    what reaches the log on disk is unchanged. With no bar there is nothing to
-    tear, and nothing is done.
+    Console handlers are routed through `tqdm.write`, which clears the bar before the
+    line and draws it again after. File handlers are left alone, so what reaches the log
+    on disk is unchanged. With no bar there is nothing to tear, and nothing is done.
     """
     return logging_redirect_tqdm() if progress else nullcontext()
 
@@ -451,15 +448,14 @@ def _tracked(
 ) -> Iterable[Outcome]:
     """Return `outcomes`, advancing a bar as each one is taken.
 
-    Both run paths draw through here, so the bar counts one thing: the results
-    this process has in hand. Left to `mpire`, the pool's own bar counts what
-    the workers reported finishing, which is a different clock and reaches the
-    end while the parent is still draining the queue.
+    Both run paths draw through here, so the bar counts one thing: the results this
+    process has in hand. Left to `mpire`, the pool's own bar counts what the workers
+    reported finishing, which is a different clock and reaches the end while the parent
+    is still draining the queue.
 
-    The bar therefore follows collection rather than computation, and `imap`
-    hands results back in order, so one slow item holds the bar behind workers
-    that have already moved on. It catches up by the end, which is where the
-    two clocks disagreed.
+    The bar therefore follows collection rather than computation, and `imap` hands
+    results back in order, so one slow item holds the bar behind workers that have
+    already moved on. It catches up by the end, which is where the two clocks disagreed.
     """
     total = len(context.stages)
 
@@ -500,8 +496,7 @@ def _run_in_pool(
 
     Args:
         context: The state handed to every worker when the pool starts.
-        config: The settings saying what to report and how long a worker
-            lives.
+        config: The settings saying what to report and how long a worker lives.
         record: The record to fill as the items come back.
         unit: The name for one item, used in the progress bar and the insights.
         show_progress: Whether to draw the progress bar.
@@ -540,25 +535,24 @@ def run_all(
 ) -> None:
     """Run every item a job offers, and report what got through.
 
-    A single worker runs here rather than in a pool, since a pool of one only
-    costs a process. Whatever has to outlive one item is opened around the whole
-    run, and a failure while closing it does not take the verdict with it: once
-    every item has been seen, the run still says which of them failed.
+    A single worker runs here rather than in a pool, since a pool of one only costs a
+    process. Whatever has to outlive one item is opened around the whole run, and a
+    failure while closing it does not take the verdict with it: once every item has been
+    seen, the run still says which of them failed.
 
     Args:
         stages: The items to run, and how to run one.
         config: The device to run them on, and what to report.
-        unit: The name for one item, used in the progress bar and the summary.
-            Defaults to `"it"`.
-        log_folder: The folder workers write their own files into, named for
-            this same run. Defaults to None, which leaves their logging alone.
+        unit: The name for one item, used in the progress bar and the summary. Defaults
+            to `"it"`.
+        log_folder: The folder workers write their own files into, named for this same
+            run. Defaults to None, which leaves their logging alone.
 
     Raises:
-        ValueError: If the log folder is named for another run. Its files would
-            then be filed under one name and the parent's own under another,
-            which no reader could pair up again.
-        IncompleteRunError: If any item failed, raised once the rest have
-            finished.
+        ValueError: If the log folder is named for another run. Its files would then be
+            filed under one name and the parent's own under another, which no reader
+            could pair up again.
+        IncompleteRunError: If any item failed, raised once the rest have finished.
     """
     name = stages.name
     logger = logging.getLogger(name)

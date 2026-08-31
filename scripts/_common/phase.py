@@ -46,13 +46,13 @@ LAST_SEARCH: dict[tuple[object, ...], SearchResult] = {}
 class PhaseSourceConfig(SourceConfig):
     """A tree of phase sequences, laid out the way an acquisition arrives.
 
-    Every stage that reads phase reads it the same way, whether it filters the
-    frames or estimates flows across them.
+    Every stage that reads phase reads it the same way, whether it filters the frames or
+    estimates flows across them.
 
     Attributes:
-        DEFAULT_SUBPATH: Koala's own layout, which is where a phase sequence
-            comes off the microscope. A tree holding another modality names its
-            own `subpath`, and one that names the wrong layout is found empty.
+        DEFAULT_SUBPATH: Koala's own layout, which is where a phase sequence comes off
+            the microscope. A tree holding another modality names its own `subpath`, and
+            one that names the wrong layout is found empty.
         subpath: As `SourceConfig`.
         root: As `SourceConfig`.
         frames: As `SourceConfig`.
@@ -67,10 +67,10 @@ def _source_key(
 ) -> tuple[object, ...]:
     """Return what makes two searches the same search.
 
-    Every field is read rather than a chosen few, so a setting added later
-    cannot quietly reuse an answer it would have changed. The working directory
-    joins them because a relative `root` or `include` names a different folder
-    once `hydra.job.chdir` has moved it.
+    Every field is read rather than a chosen few, so a setting added later cannot
+    quietly reuse an answer it would have changed. The working directory joins them
+    because a relative `root` or `include` names a different folder once
+    `hydra.job.chdir` has moved it.
     """
 
     def frozen(value: object) -> object:
@@ -92,15 +92,14 @@ def _source_key(
 def _ensure_selection(value: list[str] | str | None, key: str) -> None:
     """Raise unless a selection names something to select by.
 
-    An empty one reads as no selection at all, so a list that came out empty
-    takes the whole dataset rather than none of it, and says nothing about
-    either. A file is opened only once the walk is done, so a mistyped path
-    spent the whole search before failing, and failed in the library's words
-    rather than naming the setting that carried it.
+    An empty one reads as no selection at all, so a list that came out empty takes the
+    whole dataset rather than none of it, and says nothing about either. A file is
+    opened only once the walk is done, so a mistyped path spent the whole search before
+    failing, and failed in the library's words rather than naming the setting that
+    carried it.
 
     Args:
-        value: What the setting holds: names, a path to a file of them, or
-            `None`.
+        value: What the setting holds: names, a path to a file of them, or `None`.
         key: The setting's own name, so a refusal says where to go and fix it.
 
     Raises:
@@ -198,39 +197,38 @@ def search_sources(
 ) -> SearchResult:
     """Find the sequences a run reads, narrowed by what it was told to take.
 
-    Every sequence taken is checked for a missing frame before any of them is
-    run, since a gap is a fault in the dataset rather than in one item of work.
-    A gap otherwise opens as an ordinary shorter sequence, and what is written
-    back out is numbered without one, so nothing downstream can tell.
+    Every sequence taken is checked for a missing frame before any of them is run, since
+    a gap is a fault in the dataset rather than in one item of work. A gap otherwise
+    opens as an ordinary shorter sequence, and what is written back out is numbered
+    without one, so nothing downstream can tell.
 
-    A selection that lands on none of a sequence's frames is refused there too,
-    and is not the policy's to decide: a run reading nothing at all is a
-    setting that was written wrong rather than a dataset that came up short.
+    A selection that lands on none of a sequence's frames is refused there too, and is
+    not the policy's to decide: a run reading nothing at all is a setting that was
+    written wrong rather than a dataset that came up short.
 
-    Nothing inside a time-lapse is descended into. Opening one lists its frames
-    already, and the walk has no reason to list them a second time looking for
-    a time-lapse that cannot be nested there.
+    Nothing inside a time-lapse is descended into. Opening one lists its frames already,
+    and the walk has no reason to list them a second time looking for a time-lapse that
+    cannot be nested there.
 
-    The answer is held for the next call asking the same thing, since a sweep
-    runs every job in one process and only the filter differs between them.
-    Only the newest is held, so a call asking for something else pays what it
-    would have paid anyway. A sweep cannot write frames at all, which is what
-    leaves the answer standing for as long as one runs.
+    The answer is held for the next call asking the same thing, since a sweep runs every
+    job in one process and only the filter differs between them. Only the newest is
+    held, so a call asking for something else pays what it would have paid anyway. A
+    sweep cannot write frames at all, which is what leaves the answer standing for as
+    long as one runs.
 
     Returns:
-        One folder per sequence taken, each set to give its frames in radians,
-        and a contents of every sequence the root holds against the frames the
-        run would measure it over. The contents covers what the selection left
-        out too, which is what lets a document say it describes part of a
-        dataset rather than the whole of a smaller one, and what an output with
-        no sequence behind it is measured against. Both are the caller's own to
-        reorder or add to; the folders inside them are shared and read-only.
+        One folder per sequence taken, each set to give its frames in radians, and a
+        contents of every sequence the root holds against the frames the run would
+        measure it over. The contents covers what the selection left out too, which is
+        what lets a document say it describes part of a dataset rather than the whole of
+        a smaller one, and what an output with no sequence behind it is measured
+        against. Both are the caller's own to reorder or add to; the folders inside them
+        are shared and read-only.
 
     Raises:
-        ValueError: If the root holds no sequence at all, if the selection
-            leaves none of the ones it holds, or if a sequence taken is missing
-            a frame. The first two are told apart, since they are fixed
-            differently.
+        ValueError: If the root holds no sequence at all, if the selection leaves none
+            of the ones it holds, or if a sequence taken is missing a frame. The first
+            two are told apart, since they are fixed differently.
     """
     key = _source_key(source_config, select_config)
 
@@ -251,12 +249,12 @@ def build_sequences(
 ) -> tuple[list[PhaseFilteredSequence], dict[str, tuple[str, ...]]]:
     """Build one filtered view per sequence, all sharing a single kernel.
 
-    A kernel holds only the shape it reads, never frames, so one serves every
-    sequence of the run.
+    A kernel holds only the shape it reads, never frames, so one serves every sequence
+    of the run.
 
     Returns:
-        The sequences, in the order the search found them, and the contents of
-        the whole dataset they were selected from.
+        The sequences, in the order the search found them, and the contents of the whole
+        dataset they were selected from.
     """
     sources, contents = search_sources(source_config, select_config)
     subpath = source_config.resolve_subpath()
@@ -287,15 +285,15 @@ def log_short_sequences(
 ) -> None:
     """Name the sequences that could not supply the count that was asked for.
 
-    Said after the search rather than with the rest of the configuration, since
-    it is what the dataset turned out to hold and not what the run was told to
-    do. `"error"` never reaches here: the search refuses there.
+    Said after the search rather than with the rest of the configuration, since it is
+    what the dataset turned out to hold and not what the run was told to do. `"error"`
+    never reaches here: the search refuses there.
 
     Args:
         frame_config: The frame selection, for the count to fall short of.
         sequences: The sequences the run took.
-        contents: Every sequence the source holds, against the frames each
-            would be read over.
+        contents: Every sequence the source holds, against the frames each would be read
+            over.
         name: The run's name, which the warning is filed under.
     """
     count = frame_config.count

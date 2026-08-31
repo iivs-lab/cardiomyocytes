@@ -25,18 +25,18 @@ _GROUP: Final = "filter"
 def parse_filter_config(node: DictConfig | None) -> KernelConfig:
     """Read a kernel's settings from a configuration node.
 
-    An absent node means no filtering, which is a kernel of its own rather
-    than a missing one. What comes back holds plain values, not configuration
-    containers, so it can be recorded as it stands.
+    An absent node means no filtering, which is a kernel of its own rather than a
+    missing one. What comes back holds plain values, not configuration containers, so it
+    can be recorded as it stands.
 
     Returns:
         The settings the node describes.
 
     Raises:
-        TypeError: If the node is a kernel's name rather than the kernel, or
-            describes something that is not a kernel at all.
-        InstantiationException: If the node names something that is not one
-            of this project's kernels.
+        TypeError: If the node is a kernel's name rather than the kernel, or describes
+            something that is not a kernel at all.
+        InstantiationException: If the node names something that is not one of this
+            project's kernels.
     """
     if not node:
         return IdentityConfig()
@@ -57,8 +57,8 @@ def parse_filter_config(node: DictConfig | None) -> KernelConfig:
 def describe_filter_kernel(config: KernelConfig) -> dict[str, Any]:
     """Return a kernel's settings as plain data, with what kind it is.
 
-    A fresh mapping each call, so a caller may change or drop keys without
-    reaching the settings anyone else was given.
+    A fresh mapping each call, so a caller may change or drop keys without reaching the
+    settings anyone else was given.
     """
     return {"kind": config.kind, **asdict(config)}
 
