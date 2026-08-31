@@ -19,13 +19,13 @@ from iivs_cardio.data.transforms.filtering.kernel.base import (
 class IdentityKernel(FilterKernel):
     """The kernel that reduces a pixel to itself, so a sequence reads unfiltered.
 
-    Exists so that "no filtering" is a kernel rather than a missing one: a
-    caller, a config group, and `FilteredSequence` all take the same shape
-    whether or not a run filters, and `None` stops meaning anything special.
+    Exists so that "no filtering" is a kernel rather than a missing one: a caller, a
+    config group, and `FilteredSequence` all take the same shape whether or not a run
+    filters, and `None` stops meaning anything special.
 
-    Its radius is `0` on every axis, so `FilteredSequence` reads a one-frame
-    window and hands it straight back. That path costs one buffered read per
-    frame and no copy, which is what the unfiltered case would cost anyway.
+    Its radius is `0` on every axis, so `FilteredSequence` reads a one-frame window and
+    hands it straight back. That path costs one buffered read per frame and no copy,
+    which is what the unfiltered case would cost anyway.
     """
 
     def __init__(self) -> None:
@@ -41,9 +41,9 @@ class IdentityKernel(FilterKernel):
             target: The index in `window` of the frame to return.
 
         Returns:
-            That frame, copied out of `window` rather than viewed: no filtering
-            still means a frame of the caller's own, since the one behind it is
-            the buffer the next window is built from.
+            That frame, copied out of `window` rather than viewed: no filtering still
+            means a frame of the caller's own, since the one behind it is the buffer the
+            next window is built from.
 
         Raises:
             ValueError: If `target` is not an index into `window`.

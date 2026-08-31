@@ -27,21 +27,21 @@ def frame_indices(
 ) -> range:
     """Return which of `total` source frames a run takes, in order.
 
-    The one place the three settings become positions: a run reads its frames
-    through a sequence and lists them again when it says what it covered, so a
-    difference between the two shows up as every output being stale.
+    The one place the three settings become positions: a run reads its frames through a
+    sequence and lists them again when it says what it covered, so a difference between
+    the two shows up as every output being stale.
 
-    A selection overrunning the source is clamped rather than refused, since
-    how short a sequence may come is the caller's policy. `total` alone is
-    unchecked, being measured from a source where the rest are read from a
-    config: measure it rather than pick a length that shapes the answer.
+    A selection overrunning the source is clamped rather than refused, since how short a
+    sequence may come is the caller's policy. `total` alone is unchecked, being measured
+    from a source where the rest are read from a config: measure it rather than pick a
+    length that shapes the answer.
 
     Args:
         total: How many frames the source holds.
         start: The first source frame to take. Defaults to 0.
         step: The stride to take them at. Defaults to 1.
-        count: How many to take once the stride has been applied. Defaults to
-            `None`, which takes them all.
+        count: How many to take once the stride has been applied. Defaults to `None`,
+            which takes them all.
 
     Returns:
         The source positions to read, ascending.
@@ -71,33 +71,33 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
 ):
     """A filtered view over a sequence, which is itself a sequence.
 
-    Asking for item `i` applies the kernel to the frames around `i`, so what
-    comes back depends on `i` alone, whatever order the items are asked for.
-    Frames at the two ends are filtered over a shorter window rather than a
-    padded one, so every kept frame gives exactly one output.
+    Asking for item `i` applies the kernel to the frames around `i`, so what comes back
+    depends on `i` alone, whatever order the items are asked for. Frames at the two ends
+    are filtered over a shorter window rather than a padded one, so every kept frame
+    gives exactly one output.
 
-    A small buffer holds the frames of the current window, which makes a walk
-    in order cost one read of the source per frame. Reading out of order stays
-    correct and only misses the buffer more often.
+    A small buffer holds the frames of the current window, which makes a walk in order
+    cost one read of the source per frame. Reading out of order stays correct and only
+    misses the buffer more often.
 
-    The frames are chosen before filtering, not after: taking every Nth first
-    is what makes a strided read measure the frame rate it claims to. It also
-    renumbers the view, so `len` and every index count kept frames, and item 1
-    at `step=2` is the source's frame 2.
+    The frames are chosen before filtering, not after: taking every Nth first is what
+    makes a strided read measure the frame rate it claims to. It also renumbers the
+    view, so `len` and every index count kept frames, and item 1 at `step=2` is the
+    source's frame 2.
 
     Type Parameters:
         S: The source's own type, which `origin` gives back unchanged.
         M: The source's per frame metadata, which filtering passes through.
-        T: The source's numpy dtype, any real kind. Frames are read as float32,
-            since that is what a kernel reduces and what the output carries.
+        T: The source's numpy dtype, any real kind. Frames are read as float32, since
+            that is what a kernel reduces and what the output carries.
 
     Args:
         source: The sequence to read frames from.
         kernel: The reduction to apply over each window.
         start: The first source frame to take. Defaults to 0.
         step: The stride to read the source at. Defaults to 1.
-        count: How many frames to take once the stride has been applied.
-            Defaults to `None`, which takes them all.
+        count: How many frames to take once the stride has been applied. Defaults to
+            `None`, which takes them all.
         device: The device the frames are filtered on. Defaults to `"cpu"`.
 
     Raises:
@@ -131,8 +131,8 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
     def device(self) -> Device:
         """Where the frames are filtered, and where the output comes back on.
 
-        Setting it to a different device drops whatever is buffered, since
-        those frames are on the device it was set away from.
+        Setting it to a different device drops whatever is buffered, since those frames
+        are on the device it was set away from.
         """
         return self._device
 
@@ -146,11 +146,11 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
     def release(self) -> None:
         """Drop the buffered window, leaving the view usable.
 
-        Nothing else lets go of it: the window is whatever the last read needed,
-        so a view that has been walked to the end keeps that much on its device
-        for as long as anything holds the view. A caller that has finished with
-        a sequence but not with the object says so here, and one that reads
-        again simply pays for the frames a second time.
+        Nothing else lets go of it: the window is whatever the last read needed, so a
+        view that has been walked to the end keeps that much on its device for as long
+        as anything holds the view. A caller that has finished with a sequence but not
+        with the object says so here, and one that reads again simply pays for the
+        frames a second time.
         """
         self._buffer.clear()
 
@@ -205,8 +205,8 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
     def get_meta(self, index: int) -> M:
         """Return the source's own metadata for the frame at view `index`.
 
-        It names the frame the way the source does, so a message about a frame
-        points at the file it came from rather than at a renumbered position.
+        It names the frame the way the source does, so a message about a frame points at
+        the file it came from rather than at a renumbered position.
 
         Raises:
             IndexError: If `index` is outside the frames this view keeps.
@@ -216,16 +216,16 @@ class FilteredSequence[S: DataSequence[Any, Any], M, T: NumPyRealDType = np.floa
     def _window(self, indices: range) -> Tensor:
         """Read the frames the window needs, keeping only those still in it.
 
-        This is the one place every source frame passes through, and the last
-        one before they leave the host, so it is where a non finite value is
-        refused. The check follows the cast to float32, since a value a wider
-        source holds may be finite there and infinite once narrowed, and comes
-        before the move to the device, so the answer costs no synchronisation.
+        This is the one place every source frame passes through, and the last one before
+        they leave the host, so it is where a non finite value is refused. The check
+        follows the cast to float32, since a value a wider source holds may be finite
+        there and infinite once narrowed, and comes before the move to the device, so
+        the answer costs no synchronisation.
 
-        What is buffered owns its memory rather than viewing the source's, so
-        neither side can change the other: a source handing back a slice of an
-        array it keeps is the ordinary case, and without the copy a float32 one
-        would be buffered, filtered, and handed to a caller by reference.
+        What is buffered owns its memory rather than viewing the source's, so neither
+        side can change the other: a source handing back a slice of an array it keeps is
+        the ordinary case, and without the copy a float32 one would be buffered,
+        filtered, and handed to a caller by reference.
         """
         self._buffer = {i: f for i, f in self._buffer.items() if i in indices}
 

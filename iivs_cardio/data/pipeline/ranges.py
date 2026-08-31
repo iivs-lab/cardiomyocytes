@@ -38,8 +38,8 @@ def _entry[T](
 ) -> T:
     """Read `key` from a document, refusing it by name when it cannot be read.
 
-    Absent and wrong type are one rejection: a document read back off disk is
-    just data either way, and neither makes it a range document.
+    Absent and wrong type are one rejection: a document read back off disk is just data
+    either way, and neither makes it a range document.
     """
     value = document.get(key)
     if not isinstance(value, kind):
@@ -52,11 +52,11 @@ def _entry[T](
 def _number(document: Mapping[str, Any], key: str) -> float:
     """Read `key` from a document as a bound, refusing what only looks like one.
 
-    `bool` is an `int` to `isinstance`, so `true` would otherwise read as 1.0
-    and a pair of them as a range running backwards. A non-finite bound is
-    refused here rather than combined: `min` and `max` carry a NaN through or
-    drop it depending on where it sits, so one that got in would combine to
-    whatever the order of the results happened to be.
+    `bool` is an `int` to `isinstance`, so `true` would otherwise read as 1.0 and a pair
+    of them as a range running backwards. A non-finite bound is refused here rather than
+    combined: `min` and `max` carry a NaN through or drop it depending on where it sits,
+    so one that got in would combine to whatever the order of the results happened to
+    be.
 
     Raises:
         ValueError: If the value is absent, not a number, or not finite.
@@ -79,8 +79,8 @@ class ValueRange(ABC):
     """The lowest and highest value found in something, and what that was.
 
     Attributes:
-        source: The thing the range was measured over, named the way a reader
-            of the document would look it up.
+        source: The thing the range was measured over, named the way a reader of the
+            document would look it up.
         min_value: The lowest value found.
         max_value: The highest value found.
     """
@@ -126,9 +126,8 @@ class FrameRange(ValueRange):
     """The range of one frame.
 
     Attributes:
-        source: The file the frame was read from, which is the name it has at
-            the source and not necessarily the one a cache of the same run
-            gives it.
+        source: The file the frame was read from, which is the name it has at the source
+            and not necessarily the one a cache of the same run gives it.
         min_value: The lowest value in the frame.
         max_value: The highest value in the frame.
     """
@@ -139,8 +138,8 @@ class FrameRange(ValueRange):
         """Rebuild a frame range from `source`, `min_value` and `max_value`.
 
         Raises:
-            ValueError: If any of the three is absent or unreadable, or if the
-                two bounds run backwards.
+            ValueError: If any of the three is absent or unreadable, or if the two
+                bounds run backwards.
         """
         return cls(
             _entry(document, "source", str),
@@ -153,9 +152,9 @@ class FrameRange(ValueRange):
 class CompositeRange(ValueRange, ABC):
     """A range combined from smaller ones, keeping where each end came from.
 
-    The bounds are not given but taken from the results, and each is remembered
-    with the result it came from, so a wide dataset range can be traced back to
-    the one sequence or frame that widened it.
+    The bounds are not given but taken from the results, and each is remembered with the
+    result it came from, so a wide dataset range can be traced back to the one sequence
+    or frame that widened it.
 
     Attributes:
         source: The thing the combined range was measured over.
@@ -165,8 +164,8 @@ class CompositeRange(ValueRange, ABC):
         max_index: The position of the result holding the highest value.
 
     Raises:
-        ValueError: If there are no results, since a range over nothing has no
-            meaning to fall back on.
+        ValueError: If there are no results, since a range over nothing has no meaning
+            to fall back on.
     """
 
     min_value: float = field(init=False)
@@ -205,11 +204,10 @@ class CompositeRange(ValueRange, ABC):
 class SequenceRange(CompositeRange):
     """The range of one sequence, combined from the frames it was measured over.
 
-    Position is the key, not the name. Each frame is filed under the source it
-    was read from, while a cache the same run writes numbers its frames from
-    zero without a gap, so the two disagree wherever the run read the source
-    with a stride or the source itself was sparse. The nth entry here is the
-    nth frame either way.
+    Position is the key, not the name. Each frame is filed under the source it was read
+    from, while a cache the same run writes numbers its frames from zero without a gap,
+    so the two disagree wherever the run read the source with a stride or the source
+    itself was sparse. The nth entry here is the nth frame either way.
 
     Attributes:
         source: The name the sequence has in its dataset.
@@ -217,8 +215,8 @@ class SequenceRange(CompositeRange):
         max_value: The highest value across every frame.
         min_index: The position of the frame holding the lowest value.
         max_index: The position of the frame holding the highest value.
-        frames: The range of each frame, in the order they were read, which is
-            the order a cache of the same run writes them in.
+        frames: The range of each frame, in the order they were read, which is the order
+            a cache of the same run writes them in.
     """
 
     frames: tuple[FrameRange, ...]
@@ -248,8 +246,8 @@ class DatasetRange(CompositeRange):
     """The range of a whole dataset, combined from the sequences it covers.
 
     Attributes:
-        source: The dataset root the run read, which is what tells two
-            documents apart when someone comes to merge them.
+        source: The dataset root the run read, which is what tells two documents apart
+            when someone comes to merge them.
         min_value: The lowest value across every sequence.
         max_value: The highest value across every sequence.
         min_index: The position of the sequence holding the lowest value.
@@ -287,9 +285,9 @@ class DatasetRange(CompositeRange):
 class RangeWriter(ResultWriter[SequenceRange]):
     """Measure the range of every frame of one sequence, then write the result.
 
-    This is the hook a range document hands to a sequence. It records a range
-    per frame as the frames go by, and on a clean close writes them beside the
-    document as that sequence's result.
+    This is the hook a range document hands to a sequence. It records a range per frame
+    as the frames go by, and on a clean close writes them beside the document as that
+    sequence's result.
 
     Args:
         root: As `ResultWriter`.
@@ -319,8 +317,8 @@ class RangeWriter(ResultWriter[SequenceRange]):
         """Record the range of the frame in `step`, named after its own file.
 
         Raises:
-            ValueError: If the step carries no frame or no path, or if the
-                frame holds no finite value to take a range from.
+            ValueError: If the step carries no frame or no path, or if the frame holds
+                no finite value to take a range from.
         """
         frame = step.require()
         path = step.require_extra()

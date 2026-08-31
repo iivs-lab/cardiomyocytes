@@ -34,9 +34,9 @@ def _ensure_span(span: tuple[float, float], key: str) -> tuple[float, float]:
 def _dtype_span(dtype: torch.dtype) -> tuple[float, float]:
     """Return the span an output of `dtype` covers when nothing else says.
 
-    `[0, 1]` for a float, whose own span bounds nothing worth scaling onto, and
-    the whole of `iinfo` for an integer, where every step spent is a step the
-    estimator downstream can read a brightness change in.
+    `[0, 1]` for a float, whose own span bounds nothing worth scaling onto, and the
+    whole of `iinfo` for an integer, where every step spent is a step the estimator
+    downstream can read a brightness change in.
     """
     if dtype.is_floating_point:
         return 0.0, 1.0
@@ -50,25 +50,23 @@ def _dtype_span(dtype: torch.dtype) -> tuple[float, float]:
 class FrameNormalizer:
     """Min-max scale a frame from one fixed range onto another, and onto a dtype.
 
-    The range is fixed rather than measured per call, which is what makes this a
-    pure function of the frame. Every frame a normalizer touches scales by the
-    same two constants however it was read, so the brightness constancy a dense
-    estimator assumes survives the scaling, and nothing has to see two frames at
-    once to scale either of them.
+    The range is fixed rather than measured per call, which is what makes this a pure
+    function of the frame. Every frame a normalizer touches scales by the same two
+    constants however it was read, so the brightness constancy a dense estimator assumes
+    survives the scaling, and nothing has to see two frames at once to scale either of
+    them.
 
-    Values outside the source range are clamped. That is lossy and expected: a
-    range measured across a sequence or a dataset is not a bound on any one
-    frame of it.
+    Values outside the source range are clamped. That is lossy and expected: a range
+    measured across a sequence or a dataset is not a bound on any one frame of it.
 
     Attributes:
         source: The `(min, max)` a frame is scaled from.
         target: The `(min, max)` the output covers.
-        dtype: The dtype the output is cast to, rounding on the way where it is
-            an integer one.
+        dtype: The dtype the output is cast to, rounding on the way where it is an
+            integer one.
 
     Raises:
-        ValueError: If either span is empty, or an integer `dtype` cannot hold
-            `target`.
+        ValueError: If either span is empty, or an integer `dtype` cannot hold `target`.
     """
 
     source: tuple[float, float]
@@ -95,9 +93,9 @@ class FrameNormalizer:
         """Scale `frame` onto the target range and dtype, keeping its shape.
 
         Args:
-            frame: The `(*dim, H, W)` frame or frames to scale, of any real
-                dtype. Leading dimensions are along for the ride: one pair of
-                constants covers them all, so a batch scales as one frame does.
+            frame: The `(*dim, H, W)` frame or frames to scale, of any real dtype.
+                Leading dimensions are along for the ride: one pair of constants covers
+                them all, so a batch scales as one frame does.
         """
         minimum, maximum = self.source
         low, high = self.target
@@ -115,24 +113,22 @@ class FrameNormalizer:
 class NormalizerConfig:
     """Where a normalizer's source range comes from, as one value.
 
-    The level is the whole of the choice. `"sequence"` and `"dataset"` name a
-    layer of the range document an earlier run wrote, which the caller reads and
-    hands to `build`. `"given"` carries the span itself, which is what makes two
-    runs under different filters comparable: a measured range is a property of
-    the filter that shaped it, so filter sweeps scale by ranges that are not the
-    same range.
+    The level is the whole of the choice. `"sequence"` and `"dataset"` name a layer of
+    the range document an earlier run wrote, which the caller reads and hands to
+    `build`. `"given"` carries the span itself, which is what makes two runs under
+    different filters comparable: a measured range is a property of the filter that
+    shaped it, so filter sweeps scale by ranges that are not the same range.
 
     Attributes:
         level: Which range a frame is scaled from.
-        source: The span `"given"` scales from. Defaults to `None`, which is
-            what a measured level requires.
-        target: The span the output covers. Defaults to `None`, which takes the
-            output dtype's own.
+        source: The span `"given"` scales from. Defaults to `None`, which is what a
+            measured level requires.
+        target: The span the output covers. Defaults to `None`, which takes the output
+            dtype's own.
 
     Raises:
-        ValueError: If `level` is not one this offers, if `"given"` carries no
-            `source`, if a measured level carries one, or if either span given
-            is empty.
+        ValueError: If `level` is not one this offers, if `"given"` carries no `source`,
+            if a measured level carries one, or if either span given is empty.
     """
 
     level: RangeLevel = "dataset"
@@ -163,16 +159,15 @@ class NormalizerConfig:
         """Construct the normalizer this describes, for frames of `dtype`.
 
         Args:
-            dtype: The dtype the output is cast to, which is the one the
-                estimator downstream takes: `EstimatorConfig.FRAME_DTYPE`.
-            measured: The range the document holds at this level. Every level
-                but `"given"` needs it, and `"given"` refuses it rather than
-                scaling by one of two ranges without saying which.
+            dtype: The dtype the output is cast to, which is the one the estimator
+                downstream takes: `EstimatorConfig.FRAME_DTYPE`.
+            measured: The range the document holds at this level. Every level but
+                `"given"` needs it, and `"given"` refuses it rather than scaling by one
+                of two ranges without saying which.
 
         Raises:
-            ValueError: If a measured level was handed no range, if `"given"`
-                was handed one, or if the normalizer this describes could not
-                scale.
+            ValueError: If a measured level was handed no range, if `"given"` was handed
+                one, or if the normalizer this describes could not scale.
         """
         if self.source is not None:
             if measured is not None:

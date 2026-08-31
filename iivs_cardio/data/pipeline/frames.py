@@ -93,26 +93,24 @@ def phase_frame_writer(
 ) -> FrameWriter[Tensor]:
     """Build a writer that saves frames as a phase folder under `dest`.
 
-    The pixel size, height scale and unit are written into each file, so what
-    a later run needs to read them back travels with the frames rather than
-    beside them. A non finite value is refused rather than written, since
-    what is written here is what a later run will take as its source.
+    The pixel size, height scale and unit are written into each file, so what a later
+    run needs to read them back travels with the frames rather than beside them. A non
+    finite value is refused rather than written, since what is written here is what a
+    later run will take as its source.
 
-    A phase header carries no time and no source name, and the folder is
-    renumbered from zero, so nothing in the frames themselves says which
-    acquisition they came from. That is what `record` is for.
+    A phase header carries no time and no source name, and the folder is renumbered from
+    zero, so nothing in the frames themselves says which acquisition they came from.
+    That is what `record` is for.
 
     Args:
         dest: The folder the finished frames go to.
         pixel_size: The size one pixel covers, stamped into each frame.
         height_scale: The scale that turns phase into height.
         unit: The meaning the values carry. Defaults to `PhaseUnit.RADIANS`.
-        overwrite: Whether an existing folder may be replaced. Defaults to
-            `False`.
-        record: The block the folder should carry about itself. Defaults to
-            `None`, which files nothing.
-        record_file: The name that block is filed under. Defaults to
-            `RECORD_FILE`.
+        overwrite: Whether an existing folder may be replaced. Defaults to `False`.
+        record: The block the folder should carry about itself. Defaults to `None`,
+            which files nothing.
+        record_file: The name that block is filed under. Defaults to `RECORD_FILE`.
 
     Returns:
         A writer ready to be registered as a hook.

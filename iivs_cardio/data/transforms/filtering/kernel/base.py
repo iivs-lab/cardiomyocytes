@@ -23,10 +23,10 @@ def _normalize_triple[T](
 ) -> tuple[T, T, T]:
     """Expand a scalar / `(spatial, temporal)` / `(x, y, z)` to the `(x, y, z)` triple.
 
-    Shape only. Element validation is the caller's, since a radius and a sigma
-    admit different values. Any two- or three-element `Sequence` is accepted, not
-    only `list`/`tuple`, so OmegaConf's `ListConfig` and the lists a config parser
-    produces pass as readily as tuples.
+    Shape only. Element validation is the caller's, since a radius and a sigma admit
+    different values. Any two- or three-element `Sequence` is accepted, not only
+    `list`/`tuple`, so OmegaConf's `ListConfig` and the lists a config parser produces
+    pass as readily as tuples.
 
     Raises:
         ValueError: If `value` is none of the three shapes.
@@ -50,21 +50,21 @@ def _normalize_triple[T](
 def _normalize_radius(radius: RadiusLike) -> RadiusType:
     """Expand `radius` to the validated `(rx, ry, rz)` every kernel stores.
 
-    The two-value form is usually the one to reach for: the in-plane axes are
-    almost always equal, while `rz` is not free to follow them because it counts
-    frames and so tracks the frame rate.
+    The two-value form is usually the one to reach for: the in-plane axes are almost
+    always equal, while `rz` is not free to follow them because it counts frames and so
+    tracks the frame rate.
 
     Args:
-        radius: The half-extent per axis, as `r` for every axis,
-            `(r_spatial, r_temporal)` to set the two in-plane axes together, or
-            an explicit `(rx, ry, rz)`.
+        radius: The half-extent per axis, as `r` for every axis, `(r_spatial,
+            r_temporal)` to set the two in-plane axes together, or an explicit `(rx, ry,
+            rz)`.
 
     Returns:
         The half-extent per axis, in `(rx, ry, rz)` order.
 
     Raises:
-        ValueError: If `radius` is none of those shapes, holds a non-`int`, or
-            holds a negative axis.
+        ValueError: If `radius` is none of those shapes, holds a non-`int`, or holds a
+            negative axis.
     """
     triple = _normalize_triple(radius, name="radius")
     if not all(isinstance(r, int) and not isinstance(r, bool) for r in triple):
@@ -79,27 +79,27 @@ def _normalize_radius(radius: RadiusLike) -> RadiusType:
 class FilterKernel(ABC):
     """The neighbourhood a 3D filter reads, and what it reduces it to.
 
-    Holds the sampling geometry only, never frames, so one kernel serves any
-    number of sequences and `FilteredSequence` owns the reading and buffering.
+    Holds the sampling geometry only, never frames, so one kernel serves any number of
+    sequences and `FilteredSequence` owns the reading and buffering.
 
-    Out-of-range neighbours, past a sequence end in time or past an edge in
-    space, are **dropped, not padded**, in every subclass. A pixel near a
-    border is therefore reduced over fewer samples, and each subclass says what
-    that means for its own reduction.
+    Out-of-range neighbours, past a sequence end in time or past an edge in space, are
+    **dropped, not padded**, in every subclass. A pixel near a border is therefore
+    reduced over fewer samples, and each subclass says what that means for its own
+    reduction.
 
-    `FilteredSequence` is written against this type rather than a concrete
-    kernel, so a new reduction is written here and leaves the reading, the
-    buffering, and the window arithmetic untouched.
+    `FilteredSequence` is written against this type rather than a concrete kernel, so a
+    new reduction is written here and leaves the reading, the buffering, and the window
+    arithmetic untouched.
 
     Args:
-        radius: The half-extent per axis, so an axis spans `2r + 1` samples
-            and `0` disables it. Written as `r`, `(r_spatial, r_temporal)`, or
-            an explicit `(rx, ry, rz)`; stored normalized to the triple.
-            Subclasses may derive it rather than take it directly.
+        radius: The half-extent per axis, so an axis spans `2r + 1` samples and `0`
+            disables it. Written as `r`, `(r_spatial, r_temporal)`, or an explicit `(rx,
+            ry, rz)`; stored normalized to the triple. Subclasses may derive it rather
+            than take it directly.
 
     Raises:
-        ValueError: If `radius` is not one of those shapes, holds a non-`int`,
-            or holds a negative axis.
+        ValueError: If `radius` is not one of those shapes, holds a non-`int`, or holds
+            a negative axis.
     """
 
     def __init__(self, radius: RadiusLike) -> None:
@@ -119,11 +119,10 @@ class FilterKernel(ABC):
     def apply(self, window: WindowType, target: int) -> FrameType:
         """Reduce the neighbourhood of each pixel of frame `target` in `window`.
 
-        A pure function of its arguments, so a caller holding a whole sequence
-        gets exactly what the streaming pass would produce for the same frame.
-        What comes back owns its memory rather than viewing `window`, so the
-        caller may keep or change it without reaching the frames still buffered
-        behind it.
+        A pure function of its arguments, so a caller holding a whole sequence gets
+        exactly what the streaming pass would produce for the same frame. What comes
+        back owns its memory rather than viewing `window`, so the caller may keep or
+        change it without reaching the frames still buffered behind it.
 
         Args:
             window: The `(T, H, W)` consecutive float32 frames to read.
@@ -149,14 +148,14 @@ class KernelConfig(ABC):
     """A kernel's constructor arguments as one value, buildable into the kernel.
 
     Separate from `FilterKernel` so a config, a CLI, or the cache sidecar carries the
-    settings without a live object, and what a later run reconstructs is
-    exactly what was recorded. Closed at the same family as `FilterKernel`; each
-    concrete config is a plain frozen record that neither expands nor validates
-    its fields, leaving the kernel the one place that interprets them.
+    settings without a live object, and what a later run reconstructs is exactly what
+    was recorded. Closed at the same family as `FilterKernel`; each concrete config is a
+    plain frozen record that neither expands nor validates its fields, leaving the
+    kernel the one place that interprets them.
 
-    `kind` is what a record says the filter was. Declared rather than read off
-    the class or the import path, so moving the code cannot make two runs that
-    filtered the same way look different to whoever compares their records.
+    `kind` is what a record says the filter was. Declared rather than read off the class
+    or the import path, so moving the code cannot make two runs that filtered the same
+    way look different to whoever compares their records.
     """
 
     kind: ClassVar[str]

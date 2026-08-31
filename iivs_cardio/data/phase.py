@@ -17,20 +17,19 @@ if TYPE_CHECKING:
 class PhaseFilteredSequence(FilteredSequence[PhaseFileFolder, Path]):
     """A filtered phase sequence that knows what it is called in its dataset.
 
-    The name is taken from where the folder sits under the dataset root, so a
-    side branch filing something under it lands where the frames came from.
+    The name is taken from where the folder sits under the dataset root, so a side
+    branch filing something under it lands where the frames came from.
 
     Args:
         source: The phase folder to read.
         kernel: The reduction to apply over each window.
         root: The dataset root the name is measured from.
-        subpath: The part of the folder's path that is the same for every
-            sequence, and so is left out of the name.
+        subpath: The part of the folder's path that is the same for every sequence, and
+            so is left out of the name.
         start: The first source frame to take. Defaults to 0.
-        step: Take every `step`th frame of the source, before filtering.
-            Defaults to 1.
-        count: How many frames to take once the stride has been applied.
-            Defaults to `None`, which takes them all.
+        step: Take every `step`th frame of the source, before filtering. Defaults to 1.
+        count: How many frames to take once the stride has been applied. Defaults to
+            `None`, which takes them all.
     """
 
     def __init__(

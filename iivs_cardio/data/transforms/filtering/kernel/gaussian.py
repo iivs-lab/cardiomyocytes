@@ -28,13 +28,13 @@ SigmaLike = float | tuple[float, float] | SigmaType
 def _normalize_sigma(sigma: SigmaLike) -> SigmaType:
     """Expand `sigma` to the validated `(sx, sy, sz)` of standard deviations.
 
-    Mirrors a radius in shape, taking a scalar, `(s_spatial, s_temporal)`, or the
-    full triple. The axes carry a width rather than a sample count, so an `int`
-    is coerced to `float` rather than required.
+    Mirrors a radius in shape, taking a scalar, `(s_spatial, s_temporal)`, or the full
+    triple. The axes carry a width rather than a sample count, so an `int` is coerced to
+    `float` rather than required.
 
     Raises:
-        ValueError: If `sigma` is none of those shapes, holds a non-number, or
-            holds a negative axis.
+        ValueError: If `sigma` is none of those shapes, holds a non-number, or holds a
+            negative axis.
     """
     triple = _normalize_triple(sigma, name="sigma")
     if not all(isinstance(s, int | float) and not isinstance(s, bool) for s in triple):
@@ -51,24 +51,24 @@ def _normalize_sigma(sigma: SigmaLike) -> SigmaType:
 class GaussianKernel(FilterKernel):
     """A separable 3D Gaussian, renormalized over whatever neighbours survive.
 
-    Dropping out-of-range neighbours would darken every border, so the weights
-    that landed inside are summed and divided out, giving a weighted mean over
-    the surviving support rather than a partial sum. Because the weights are
-    separable and that division happens once at the end, the result equals the
-    full 3D normalized Gaussian exactly, not a per-axis approximation of it.
+    Dropping out-of-range neighbours would darken every border, so the weights that
+    landed inside are summed and divided out, giving a weighted mean over the surviving
+    support rather than a partial sum. Because the weights are separable and that
+    division happens once at the end, the result equals the full 3D normalized Gaussian
+    exactly, not a per-axis approximation of it.
 
     Where a `MedianKernel` deletes an isolated spike, this spreads it across the
     neighbourhood; the two are not interchangeable.
 
     Args:
-        sigma: The standard deviation per axis, in samples, where `0` disables
-            that axis. Written as `s`, `(s_spatial, s_temporal)`, or
-            `(sx, sy, sz)`, like a radius, and for the same reason the two-value
-            form is usual, since `sz` spans frames and tracks the frame rate.
-        truncate: The number of standard deviations the window spans, so each
-            radius is `int(truncate * sigma + 0.5)`, which is
-            `scipy.ndimage`'s rule and name. It is distinct from the border
-            policy, which is always to drop. Defaults to 4.0.
+        sigma: The standard deviation per axis, in samples, where `0` disables that
+            axis. Written as `s`, `(s_spatial, s_temporal)`, or `(sx, sy, sz)`, like a
+            radius, and for the same reason the two-value form is usual, since `sz`
+            spans frames and tracks the frame rate.
+        truncate: The number of standard deviations the window spans, so each radius is
+            `int(truncate * sigma + 0.5)`, which is `scipy.ndimage`'s rule and name. It
+            is distinct from the border policy, which is always to drop. Defaults to
+            4.0.
 
     Raises:
         ValueError: If any sigma is negative, or `truncate` is not positive.
@@ -95,10 +95,10 @@ class GaussianKernel(FilterKernel):
         """Return the `2r + 1` normalized weights along `axis` (`0`=x, `1`=y, `2`=z).
 
         A disabled axis (`sigma` `0`) yields the single weight `[1.0]`, so it
-        contributes a pass-through. Precomputed on the CPU and copied on each
-        call, which is cheap against the convolution it feeds and is what keeps
-        a caller's assignment out of the kernel: moving to a device the weights
-        are already on does not copy on its own.
+        contributes a pass-through. Precomputed on the CPU and copied on each call,
+        which is cheap against the convolution it feeds and is what keeps a caller's
+        assignment out of the kernel: moving to a device the weights are already on does
+        not copy on its own.
         """
         return self._weights[axis].to(device, copy=True)
 
@@ -123,8 +123,8 @@ class GaussianKernel(FilterKernel):
             target: The index in `window` of the frame to filter.
 
         Returns:
-            The `(H, W)` filtered frame, each pixel divided by the weight that
-            actually reached it, so borders keep their brightness.
+            The `(H, W)` filtered frame, each pixel divided by the weight that actually
+            reached it, so borders keep their brightness.
 
         Raises:
             ValueError: If `target` is not an index into `window`.
@@ -166,8 +166,7 @@ class GaussianConfig(KernelConfig):
     Attributes:
         kind: The name a record gives this filter.
         sigma: The standard deviation per axis, in samples.
-        truncate: The number of standard deviations the window spans. Defaults
-            to 4.0.
+        truncate: The number of standard deviations the window spans. Defaults to 4.0.
     """
 
     kind: ClassVar[str] = "gaussian"

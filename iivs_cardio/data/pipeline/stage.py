@@ -20,8 +20,8 @@ if TYPE_CHECKING:
 class SequenceStageRun(StageRun["PhaseFilteredSequence"]):
     """The run that filters one dataset's sequences, one stage per sequence.
 
-    A sequence filters itself as it is read, so the stage is the sequence and
-    the branches watch it directly.
+    A sequence filters itself as it is read, so the stage is the sequence and the
+    branches watch it directly.
 
     Args:
         sequences: As `StageRun`.

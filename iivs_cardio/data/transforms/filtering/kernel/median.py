@@ -59,10 +59,10 @@ def _prefers_topk(samples: int) -> bool:
 def _band_bytes(samples: int, rows: int, width: int, itemsize: int) -> int:
     """Measure what one pass over `rows` rows holds at its peak.
 
-    The stack of neighbours is only part of it: ordering hands back the values
-    again with an int64 index beside each, and the validity count reads a bool
-    mask over the same shape. Counting the stack alone put the real peak at
-    several times the budget it was measured against.
+    The stack of neighbours is only part of it: ordering hands back the values again
+    with an int64 index beside each, and the validity count reads a bool mask over the
+    same shape. Counting the stack alone put the real peak at several times the budget
+    it was measured against.
     """
     per_sample = 2 * itemsize + _INDEX_BYTES + _MASK_BYTES
 
@@ -72,8 +72,8 @@ def _band_bytes(samples: int, rows: int, width: int, itemsize: int) -> int:
 def _tile_rows(samples: int, width: int, itemsize: int) -> int:
     """Choose how many rows of the frame one pass may take, at least one.
 
-    One row is the floor: a neighbourhood wide enough to exceed the budget on
-    its own has nothing left to divide, and the pass takes it anyway.
+    One row is the floor: a neighbourhood wide enough to exceed the budget on its own
+    has nothing left to divide, and the pass takes it anyway.
     """
     return max(1, _TILE_BYTES // _band_bytes(samples, 1, width, itemsize))
 
@@ -81,21 +81,19 @@ def _tile_rows(samples: int, width: int, itemsize: int) -> int:
 class MedianKernel(FilterKernel):
     """A 3D median over a discrete neighbourhood, robust to isolated spikes.
 
-    Dropping out-of-range neighbours shortens the sample list rather than
-    biasing it, and with an even number left the median averages the middle two.
-    That is why `torch.median`, which returns the lower, cannot serve here.
+    Dropping out-of-range neighbours shortens the sample list rather than biasing it,
+    and with an even number left the median averages the middle two. That is why
+    `torch.median`, which returns the lower, cannot serve here.
 
     Args:
-        radius: The half-extent per axis, where `0` disables that axis. Left
-            required because there is no safe default: `rz` counts frames but
-            damage tracks the time a window spans, so it has to follow the frame
-            rate rather than a constant. That is also why
-            `(r_spatial, r_temporal)` is usually the form to reach for over a
-            bare `r`.
-        shape: The neighbours to read inside that extent. `"ellipsoid"` weighs
-            the axes against their radii together, taking 33 offsets at radius
-            `(2, 2, 2)`; `"cuboid"` takes the whole box, 125. Defaults to
-            `"ellipsoid"`.
+        radius: The half-extent per axis, where `0` disables that axis. Left required
+            because there is no safe default: `rz` counts frames but damage tracks the
+            time a window spans, so it has to follow the frame rate rather than a
+            constant. That is also why `(r_spatial, r_temporal)` is usually the form to
+            reach for over a bare `r`.
+        shape: The neighbours to read inside that extent. `"ellipsoid"` weighs the axes
+            against their radii together, taking 33 offsets at radius `(2, 2, 2)`;
+            `"cuboid"` takes the whole box, 125. Defaults to `"ellipsoid"`.
 
     Raises:
         ValueError: If any radius is negative, or `shape` is neither name.
@@ -120,8 +118,8 @@ class MedianKernel(FilterKernel):
     def _build_offsets(self) -> tuple[RadiusType, ...]:
         """Enumerate the offsets `shape` admits, in scan order.
 
-        An axis with radius `0` contributes only `0`, disabling it. `ellipsoid`
-        keeps those satisfying `(dx/rx)^2 + (dy/ry)^2 + (dz/rz)^2 <= 1`.
+        An axis with radius `0` contributes only `0`, disabling it. `ellipsoid` keeps
+        those satisfying `(dx/rx)^2 + (dy/ry)^2 + (dz/rz)^2 <= 1`.
         """
         rx, ry, rz = self.radius
         box = product(range(-rx, rx + 1), range(-ry, ry + 1), range(-rz, rz + 1))
@@ -145,8 +143,8 @@ class MedianKernel(FilterKernel):
             target: The index in `window` of the frame to filter.
 
         Returns:
-            The `(H, W)` filtered frame, each pixel the median of however many
-            of its neighbours fell inside the window and the frame.
+            The `(H, W)` filtered frame, each pixel the median of however many of its
+            neighbours fell inside the window and the frame.
 
         Raises:
             ValueError: If `target` is not an index into `window`.
@@ -179,10 +177,10 @@ class MedianKernel(FilterKernel):
     ) -> None:
         """Say so once when a single row already exceeds what a pass may hold.
 
-        Tiling can only divide down to one row, so past that the bound is gone
-        and the pass takes whatever the neighbourhood asks for. A radius large
-        enough to reach here costs nothing to build and nothing to configure,
-        so without this the first sign of it is the allocation failing.
+        Tiling can only divide down to one row, so past that the bound is gone and the
+        pass takes whatever the neighbourhood asks for. A radius large enough to reach
+        here costs nothing to build and nothing to configure, so without this the first
+        sign of it is the allocation failing.
         """
         if rows > 1 or self._warned_unbounded:
             return
@@ -246,8 +244,7 @@ class MedianConfig(KernelConfig):
     Attributes:
         kind: The name a record gives this filter.
         radius: The half-extent per axis, in samples.
-        shape: The neighbours read inside that extent. Defaults to
-            `"ellipsoid"`.
+        shape: The neighbours read inside that extent. Defaults to `"ellipsoid"`.
     """
 
     kind: ClassVar[str] = "median"
