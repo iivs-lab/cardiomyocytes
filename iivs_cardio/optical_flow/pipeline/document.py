@@ -47,15 +47,23 @@ class EvaluationDocument(
     """The document a flow stage writes, gathering what every sequence scored.
 
     Args:
-        path: As `DocumentBranch`.
-        source: As `DocumentBranch`.
-        contents: As `DocumentBranch`, holding the frames each sequence was read over
+        path: The file to write the document to, given `.json` if it has none.
+        source: The dataset root the run read, recorded so two documents can be told
+            apart before anyone merges them.
+        contents: Every sequence the source holds, mapped to the frames it was read over
             rather than the flows: what a sequence owes is worked out from them, so the
-            same contents describes both branches of a stage.
-        settings: As `DocumentBranch`.
-        selected: As `DocumentBranch`.
-        if_present: As `DocumentBranch`.
-        if_unsourced: As `DocumentBranch`.
+            same contents describes both branches of a stage. The whole dataset rather
+            than the run's own selection, since a document may combine results an
+            earlier run left and coverage counted against the selection would call that
+            complete.
+        settings: The block a later run would compare against this one. Defaults to
+            `None`, which records nothing and so can never be reused.
+        selected: The sequences of the contents this run was given to cover. Repeats
+            count once. Defaults to `None`, which takes all of them.
+        if_present: The policy for a sequence that already has a result here. Defaults
+            to `"error"`.
+        if_unsourced: The policy for a result whose sequence the source has lost.
+            Defaults to `"keep"`.
         data_range: The value range SSIM and PSNR are scored against; taken from the
             frame dtype when omitted, which a float frame has none to give. The reverse
             flow each writer measures comes from the estimator its own sequence carries,
@@ -63,18 +71,27 @@ class EvaluationDocument(
         padding_mode: `grid_sample` out-of-bounds policy for every warp.
 
     Attributes:
-        RESULTS_SUFFIX: As `DocumentBranch`.
-        path: As `DocumentBranch`.
-        results_root: As `DocumentBranch`.
-        source: As `DocumentBranch`.
-        contents: As `DocumentBranch`.
-        settings: As `DocumentBranch`.
-        selected: As `DocumentBranch`.
-        if_present: As `DocumentBranch`.
-        if_unsourced: As `DocumentBranch`.
+        RESULTS_SUFFIX: What the folder of results beside the document is called.
+        path: The document itself, extension included.
+        results_root: The folder each sequence's evaluation is written into.
+        source: The dataset root the run read, recorded so two documents can be told
+            apart before anyone merges them.
+        contents: Every sequence the source holds, each mapped to the frames it was read
+            over. A pair answers one flow, so a sequence is owed a score for every name
+            here but the last.
+        settings: The block a later run would compare against this one, `None` where
+            nothing was recorded and so nothing can be reused.
+        selected: The sequences of the contents this run was given to cover, repeats
+            counted once.
+        if_present: The policy for a sequence that already has an evaluation here.
+            `"reuse"` keeps one still describing this run and scores the rest.
+        if_unsourced: The policy for an evaluation whose sequence the source has lost.
 
     Raises:
-        ValueError: As `DocumentBranch`.
+        ValueError: If `if_present` or `if_unsourced` is not a policy a document offers,
+            if `contents` is empty, since coverage would then have nothing to be
+            measured against, or if `selected` names something the contents does not
+            hold.
     """
 
     def __init__(
