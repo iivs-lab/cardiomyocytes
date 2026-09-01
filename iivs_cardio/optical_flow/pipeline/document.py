@@ -47,23 +47,6 @@ class EvaluationDocument(
     """The document a flow stage writes, gathering what every sequence scored.
 
     Args:
-        path: The file to write the document to, given `.json` if it has none.
-        source: The dataset root the run read, recorded so two documents can be told
-            apart before anyone merges them.
-        contents: Every sequence the source holds, mapped to the frames it was read over
-            rather than the flows: what a sequence owes is worked out from them, so the
-            same contents describes both branches of a stage. The whole dataset rather
-            than the run's own selection, since a document may combine results an
-            earlier run left and coverage counted against the selection would call that
-            complete.
-        settings: The block a later run would compare against this one. Defaults to
-            `None`, which records nothing and so can never be reused.
-        selected: The sequences of the contents this run was given to cover. Repeats
-            count once. Defaults to `None`, which takes all of them.
-        if_present: The policy for a sequence that already has a result here. Defaults
-            to `"error"`.
-        if_unsourced: The policy for a result whose sequence the source has lost.
-            Defaults to `"keep"`.
         data_range: The value range SSIM and PSNR are scored against; taken from the
             frame dtype when omitted, which a float frame has none to give. The reverse
             flow each writer measures comes from the estimator its own sequence carries,
@@ -77,8 +60,9 @@ class EvaluationDocument(
         source: The dataset root the run read, recorded so two documents can be told
             apart before anyone merges them.
         contents: Every sequence the source holds, each mapped to the frames it was read
-            over. A pair answers one flow, so a sequence is owed a score for every name
-            here but the last.
+            over rather than the flows, so the same contents describes both branches of
+            a stage. A pair answers one flow, so a sequence is owed a score for every
+            name here but the last.
         settings: The block a later run would compare against this one, `None` where
             nothing was recorded and so nothing can be reused.
         selected: The sequences of the contents this run was given to cover, repeats
