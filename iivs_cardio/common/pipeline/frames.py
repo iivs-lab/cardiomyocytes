@@ -344,6 +344,12 @@ class FrameBranch[N: Named, T](DatasetBranch):
     ) -> FrameWriter[T]:
         """Return the writer that puts `source`'s frames under `dest`.
 
+        What reaches that folder is frames and this tree's own record, and nothing
+        beside them. Reuse counts the files it finds against the names the record lists,
+        so a sidecar the format leaves is one file too many: the folder reads as one
+        this tree cannot vouch for and is written again every run, without a word about
+        why.
+
         Args:
             source: The sequence the frames come from, for whatever the format takes
                 from it that a frame alone does not carry.
@@ -439,6 +445,12 @@ class FrameBranch[N: Named, T](DatasetBranch):
 
         Only that shape is taken, a hidden name ending in `.tmp`, and only the folders
         it leaves empty, since a run writes into the directory that keeps its logs too.
+
+        The whole tree is walked, where the two searches beside this one stop at a
+        sequence: staging can be anywhere a writer reached, and bounding the walk means
+        working the depth out from the contents and the layout. Cheap enough beside the
+        frames a run spends, and it runs twice, once for what an earlier run left and
+        once for what this one did.
         """
         if not self.root.is_dir():
             return
