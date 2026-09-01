@@ -7,10 +7,7 @@ from typing import TYPE_CHECKING, override
 from iivs.dhm.data.koala import koala_frame_name
 
 from iivs_cardio.common.pipeline.frames import RECORD_FILE, FrameBranch, FrameWriter
-from iivs_cardio.optical_flow.data.folder import (
-    OpticalFlowFolder,
-    save_flow_npy,
-)
+from iivs_cardio.optical_flow.data.folder import OpticalFlowFolder, save_flow_npy
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -63,7 +60,10 @@ class FlowTree(FrameBranch["Named", "Tensor"]):
         record: Mapping[str, object] | None,
     ) -> FrameWriter[Tensor]:
         return flow_frame_writer(
-            dest, overwrite=overwrite, record=record, record_file=self.record_file
+            dest,
+            overwrite=overwrite,
+            record=record,
+            record_file=self.record_file,
         )
 
     @override
@@ -105,8 +105,11 @@ def flow_frame_writer(
 
     def save_fn(folder: Path, index: int, flow: Tensor) -> None:
         name = koala_frame_name(
-            index, stem=OpticalFlowFolder.FILE_STEM, ext=OpticalFlowFolder.FILE_EXT
+            index,
+            stem=OpticalFlowFolder.FILE_STEM,
+            ext=OpticalFlowFolder.FILE_EXT,
         )
+
         save_flow_npy(folder / name, flow.cpu().numpy(), on_nonfinite="raise")
 
     def source_fn(source: Path) -> str:
