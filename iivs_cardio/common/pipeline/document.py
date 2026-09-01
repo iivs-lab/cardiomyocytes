@@ -522,22 +522,15 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
         """Yield each result that still stands for this run, with what it holds.
 
         The one place a result is judged, so opening and closing cannot come to
-        different answers. A result reused on the way in that the combine then passed
-        over would leave a sequence nothing measured and nothing counted.
-
-        Args:
-            strict: Whether a result that cannot be read, or that is filed under a
-                sequence other than the one it holds, stops the run. Judging is not
-                reading, so opening passes over such a result and only the combine
-                refuses it.
+        different answers. Judging is not reading, and `strict` is what parts them:
+        opening passes over a result it cannot read where the combine refuses one.
 
         Yields:
             Each result and what it holds, in the order `list_results` gives.
 
         Raises:
             ValueError: Under `strict`, if a result cannot be read or is filed under the
-                wrong sequence. The result is named, since the folder holds one file per
-                sequence and only the name says which to go and look at.
+                wrong sequence.
         """
         for result in self.list_results():
             name = self._source_of(result)
@@ -566,16 +559,8 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
         """Combine every result on disk into the one value the document carries.
 
         Only the results of sequences the source still holds, and only those a run with
-        these settings could have written. One left by a run whose dataset was larger
-        describes a sequence that is not there, and one left under a different filter
-        describes numbers this run would not produce; combining either would move the
-        answer by something nothing here accounts for. Both stay on disk, since a source
-        that looks smaller than it is makes exactly the same absence as one that shrank.
-
-        A result is filed under the sequence it belongs to and says so again inside, and
-        the two must agree. Nothing else compares them, so a result that disagrees would
-        be sorted under one name and counted under another, which no number in the
-        finished document would show.
+        these settings could have written. Both stay on disk, since a source that looks
+        smaller than it is makes exactly the same absence as one that shrank.
 
         Args:
             strict: Whether a result that cannot be read stops the combine. `False`
@@ -584,9 +569,7 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
                 `True`.
 
         Returns:
-            The combine, or `None` when no result is there. A run whose sequences all
-            failed has nothing to combine, and that is what `coverage` is for: the
-            document says it covers none of them rather than not being written at all.
+            The combine, or `None` when no result is there.
 
         Raises:
             ValueError: Under `strict`, if one of the results cannot be read, or one is
