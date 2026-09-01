@@ -366,7 +366,7 @@ class RangeWriter(ResultWriter[SequenceRange]):
 # ========================== #
 
 
-class RangeDocument(DocumentBranch["Named", SequenceRange, DatasetRange, RangeWriter]):
+class RangeDocument(DocumentBranch["Named", SequenceRange, DatasetRange]):
     """The document a phase stage writes, gathering every sequence's range.
 
     Attributes:

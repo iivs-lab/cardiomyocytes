@@ -27,7 +27,7 @@ from kaparoo.filesystem import (
 from kaparoo.filters import EndsWith
 from kaparoo.utils import quantify
 
-from iivs_cardio.common.pipeline.base import Named
+from iivs_cardio.common.pipeline.base import Named, Step
 from iivs_cardio.common.pipeline.branch import (
     JSON_EXT,
     STAGING,
@@ -212,8 +212,8 @@ class ResultWriter[S: SequenceResult](ABC):
     a sequence that finished. Another hook of the same sequence failing to commit is
     that same thing seen a moment later, and `revert` is how the result goes with it.
 
-    A subclass says one thing and inherits the rest: what the frames it watched combine
-    into.
+    A subclass says two things and inherits the rest: what to take from each step of the
+    sequence, and what the steps it watched combine into.
 
     Type Parameters:
         S: What this sequence's result holds.
@@ -251,6 +251,10 @@ class ResultWriter[S: SequenceResult](ABC):
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self._source!r})"
+
+    @abstractmethod
+    def __call__(self, step: Step[Any, Any]) -> None:
+        """Take one step of the sequence into what is being measured."""
 
     @abstractmethod
     def _result(self) -> S:
@@ -314,7 +318,7 @@ class ResultWriter[S: SequenceResult](ABC):
 # ========================== #
 
 
-class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBranch):
+class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult](DatasetBranch):
     """The side branch that gathers a dataset's results into one document.
 
     It hands each sequence a writer, and each writer leaves its own result in a folder
@@ -335,7 +339,6 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
             way the document files it.
         S: What one sequence's result holds, once read back.
         D: What the results combine into.
-        W: The writer itself, as the branch hands it out.
 
     Attributes:
         RESULTS_SUFFIX: What the folder of results beside the document is called.
@@ -400,7 +403,7 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
         self._written: Path | None = None
 
     @abstractmethod
-    def _make_writer(self, source: N) -> W:
+    def _make_writer(self, source: N) -> ResultWriter[S]:
         """Return the writer that will measure `source` and leave its own result.
 
         Called only for a sequence this run has to measure, so nothing here has to ask
@@ -435,7 +438,7 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
         """How many sequences the source holds."""
         return len(self.contents)
 
-    def get_hook(self, source: N) -> W | None:
+    def get_hook(self, source: N) -> ResultWriter[S] | None:
         """Return the writer that will measure `source`, or `None` to reuse.
 
         Whether a result still stands for this run was settled when the document opened,

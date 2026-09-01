@@ -42,7 +42,7 @@ class Evaluated(Named, Protocol):
 
 
 class EvaluationDocument(
-    DocumentBranch[Evaluated, SequenceEvaluation, DatasetEvaluation, EvaluationWriter]
+    DocumentBranch[Evaluated, SequenceEvaluation, DatasetEvaluation]
 ):
     """The document a flow stage writes, gathering what every sequence scored.
 
