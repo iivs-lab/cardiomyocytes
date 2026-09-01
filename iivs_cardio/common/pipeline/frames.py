@@ -315,24 +315,6 @@ class FrameBranch[N: Named, T](DatasetBranch):
         self._replaced: list[str] = []
         self._dropped: list[str] = []
 
-    def get_hook(self, source: N) -> FrameWriter[T] | None:
-        """Return the writer for `source`, or `None` to keep what is there.
-
-        Whether a folder still stands for this run was settled when the tree opened;
-        this only looks the answer up. The record names the sequence as the dataset does
-        and leaves out the root, an absolute path not surviving a move.
-        """
-        if source.name in self._reused:
-            return None
-
-        record = None
-        if self.settings is not None:
-            record = {"settings": dict(self.settings), "source": source.name}
-
-        dest = Path(self.root, source.name, self.subpath)
-
-        return self._make_writer(dest, source, overwrite=self._replacing, record=record)
-
     @abstractmethod
     def _make_writer(
         self,
@@ -354,6 +336,25 @@ class FrameBranch[N: Named, T](DatasetBranch):
             source: The sequence the frames come from, for whatever the format takes
                 from it that a frame alone does not carry.
         """
+        raise NotImplementedError
+
+    def get_hook(self, source: N) -> FrameWriter[T] | None:
+        """Return the writer for `source`, or `None` to keep what is there.
+
+        Whether a folder still stands for this run was settled when the tree opened;
+        this only looks the answer up. The record names the sequence as the dataset does
+        and leaves out the root, an absolute path not surviving a move.
+        """
+        if source.name in self._reused:
+            return None
+
+        record = None
+        if self.settings is not None:
+            record = {"settings": dict(self.settings), "source": source.name}
+
+        dest = Path(self.root, source.name, self.subpath)
+
+        return self._make_writer(dest, source, overwrite=self._replacing, record=record)
 
     def list_sequences(self) -> list[str]:
         """Return every sequence this tree already holds frames for, sorted.
@@ -480,12 +481,15 @@ class FrameBranch[N: Named, T](DatasetBranch):
         up leaves the folder that was here standing.
         """
         said = []
+
         if self._reused:
             kept = quantify(len(self._reused), "sequence")
             said.append(f"kept {kept} already written")
+
         if self._replaced:
             over = quantify(len(self._replaced), "sequence")
             said.append(f"took {over} already here to write again")
+
         if self._dropped:
             gone = quantify(len(self._dropped), "folder")
             said.append(f"removed {gone} with no source")

@@ -192,3 +192,4 @@ class DatasetBranch(ABC):
         to answer once returns fewer, and saying so is what lets what it wrote be
         recognised again.
         """
+        raise NotImplementedError
