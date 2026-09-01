@@ -461,6 +461,10 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
 
         return sorted(results, key=self._source_of)
 
+    def _source_of(self, result: Path) -> str:
+        """Return the sequence a result belongs to, read off where it sits."""
+        return stringify_path(result.with_suffix(""), after=self.results_root)
+
     def _list_staging(self) -> list[Path]:
         """Return the staging files an interrupted run left among the results.
 
@@ -513,10 +517,6 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
             raise ValueError(msg)  # noqa: TRY004
 
         return document
-
-    def _source_of(self, result: Path) -> str:
-        """Return the sequence a result belongs to, read off where it sits."""
-        return stringify_path(result.with_suffix(""), after=self.results_root)
 
     def _read_valid(self, *, strict: bool) -> Iterator[tuple[Path, S]]:
         """Yield each result that still stands for this run, with what it holds.
@@ -657,6 +657,38 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
 
         return written
 
+    def list_unsourced(self) -> list[str]:
+        """Return the sequences a result is filed under that the source has lost.
+
+        Named rather than acted on: the same absence is what a half mounted share and a
+        misspelt subpath produce, so what to do with them is the caller's policy and
+        saying they are there is not.
+        """
+        filed = map(self._source_of, self.list_results())
+
+        return [name for name in filed if name not in self.contents]
+
+    def drop_unsourced(self) -> list[str]:
+        """Remove the results of sequences the source has lost, and name them.
+
+        The folders a removal empties go with it, the same way opening prunes the ones
+        it emptied: a sequence dropped from a nested dataset would otherwise leave the
+        path down to it standing.
+
+        Returns:
+            The sequences whose results were removed, in the order they were filed
+            under.
+        """
+        dropped = []
+
+        for name in self.list_unsourced():
+            result = self.results_root / f"{name}{JSON_EXT}"
+            result.unlink()
+            prune_upward(result.parent, self.results_root)
+            dropped.append(name)
+
+        return dropped
+
     def report(self) -> str | None:
         """Return one line naming what was written, or `None` before it was.
 
@@ -746,38 +778,6 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
             self._drop(present)
 
         return self
-
-    def list_unsourced(self) -> list[str]:
-        """Return the sequences a result is filed under that the source has lost.
-
-        Named rather than acted on: the same absence is what a half mounted share and a
-        misspelt subpath produce, so what to do with them is the caller's policy and
-        saying they are there is not.
-        """
-        filed = map(self._source_of, self.list_results())
-
-        return [name for name in filed if name not in self.contents]
-
-    def drop_unsourced(self) -> list[str]:
-        """Remove the results of sequences the source has lost, and name them.
-
-        The folders a removal empties go with it, the same way opening prunes the ones
-        it emptied: a sequence dropped from a nested dataset would otherwise leave the
-        path down to it standing.
-
-        Returns:
-            The sequences whose results were removed, in the order they were filed
-            under.
-        """
-        dropped = []
-
-        for name in self.list_unsourced():
-            result = self.results_root / f"{name}{JSON_EXT}"
-            result.unlink()
-            prune_upward(result.parent, self.results_root)
-            dropped.append(name)
-
-        return dropped
 
     def __exit__(
         self,
