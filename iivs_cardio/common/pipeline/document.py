@@ -337,33 +337,25 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
         D: What the results combine into.
         W: The writer itself, as the branch hands it out.
 
-    Args:
-        path: The file to write the document to, given `.json` if it has none.
+    Attributes:
+        RESULTS_SUFFIX: What the folder of results beside the document is called.
+        path: The document itself, extension included, `.json` where none was given.
+        results_root: The folder the results are written into, named after the document.
         source: The dataset root the run read, recorded so two documents can be told
             apart before anyone merges them.
         contents: Every sequence the source holds, each mapped to the frames it would be
-            measured over. The whole dataset rather than the run's own selection, since
-            a document may combine results an earlier run left and coverage counted
-            against the selection would call that complete.
+            measured over and kept as a tuple. The whole dataset rather than the run's
+            own selection, since a document may combine results an earlier run left and
+            coverage counted against the selection would call that complete.
         settings: The block a later run would compare against this one. Defaults to
             `None`, which records nothing and so can never be reused.
-        selected: The sequences of the contents this run was given to cover. Repeats
-            count once. Defaults to `None`, which takes all of them.
-        if_present: The policy for a sequence that already has a result here. Defaults
-            to `"error"`.
+        selected: The sequences of the contents this run was given to cover, repeats
+            counted once. Taking all of them when `None` is given.
+        if_present: The policy for a sequence that already has a result here. `"reuse"`
+            keeps one whose result still describes this run and measures the rest.
+            Defaults to `"error"`.
         if_unsourced: The policy for a result whose sequence the source has lost.
             Defaults to `"keep"`.
-
-    Attributes:
-        RESULTS_SUFFIX: What the folder of results beside the document is called.
-        path: The document itself, extension included.
-        results_root: The folder the results are written into.
-        source: As given.
-        contents: As given, each sequence's frames kept as a tuple.
-        settings: As given.
-        selected: As given, with repeats dropped.
-        if_present: As given.
-        if_unsourced: As given.
 
     Raises:
         ValueError: If `if_present` or `if_unsourced` is not a policy a document offers,
@@ -417,6 +409,7 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
         Args:
             source: The sequence the writer is to be made for.
         """
+        raise NotImplementedError
 
     @abstractmethod
     def _parse(self, document: Mapping[str, Any]) -> S:
@@ -425,6 +418,7 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
         Raises:
             ValueError: If the document is not one this branch wrote.
         """
+        raise NotImplementedError
 
     @abstractmethod
     def _combine(self, results: tuple[S, ...]) -> D:
@@ -434,6 +428,7 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
             results: What each sequence left, ordered by the sequence it belongs to and
                 never empty: combining nothing is answered before it gets here.
         """
+        raise NotImplementedError
 
     @property
     def found(self) -> int:
