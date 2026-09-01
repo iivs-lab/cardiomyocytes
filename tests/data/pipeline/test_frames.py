@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import itertools
 import json
+import shutil
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -325,6 +327,31 @@ def test_reuse_counts_what_it_kept_apart_from_what_it_takes_again(tmp_path):
     assert tree.report() == (
         "kept 1 sequence already written, took 1 sequence already here to write again"
     )
+
+
+def test_a_removal_that_stops_part_way_still_counts_what_went(tmp_path, monkeypatch):
+    # The removals are not one act, so the folders already gone are gone whether
+    # or not the rest followed. Counting them only after the last one left a run
+    # that failed here denying every removal it had just made.
+    for name in ("gone_a", "gone_b", "gone_c"):
+        _sequence(tmp_path, name)
+    tree = _tree(tmp_path, "TL_00", if_unsourced="delete")
+
+    removals = itertools.count(1)
+    remove = shutil.rmtree
+
+    def refuse_the_third(path, *args, **kwargs):
+        if next(removals) == 3:
+            msg = "device is busy"
+            raise OSError(msg)
+        remove(path, *args, **kwargs)
+
+    monkeypatch.setattr(shutil, "rmtree", refuse_the_third)
+
+    with pytest.raises(OSError, match="device is busy"):
+        tree.drop_unsourced()
+
+    assert tree.report() == "removed 2 folders with no source"
 
 
 def test_a_tree_that_took_nothing_away_reports_nothing(tmp_path):

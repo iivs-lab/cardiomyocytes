@@ -427,16 +427,28 @@ class FrameBranch[N: Named, T](DatasetBranch):
 
         The folders a removal empties go with it, so a sequence dropped from a nested
         dataset does not leave the path down to it standing.
+
+        One that cannot be removed rises, where `clear_staging` swallows: that clears up
+        after this code and is worth no more than it costs, while this is what
+        `if_unsourced` asked for. What went before it is counted either way, those
+        folders being gone whether or not the rest followed.
+
+        Returns:
+            The sequences whose folders were removed, in the order they were listed.
+
+        Raises:
+            OSError: If a folder cannot be removed.
         """
         dropped = []
 
-        for name in self.list_unsourced():
-            folder = self.root / name
-            shutil.rmtree(folder)
-            prune_upward(folder.parent, self.root)
-            dropped.append(name)
-
-        self._dropped.extend(dropped)
+        try:
+            for name in self.list_unsourced():
+                folder = self.root / name
+                shutil.rmtree(folder)
+                prune_upward(folder.parent, self.root)
+                dropped.append(name)
+        finally:
+            self._dropped.extend(dropped)
 
         return dropped
 
