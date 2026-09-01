@@ -388,10 +388,15 @@ class RangeDocument(DocumentBranch["Named", SequenceRange, DatasetRange]):
     """
 
     @override
-    def _make_writer(self, source: Named) -> RangeWriter:
-        return RangeWriter(
-            self.results_root, source.name, self.settings, overwrite=self._replacing
-        )
+    def _make_writer(
+        self,
+        root: Path,
+        source: Named,
+        settings: Mapping[str, object] | None,
+        *,
+        overwrite: bool,
+    ) -> RangeWriter:
+        return RangeWriter(root, source.name, settings, overwrite=overwrite)
 
     @override
     def _parse(self, document: Mapping[str, Any]) -> SequenceRange:

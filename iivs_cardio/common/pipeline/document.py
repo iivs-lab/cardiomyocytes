@@ -403,14 +403,27 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult](DatasetBranc
         self._written: Path | None = None
 
     @abstractmethod
-    def _make_writer(self, source: N) -> ResultWriter[S]:
+    def _make_writer(
+        self,
+        root: Path,
+        source: N,
+        settings: Mapping[str, object] | None,
+        *,
+        overwrite: bool,
+    ) -> ResultWriter[S]:
         """Return the writer that will measure `source` and leave its own result.
 
         Called only for a sequence this run has to measure, so nothing here has to ask
-        again whether it does.
+        again whether it does. Where the result goes and whether it may replace one are
+        the branch's to settle, and are given rather than read back off it.
 
         Args:
-            source: The sequence the writer is to be made for.
+            root: The folder the result is to be written into.
+            source: The sequence the writer is to be made for, for whatever the
+                measurement takes from it that a step alone does not carry.
+            settings: The block to record beside the numbers, or `None` to record none.
+            overwrite: Whether a result already filed under this sequence may be
+                replaced.
         """
         raise NotImplementedError
 
@@ -447,7 +460,9 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult](DatasetBranc
         if source.name in self._reused:
             return None
 
-        return self._make_writer(source)
+        return self._make_writer(
+            self.results_root, source, self.settings, overwrite=self._replacing
+        )
 
     def list_results(self) -> list[Path]:
         """Return every result on disk, ordered by the sequence it belongs to."""

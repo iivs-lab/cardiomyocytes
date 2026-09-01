@@ -105,14 +105,21 @@ class EvaluationDocument(
         self._padding_mode = padding_mode
 
     @override
-    def _make_writer(self, source: Evaluated) -> EvaluationWriter:
+    def _make_writer(
+        self,
+        root: Path,
+        source: Evaluated,
+        settings: Mapping[str, object] | None,
+        *,
+        overwrite: bool,
+    ) -> EvaluationWriter:
         return EvaluationWriter(
-            self.results_root,
+            root,
             source.name,
             source.frames,
             source.estimator,
-            self.settings,
-            overwrite=self._replacing,
+            settings,
+            overwrite=overwrite,
             data_range=self._data_range,
             padding_mode=self._padding_mode,
         )
