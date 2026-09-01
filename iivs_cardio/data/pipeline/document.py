@@ -81,7 +81,8 @@ class Bounds:
             ValueError: If either is absent or unreadable, or if the two run backwards.
         """
         return cls(
-            read_number(document, "min_value"), read_number(document, "max_value")
+            read_number(document, "min_value"),
+            read_number(document, "max_value"),
         )
 
 

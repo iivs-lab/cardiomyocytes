@@ -13,7 +13,7 @@ from iivs_cardio.common.pipeline import (
     Step,
     save_document,
 )
-from iivs_cardio.data.pipeline.ranges import (
+from iivs_cardio.data.pipeline.document import (
     Bounds,
     DatasetRange,
     FrameRange,
