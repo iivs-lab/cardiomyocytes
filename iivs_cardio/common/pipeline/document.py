@@ -439,12 +439,7 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
         """Return the writer that will measure `source`, or `None` to reuse.
 
         Whether a result still stands for this run was settled when the document opened,
-        where the whole dataset was in view; this only looks the answer up. A sequence
-        nothing has to measure costs no frames at all, which is what reuse is for.
-
-        Returns:
-            The writer, filed under the sequence's name, or `None` when a result already
-            there was found to still describe this run.
+        where the whole dataset was in view; this only looks the answer up.
         """
         if source.name in self._reused:
             return None
@@ -470,9 +465,7 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
 
         A result is written beside its destination under a hidden name ending in `.tmp`
         and moved into place on a clean close, so anything of that shape still here
-        belongs to a run that never got to close. Nothing else collects them: they are
-        hidden from `list_results`, and the only other hand on them dies with the
-        process that staged them.
+        belongs to a run that never got to close.
         """
         return search_files(self.results_root, name_filter=STAGING)
 
@@ -490,10 +483,9 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
     def _still_describes(self, document: Mapping[str, Any], result: S) -> bool:
         """Whether a result on disk stands for what this run would measure.
 
-        Two things can have moved since it was written, and neither shows in the
-        result's own name: the settings that shaped its numbers, and which frames the
-        source holds by name. A result failing either is stale rather than broken, so it
-        is passed over rather than refused.
+        Two things can have moved since it was written and neither shows in the result's
+        own name: the settings that shaped its numbers, and which frames the source
+        holds. Failing either is stale rather than broken, so it is passed over.
 
         Args:
             document: The result as it was read, for the settings it records.
@@ -592,7 +584,6 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
         keep apart.
 
         Every number is read off the contents, so the three groups always add up to it.
-        Counting one from the contents and another from disk let the two disagree.
         """
         combined = set() if dataset is None else {s.source for s in dataset.sequences}
         given = set(self.selected)
@@ -676,11 +667,9 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
         """Return one line naming what was written, or `None` before it was.
 
         The line counts against the dataset rather than against what this run was given,
-        so a document combined over result of one cannot be mistaken for one combined
-        over all of it. What is missing is split the way `coverage` splits it, since a
-        sequence that failed and one nobody asked for call for different things. A
-        document that covered none has nothing combined to name and says only what it
-        covers.
+        so a document combined over the results of one cannot be mistaken for one
+        combined over all of it. A document that covered none has nothing combined to
+        name and says only what it covers.
         """
         if self._written is None:
             return None
@@ -714,18 +703,10 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
         the whole dataset and be refused at the end, having already dropped the results
         an earlier run left behind.
 
-        What an earlier run staged and never committed always goes, since nothing else
-        is in a position to collect it. What it committed depends on the policy:
-        `"reuse"` keeps every result still describing this run and leaves the rest where
-        they are, `"overwrite"` clears the folder so that everything combined at the end
-        is this run's own, and `"error"` refuses.
-
-        `"error"` refuses here rather than leaving it to the writer that meets the
-        result, the way the frame tree does with a folder: a writer meets them one at a
-        time, so a run whose hundredth sequence is already measured pays for ninety-nine
-        of them first. Refusing is also what a run killed outright leaves behind, since
-        its results are committed and its document is not, and clearing them would spend
-        its whole measurement again without saying so.
+        What an earlier run staged and never committed always goes. What it committed
+        depends on the policy: `"reuse"` keeps every result still describing this run
+        and leaves the rest where they are, `"overwrite"` clears the folder so that
+        everything combined at the end is this run's own, and `"error"` refuses.
 
         Judging happens here, with the whole dataset in view and in one process. A
         worker holds a copy of this branch and nothing it learns comes home, so a result
@@ -771,20 +752,14 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult, W](DatasetBr
         """Write the document, whether or not the run reached the end.
 
         A run that gave up part way still measured what it measured, and the results it
-        left are of sequences that finished. Writing them is what `coverage` is for: the
-        document says which of the dataset it accounts for and names the rest, where
-        refusing to write leaves the healthy results on disk with nothing to read them
-        by.
+        left are of sequences that finished. Writing them is what `coverage` is for, and
+        refusing leaves them on disk with nothing to read them by.
 
         A result that cannot be read is the one thing that could take the whole document
-        with it, since the combine refuses such a result rather than passing it over. It
-        is written from what does read instead, which leaves that sequence out of the
-        dataset and so among the coverage's `skipped`, where a retry will find it, and
-        the refusal is raised once the document is on disk rather than instead of it.
+        with it. It is written from what does read instead, and the refusal is raised
+        once the document is on disk rather than instead of it.
 
         Parts of sequences the source has lost go afterwards where the policy says so.
-        The combine passes over them either way, so removing them is tidying rather than
-        part of the answer, and one that cannot be removed must not cost the document.
 
         The failure itself is not this branch's to report. It reaches the driver, which
         is what decides the run's verdict.
