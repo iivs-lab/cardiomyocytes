@@ -1,5 +1,5 @@
 __all__ = (
-    "CompositeRange",
+    "Bounds",
     "DatasetRange",
     "FrameRange",
     "FrameTree",
@@ -7,18 +7,16 @@ __all__ = (
     "RangeWriter",
     "SequenceRange",
     "SequenceStageRun",
-    "ValueRange",
     "phase_frame_writer",
 )
 
 from iivs_cardio.data.pipeline.frames import FrameTree, phase_frame_writer
 from iivs_cardio.data.pipeline.ranges import (
-    CompositeRange,
+    Bounds,
     DatasetRange,
     FrameRange,
     RangeDocument,
     RangeWriter,
     SequenceRange,
-    ValueRange,
 )
 from iivs_cardio.data.pipeline.stage import SequenceStageRun

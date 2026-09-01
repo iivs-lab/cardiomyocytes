@@ -9,7 +9,7 @@ from iivs.dhm.data.koala import PHASE_FLOAT_BIN
 from iivs.dhm.data.phase import save_phase_bin
 
 from iivs_cardio.common.pipeline import save_document
-from iivs_cardio.data.pipeline import DatasetRange, FrameRange, SequenceRange
+from iivs_cardio.data.pipeline import Bounds, DatasetRange, FrameRange, SequenceRange
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -61,7 +61,8 @@ def range_document(path: Path, spans: dict[str, tuple[float, float]]) -> Path:
         SequenceRange(
             name,
             tuple(
-                FrameRange(f"{index:05d}_phase.bin", *span) for index in range(FRAMES)
+                FrameRange(f"{index:05d}_phase.bin", Bounds(*span))
+                for index in range(FRAMES)
             ),
         )
         for name, span in spans.items()

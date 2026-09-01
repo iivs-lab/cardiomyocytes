@@ -26,20 +26,23 @@ def _frame(index: int, **scores: float | None) -> FrameEvaluation:
     }
     given.update(scores)
 
-    return FrameEvaluation(source=f"{index:05d}_phase.bin", **given)  # type: ignore[arg-type]
+    return FrameEvaluation(f"{index:05d}_phase.bin", given)
 
 
 def _sequence(name: str, count: int, **scores: float | None) -> SequenceEvaluation:
     return SequenceEvaluation(name, tuple(_frame(i, **scores) for i in range(count)))
 
 
-def test_the_gain_is_what_the_score_rose_above_doing_nothing():
-    assert _frame(0, ssim=0.99, ssim_floor=0.95).gain == pytest.approx(0.04)
-
-
 def test_a_score_nobody_measures_is_refused_by_name():
     with pytest.raises(ValueError, match="unsupported metric 'gain'"):
         _frame(0).score("gain")
+
+
+def test_a_score_nobody_measures_cannot_be_written_either():
+    # The mapping is the whole payload now, so a key nothing folds would be
+    # carried into the document and read back as a metric this scores on.
+    with pytest.raises(ValueError, match="unsupported metric 'gain'"):
+        _frame(0, gain=0.04)
 
 
 def test_a_fold_leaves_out_what_did_not_come_back_finite():
@@ -105,12 +108,14 @@ def test_the_ends_name_the_sequences_that_reached_them():
         _sequence("plate/TL_02", 10, ssim=0.97),
     ]
 
-    spread = DatasetEvaluation("nexel", tuple(sequences)).metrics["ssim"]
+    folded = DatasetEvaluation("nexel", tuple(sequences))
+    spread = folded.metrics["ssim"]
+    by_name = {one.source: one for one in folded.sequences}
 
-    assert spread.minimum == pytest.approx(0.40)
     assert spread.min_source == "plate/TL_01"
-    assert spread.maximum == pytest.approx(0.99)
     assert spread.max_source == "plate/TL_00"
+    assert by_name[spread.min_source].metrics["ssim"].mean == pytest.approx(0.40)
+    assert by_name[spread.max_source].metrics["ssim"].mean == pytest.approx(0.99)
 
 
 def test_a_sequence_that_scored_none_is_left_out_of_the_ends():
@@ -128,7 +133,12 @@ def test_a_sequence_that_scored_none_is_left_out_of_the_ends():
 def test_a_metric_nobody_measured_reads_as_absent():
     folded = DatasetEvaluation("nexel", (_sequence("a", 5, fb_error=None),))
 
-    assert folded.metrics["fb_error"] == Spread(0, 0.0, 0.0, 0.0, "", "")
+    assert folded.metrics["fb_error"] == Spread(0, 0.0, "", "")
+
+
+def test_a_spread_refuses_the_summary_that_would_count_sequences_equally():
+    with pytest.raises(TypeError, match="taken across sequences"):
+        Spread.over((0.9, 0.8))
 
 
 def test_a_sequence_filed_twice_is_refused():
@@ -164,7 +174,7 @@ def test_what_is_written_reads_back_as_what_it_was(value):
 
 
 def test_a_document_that_is_not_one_is_refused_by_the_key_that_gave_it_away():
-    with pytest.raises(ValueError, match="'frames' is None"):
+    with pytest.raises(ValueError, match="'steps' is None"):
         SequenceEvaluation.from_dict({"source": "plate/TL_00"})
 
 
@@ -181,17 +191,18 @@ def test_a_fold_is_taken_again_rather_than_read_back():
 
 
 def test_an_evaluation_of_nothing_is_refused():
-    with pytest.raises(ValueError, match="answered no pair"):
+    with pytest.raises(ValueError, match="covers no step"):
         SequenceEvaluation("plate/TL_00", ())
 
-    with pytest.raises(ValueError, match="holds no sequence"):
+    with pytest.raises(ValueError, match="covers no sequence"):
         DatasetEvaluation("nexel", ())
 
 
 def test_a_score_that_is_not_finite_is_not_read_back():
     # The fold that writes a part leaves them out, so one here means the
     # document was written by something else.
-    written = _frame(0).to_dict() | {"psnr": math.inf}
+    written = _frame(0).to_dict()
+    written["scores"]["psnr"] = math.inf
 
     with pytest.raises(ValueError, match="'psnr' is inf"):
         FrameEvaluation.from_dict(written)

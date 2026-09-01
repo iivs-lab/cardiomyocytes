@@ -17,10 +17,10 @@ __all__ = (
     "SequenceResult",
     "SequenceStage",
     "SideBranch",
-    "Sourced",
     "Stage",
     "StageRun",
     "Step",
+    "StepResult",
     "SupportsReport",
     "SupportsRevert",
     "SupportsUnsourced",
@@ -63,7 +63,7 @@ from iivs_cardio.common.pipeline.document import (
     DatasetResult,
     DocumentBranch,
     SequenceResult,
-    Sourced,
+    StepResult,
     save_document,
 )
 from iivs_cardio.common.pipeline.frames import (

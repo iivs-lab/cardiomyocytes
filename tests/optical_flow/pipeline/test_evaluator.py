@@ -48,7 +48,7 @@ def test_a_score_names_the_frame_its_flow_starts_from(tmp_path):
     _run(tmp_path, frame_stage(4))
 
     written = json.loads((tmp_path / f"{NAME}.json").read_text("utf-8"))
-    names = [frame["source"] for frame in written["frames"]]
+    names = [step["source"] for step in written["steps"]]
 
     assert names == ["00000_phase.bin", "00001_phase.bin", "00002_phase.bin"]
 
@@ -167,7 +167,7 @@ def test_a_sequence_that_answered_no_pair_is_refused_rather_than_filed(tmp_path)
     # A result standing for it would count as covered while saying nothing.
     evaluator = EvaluationWriter(tmp_path, NAME, frame_stage(3))
 
-    with pytest.raises(ValueError, match="answered no pair"):
+    with pytest.raises(ValueError, match="covers no step"):
         evaluator.to_evaluation()
 
 

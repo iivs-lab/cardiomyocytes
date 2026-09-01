@@ -14,6 +14,7 @@ from iivs_cardio.common.pipeline import (
     save_document,
 )
 from iivs_cardio.data.pipeline.ranges import (
+    Bounds,
     DatasetRange,
     FrameRange,
     RangeDocument,
@@ -33,9 +34,14 @@ def _contents(*names: str, frames: int = 1) -> dict[str, tuple[str, ...]]:
     return dict.fromkeys(names, listed)
 
 
+def _bounds(low: object = 0.0, high: object = 1.0) -> dict[str, object]:
+    """One pair as a document holds it, either end replaceable by what is not one."""
+    return {"min_value": low, "max_value": high}
+
+
 def _sequence(source: str, *bounds: tuple[float, float]) -> SequenceRange:
     frames = tuple(
-        FrameRange(f"{index:05d}_phase.bin", low, high)
+        FrameRange(f"{index:05d}_phase.bin", Bounds(low, high))
         for index, (low, high) in enumerate(bounds)
     )
     return SequenceRange(source, frames)
@@ -49,7 +55,7 @@ def test_the_bounds_come_from_whichever_parts_hold_them():
     # combine that ignored the results could not land on this pair by accident.
     sequence = _sequence("TL_00", (1.0, 2.0), (-4.0, 3.0), (0.0, 9.0), (0.5, 1.5))
 
-    assert (sequence.min_value, sequence.max_value) == (-4.0, 9.0)
+    assert sequence.bounds == Bounds(-4.0, 9.0)
     assert (sequence.min_index, sequence.max_index) == (1, 2)
 
 
@@ -58,7 +64,7 @@ def test_a_bound_is_read_from_its_own_side():
     # maximum, so reading both off a single "widest" result would be wrong.
     sequence = _sequence("TL_00", (-8.0, -7.0), (5.0, 6.0))
 
-    assert (sequence.min_value, sequence.max_value) == (-8.0, 6.0)
+    assert sequence.bounds == Bounds(-8.0, 6.0)
     assert (sequence.min_index, sequence.max_index) == (0, 1)
 
 
@@ -70,10 +76,10 @@ def test_a_tie_is_reported_against_the_earliest_part():
     assert (sequence.min_index, sequence.max_index) == (0, 0)
 
 
-def test_the_dataset_bound_indexes_a_sequence_rather_than_a_frame():
-    # Each level combines only its own results, so a dataset index names a sequence.
-    # The extremes are in the last sequence, whose own extremes are frames 1
-    # and 0, numbers that must not leak upwards.
+def test_the_dataset_bound_names_a_sequence_rather_than_indexing_a_frame():
+    # Each tier summarises only its own results, and a sequence keeps its name
+    # wherever a run writes it, so this end is named where a frame's is numbered.
+    # The extremes are in the last sequence, whose own are frames 1 and 0.
     dataset = DatasetRange(
         "plate_A",
         (
@@ -83,8 +89,8 @@ def test_the_dataset_bound_indexes_a_sequence_rather_than_a_frame():
         ),
     )
 
-    assert (dataset.min_value, dataset.max_value) == (-9.0, 12.0)
-    assert (dataset.min_index, dataset.max_index) == (2, 2)
+    assert dataset.bounds == Bounds(-9.0, 12.0)
+    assert (dataset.min_source, dataset.max_source) == ("TL_02", "TL_02")
     assert dataset.sequences[2].min_index == 1
 
 
@@ -96,10 +102,10 @@ def test_the_dataset_bound_indexes_a_sequence_rather_than_a_frame():
     ),
 )
 def test_a_level_holding_nothing_is_refused_by_name(build, named):
-    # There is no range to report and no index to point at, so this cannot answer
-    # with a sentinel. The message names the level, since a dataset with an empty
+    # There is no range to report and no end to point at, so this cannot answer
+    # with a sentinel. The message names the tier, since a dataset with an empty
     # sequence in it is fixed differently from an empty dataset.
-    with pytest.raises(ValueError, match=rf"{named} holds nothing"):
+    with pytest.raises(ValueError, match=rf"{named} 'TL_00|{named} 'plate_A"):
         build()
 
 
@@ -107,9 +113,9 @@ def test_a_level_holding_nothing_is_refused_by_name(build, named):
 
 
 def test_every_level_leads_with_the_source_it_names():
-    # The source is what a reader scans for, and it leads at every level without
-    # the document being reordered on the way out: `CompositeRange` declaring
-    # it ahead of the four combined numbers is what buys that.
+    # The source is what a reader scans for, and it leads at every tier without
+    # the document being reordered on the way out: the shared tier declaring it
+    # ahead of what a subclass summarises is what buys that.
     dataset = DatasetRange("plate_A", (_sequence("TL_00", (0.0, 1.0)),))
 
     document = dataset.to_dict()
@@ -117,7 +123,7 @@ def test_every_level_leads_with_the_source_it_names():
 
     assert next(iter(document)) == "source"
     assert next(iter(sequence)) == "source"
-    assert next(iter(sequence["frames"][0])) == "source"
+    assert next(iter(sequence["steps"][0])) == "source"
 
 
 def test_the_nesting_survives_the_conversion():
@@ -125,16 +131,15 @@ def test_the_nesting_survives_the_conversion():
 
     document = dataset.to_dict()
 
-    assert document["min_value"] == -4.0
-    assert document["max_index"] == 0
-    assert [frame["source"] for frame in document["sequences"][0]["frames"]] == [
+    assert document["bounds"] == {"min_value": -4.0, "max_value": 3.0}
+    assert document["max_source"] == "TL_00"
+    assert [step["source"] for step in document["sequences"][0]["steps"]] == [
         "00000_phase.bin",
         "00001_phase.bin",
     ]
-    assert document["sequences"][0]["frames"][1] == {
+    assert document["sequences"][0]["steps"][1] == {
         "source": "00001_phase.bin",
-        "min_value": -4.0,
-        "max_value": 3.0,
+        "bounds": {"min_value": -4.0, "max_value": 3.0},
     }
 
 
@@ -146,7 +151,7 @@ def test_the_document_survives_the_serializer_it_is_written_with():
 
     encoded = json.loads(json.dumps(dataset.to_dict()))
 
-    assert encoded["sequences"][0]["frames"][0]["source"] == "00000_phase.bin"
+    assert encoded["sequences"][0]["steps"][0]["source"] == "00000_phase.bin"
 
 
 class _Frames:
@@ -187,8 +192,8 @@ def test_a_meter_ranges_every_frame_under_the_file_it_came_from(tmp_path):
     _scan(writer, (0.0, 2.0), (-1.0, 1.0))
 
     ranged = writer.to_range()
-    assert (ranged.min_value, ranged.max_value) == (-1.0, 2.0)
-    assert [frame.source for frame in ranged.frames] == [
+    assert ranged.bounds == Bounds(-1.0, 2.0)
+    assert [frame.source for frame in ranged.steps] == [
         "00000_phase.bin",
         "00001_phase.bin",
     ]
@@ -256,7 +261,7 @@ def test_a_traversal_that_died_leaves_nothing(tmp_path):
 
 def test_a_meter_that_saw_nothing_is_refused_by_name(tmp_path):
     with (
-        pytest.raises(ValueError, match="SequenceRange holds nothing"),
+        pytest.raises(ValueError, match="SequenceRange 'seq' covers no step"),
         _meter(tmp_path),
     ):
         pass
@@ -303,8 +308,8 @@ def test_a_document_folds_the_parts_in_name_order(tmp_path):
     dataset = json.loads((tmp_path / "range.json").read_text(encoding="utf-8"))
 
     assert [s["source"] for s in dataset["dataset"]["sequences"]] == ["a", "b"]
-    assert dataset["dataset"]["min_index"] == 0  # `a` held the low
-    assert dataset["dataset"]["max_index"] == 1
+    assert dataset["dataset"]["min_source"] == "a"  # `a` held the low
+    assert dataset["dataset"]["max_source"] == "b"
 
 
 def test_a_document_writes_the_settings_it_was_given(tmp_path):
@@ -318,7 +323,7 @@ def test_a_document_writes_the_settings_it_was_given(tmp_path):
 
     document = json.loads((tmp_path / "range.json").read_text(encoding="utf-8"))
     assert document["settings"]["filter"] == "identity"
-    assert document["dataset"]["max_value"] == 2.0
+    assert document["dataset"]["bounds"]["max_value"] == 2.0
 
 
 def test_a_document_that_gathered_nothing_says_so_rather_than_not_being_written(
@@ -852,7 +857,7 @@ def test_the_skipped_list_keeps_the_contents_s_own_order(tmp_path):
 def test_a_range_survives_the_round_trip_it_was_written_for():
     # Both directions, and without the file in between: `to_dict` hands back
     # tuples where JSON hands back lists, and the pair has to take either.
-    frame = FrameRange("00000_phase.bin", 0.0, 1.0)
+    frame = FrameRange("00000_phase.bin", Bounds(0.0, 1.0))
     sequence = SequenceRange("TL_00", (frame,))
     dataset = DatasetRange("plate_A", (sequence,))
 
@@ -865,18 +870,14 @@ def test_a_range_survives_the_round_trip_it_was_written_for():
 @pytest.mark.parametrize(
     ("kind", "document", "named"),
     (
-        (FrameRange, {"min_value": 0.0, "max_value": 1.0}, "source"),
-        (FrameRange, {"source": "a", "max_value": 1.0}, "min_value"),
-        (FrameRange, {"source": "a", "min_value": 0.0}, "max_value"),
-        (
-            FrameRange,
-            {"source": "a", "min_value": "low", "max_value": 1.0},
-            "min_value",
-        ),
-        (SequenceRange, {"source": "a"}, "frames"),
-        (SequenceRange, {"source": "a", "frames": "00000.bin"}, "frames"),
+        (FrameRange, {"bounds": _bounds()}, "source"),
+        (FrameRange, {"source": "a"}, "bounds"),
+        (FrameRange, {"source": "a", "bounds": _bounds(low=None)}, "min_value"),
+        (FrameRange, {"source": "a", "bounds": _bounds(high="high")}, "max_value"),
+        (SequenceRange, {"source": "a"}, "steps"),
+        (SequenceRange, {"source": "a", "steps": "00000.bin"}, "steps"),
         (DatasetRange, {"source": "a"}, "sequences"),
-        (DatasetRange, {"source": "a", "frames": []}, "sequences"),
+        (DatasetRange, {"source": "a", "steps": []}, "sequences"),
     ),
 )
 def test_a_malformed_document_is_refused_by_the_entry_it_stumbled_on(
@@ -885,7 +886,7 @@ def test_a_malformed_document_is_refused_by_the_entry_it_stumbled_on(
     # A result is read back by the same code that wrote it, so the realistic cause
     # is a hand edit or a version skew: either way the message has to say which
     # entry, since the file is what the reader will go and look at.
-    with pytest.raises(ValueError, match=rf"malformed range document: '{named}'"):
+    with pytest.raises(ValueError, match=rf"malformed result: '{named}'"):
         kind.from_dict(document)
 
 
@@ -896,9 +897,9 @@ def test_a_boolean_bound_is_refused_rather_than_read_as_one_or_zero(named, value
     # `isinstance(True, int)` is true, so `true` would read as 1.0, and the
     # pair {"min_value": true, "max_value": false} as [1.0, 0.0], a range
     # running backwards that nothing downstream would question.
-    document = {"source": "a", "min_value": 0.0, "max_value": 1.0, named: value}
+    document = {"source": "a", "bounds": _bounds() | {named: value}}
 
-    with pytest.raises(ValueError, match=rf"malformed range document: '{named}'"):
+    with pytest.raises(ValueError, match=rf"malformed result: '{named}'"):
         FrameRange.from_dict(document)
 
 
@@ -915,29 +916,29 @@ def test_a_non_finite_bound_is_refused_where_it_is_read(named, value):
     # `min` and `max` carry a NaN through or drop it depending on which result
     # holds it, so a document with one combines to whatever order its results were
     # in. Refused at the read, since nothing this project writes holds one.
-    document = {"source": "a", "min_value": 0.0, "max_value": 1.0, named: value}
+    document = {"source": "a", "bounds": _bounds() | {named: value}}
 
-    with pytest.raises(ValueError, match=rf"malformed range document: '{named}'"):
+    with pytest.raises(ValueError, match=rf"malformed result: '{named}'"):
         FrameRange.from_dict(document)
 
 
 def test_a_range_that_runs_backwards_is_refused():
     # What a bound is for is comparison, and a pair the wrong way round answers
     # every one of them wrongly without ever looking malformed.
-    with pytest.raises(ValueError, match=r"inverted range in 'a'"):
-        FrameRange("a", 1.0, 0.0)
+    with pytest.raises(ValueError, match=r"inverted range"):
+        Bounds(1.0, 0.0)
 
-    with pytest.raises(ValueError, match=r"inverted range in 'a'"):
-        FrameRange.from_dict({"source": "a", "min_value": 1.0, "max_value": 0.0})
+    with pytest.raises(ValueError, match=r"inverted range"):
+        FrameRange.from_dict({"source": "a", "bounds": _bounds(low=1.0, high=0.0)})
 
 
 def test_an_integer_bound_is_taken_as_the_float_it_stands_for():
     # JSON writes a whole number without its point, so a bound that happens to
     # land on one comes back as `int` and must not be refused for it.
-    frame = FrameRange.from_dict({"source": "a", "min_value": 0, "max_value": 2})
+    frame = FrameRange.from_dict({"source": "a", "bounds": _bounds(low=0, high=2)})
 
-    assert (frame.min_value, frame.max_value) == (0.0, 2.0)
-    assert isinstance(frame.min_value, float)
+    assert frame.bounds == Bounds(0.0, 2.0)
+    assert isinstance(frame.bounds.min_value, float)
 
 
 def test_a_document_written_without_coverage_leaves_the_block_out(tmp_path):
@@ -988,8 +989,8 @@ def test_a_fold_is_the_same_whichever_order_the_parts_arrive_in():
     forward = _sequence("TL_00", *bounds)
     reversed_ = _sequence("TL_00", *reversed(bounds))
 
-    assert (forward.min_value, forward.max_value) == (0.5, 9.0)
-    assert (reversed_.min_value, reversed_.max_value) == (0.5, 9.0)
+    assert forward.bounds == Bounds(0.5, 9.0)
+    assert reversed_.bounds == Bounds(0.5, 9.0)
 
 
 def test_a_document_is_written_as_json_a_strict_reader_accepts(tmp_path):
@@ -1044,7 +1045,7 @@ def test_one_unreadable_part_does_not_take_the_whole_document(tmp_path):
     saved = _saved(tmp_path)
     assert saved["coverage"]["covered"] == 2
     assert saved["coverage"]["skipped"] == ["b"]
-    assert (saved["dataset"]["min_value"], saved["dataset"]["max_value"]) == (0.0, 5.0)
+    assert saved["dataset"]["bounds"] == {"min_value": 0.0, "max_value": 5.0}
 
 
 def test_a_part_holding_a_backwards_range_is_named_too(tmp_path):
@@ -1054,8 +1055,8 @@ def test_a_part_holding_a_backwards_range_is_named_too(tmp_path):
     document = RangeDocument(tmp_path / "range", contents=_contents("a"), source="p")
     _scan(_meter(tmp_path, "a"), (0.0, 1.0))
 
-    frame = {"source": "f", "min_value": 1.0, "max_value": 0.0}
-    broken = json.dumps({"source": "a", "frames": [frame]})
+    frame = {"source": "f", "bounds": {"min_value": 1.0, "max_value": 0.0}}
+    broken = json.dumps({"source": "a", "steps": [frame]})
     (document.results_root / "a.json").write_text(broken, encoding="utf-8")
 
     with pytest.raises(ValueError, match=r"unreadable result 'a'.*inverted range"):
@@ -1134,7 +1135,9 @@ def test_a_part_that_still_describes_the_run_is_kept_rather_than_measured(tmp_pa
         assert not _measured(second, tmp_path, "b", (9.0, 9.0))
 
     assert _saved(tmp_path)["coverage"]["reused"] == 2
-    assert _saved(tmp_path)["dataset"]["max_value"] == 3.0  # not the 9.0 above
+    assert (
+        _saved(tmp_path)["dataset"]["bounds"]["max_value"] == 3.0
+    )  # not the 9.0 above
 
 
 def test_a_part_left_under_other_settings_is_measured_again(tmp_path):
@@ -1148,7 +1151,7 @@ def test_a_part_left_under_other_settings_is_measured_again(tmp_path):
     with _reusing(tmp_path, "a", settings=changed) as second:
         assert _measured(second, tmp_path, "a", (4.0, 5.0))
 
-    assert _saved(tmp_path)["dataset"]["max_value"] == 5.0
+    assert _saved(tmp_path)["dataset"]["bounds"]["max_value"] == 5.0
     assert _saved(tmp_path)["settings"] == changed
 
 
@@ -1185,7 +1188,7 @@ def test_a_part_the_source_has_lost_stays_out_of_the_document(tmp_path):
         assert second.list_unsourced() == ["gone", "went"]
 
     assert (tmp_path / "range.results" / "gone.json").exists()
-    assert _saved(tmp_path)["dataset"]["max_value"] == 1.0
+    assert _saved(tmp_path)["dataset"]["bounds"]["max_value"] == 1.0
     assert _saved(tmp_path)["coverage"]["found"] == 1
 
 
@@ -1330,7 +1333,7 @@ def test_a_part_filed_under_another_sequence_is_not_reused(tmp_path):
         assert _measured(second, tmp_path, "b", (4.0, 5.0))
 
     assert _saved(tmp_path)["coverage"]["reused"] == 1  # 'a', not 'b'
-    assert _saved(tmp_path)["dataset"]["max_value"] == 5.0
+    assert _saved(tmp_path)["dataset"]["bounds"]["max_value"] == 5.0
 
 
 def test_dropping_the_unsourced_names_what_it_removed(tmp_path):
@@ -1363,7 +1366,7 @@ def test_a_stale_part_nobody_re_measured_stays_out_of_the_fold(tmp_path):
         assert _measured(narrowed, tmp_path, "a", (2.0, 3.0))
 
     assert (tmp_path / "range.results" / "b.json").exists()  # left alone
-    assert _saved(tmp_path)["dataset"]["max_value"] == 3.0  # not b's 9.0
+    assert _saved(tmp_path)["dataset"]["bounds"]["max_value"] == 3.0  # not b's 9.0
     assert _saved(tmp_path)["coverage"]["unselected"] == ["b"]
 
 
@@ -1414,7 +1417,7 @@ def test_a_stale_part_is_left_out_of_the_fold_as_well_as_of_the_reuse(tmp_path):
         pass
 
     assert (tmp_path / "range.results" / "b.json").exists()
-    assert _saved(tmp_path)["dataset"]["max_value"] == 1.0  # not b's 9.0
+    assert _saved(tmp_path)["dataset"]["bounds"]["max_value"] == 1.0  # not b's 9.0
     assert _saved(tmp_path)["coverage"]["unselected"] == ["b"]
 
 
@@ -1460,7 +1463,7 @@ def test_dropping_a_nested_unsourced_part_takes_what_it_empties(tmp_path):
     )
     result = document.results_root / "plate" / "2026.03.12" / "gone.json"
     result.parent.mkdir(parents=True)
-    result.write_text('{"source": "x", "frames": []}', encoding="utf-8")
+    result.write_text('{"source": "x", "steps": []}', encoding="utf-8")
 
     document.drop_unsourced()
 

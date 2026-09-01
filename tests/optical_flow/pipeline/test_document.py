@@ -90,7 +90,7 @@ def test_a_part_covers_a_pair_short_of_the_frames_it_was_read_over(tmp_path):
 
     assert written["coverage"]["reused"] == 1
     assert written["coverage"]["covered"] == 1
-    assert len(written["dataset"]["sequences"][0]["frames"]) == 4
+    assert len(written["dataset"]["sequences"][0]["steps"]) == 4
 
 
 def test_a_part_left_under_other_settings_is_measured_again(tmp_path):

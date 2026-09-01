@@ -6,14 +6,17 @@ __all__ = (
     "DocumentBranch",
     "ResultWriter",
     "SequenceResult",
-    "Sourced",
+    "StepResult",
+    "read_entry",
+    "read_number",
     "save_document",
 )
 
 import json
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, Self
+from dataclasses import asdict, dataclass
+from math import isfinite
+from typing import TYPE_CHECKING, Any, Self
 
 from kaparoo.filesystem import (
     StagedFile,
@@ -44,34 +47,207 @@ if TYPE_CHECKING:
     from kaparoo.filesystem.types import StrPath
 
 
-class Sourced(Protocol):
-    """Whatever a document needs of a measurement: what it was taken from."""
-
-    @property
-    def source(self) -> str: ...
+# ========================== #
+#          Results           #
+# ========================== #
 
 
-class SequenceResult(Sourced, Protocol):
-    """Whatever a document needs of one sequence's result.
+def read_entry[T](
+    document: Mapping[str, Any], key: str, kind: type[T] | tuple[type[T], ...]
+) -> T:
+    """Read `key` off a result, refusing it by name when it cannot be read.
 
-    Its own source, so a result filed under one name and holding another can be caught,
-    and the frames it covers, so a result written before the source changed can be told
-    from one that still describes it.
+    Absent and wrong type are one rejection: a result read back off disk is just data
+    either way, and neither makes it one this wrote.
+
+    Raises:
+        ValueError: If the value is absent or not of `kind`.
+    """
+    value = document.get(key)
+    if not isinstance(value, kind):
+        msg = f"malformed result: {key!r} is {value!r}"
+        raise ValueError(msg)  # noqa: TRY004
+
+    return value
+
+
+def read_number(document: Mapping[str, Any], key: str) -> float:
+    """Read `key` off a result as a number, refusing what only looks like one.
+
+    `bool` is an `int` to `isinstance`, so `true` would otherwise read as 1.0. A
+    non-finite value is refused because nothing writes one: JSON has none to carry, and
+    one that arrived would fold to whatever the order of the results happened to be.
+
+    Raises:
+        ValueError: If the value is absent, not a number, or not finite.
+    """
+    value = read_entry(document, key, (int, float))
+    if isinstance(value, bool) or not isfinite(value):
+        msg = f"malformed result: {key!r} is {value!r}"
+        raise ValueError(msg)
+
+    return float(value)
+
+
+@dataclass(frozen=True, slots=True)
+class StepResult(ABC):
+    """What one step of a sequence gave, named by what it was taken from.
+
+    The lowest of the three tiers a document is written in, and the one that says what
+    was measured. A step is one frame where a stage answers once per frame and one pair
+    where it reads two to answer once, the name being the frame it starts from either
+    way.
+
+    What the measurement itself is, a subclass says. This tier carries the name it is
+    filed under and nothing else, since a document only ever needs to know which step a
+    number belongs to.
+
+    Attributes:
+        source: The frame the step was taken from, named the way the source holds it and
+            not the way a cache of the same run renumbers it.
     """
 
-    @property
-    def frames(self) -> Sequence[Sourced]: ...
+    source: str
 
-    def to_dict(self) -> dict[str, Any]: ...
+    def to_dict(self) -> dict[str, Any]:
+        """Return the result as plain data, ready to be written as JSON."""
+        return asdict(self)
+
+    @classmethod
+    @abstractmethod
+    def from_dict(cls, document: Mapping[str, Any]) -> Self:
+        """Rebuild a result from what `to_dict` produced.
+
+        Raises:
+            ValueError: If a key the result needs is absent or unreadable.
+        """
+        raise NotImplementedError
 
 
-class DatasetResult(Protocol):
-    """Whatever a document needs of a dataset: the sequences that went into it."""
+@dataclass(frozen=True, slots=True)
+class SequenceResult[T: StepResult](ABC):
+    """What one sequence gave, summarised from the steps it keeps.
 
-    @property
-    def sequences(self) -> Sequence[Sourced]: ...
+    The steps are kept rather than only the summary of them, so a document carries what
+    it was summarised from: that is what lets a run split into chunks be summarised
+    again from its parts, and what a reader goes to when one number is not the whole
+    story. Reading one back takes the summary again rather than trusting the one on
+    disk, so a document edited by hand cannot disagree with the steps under it.
 
-    def to_dict(self) -> dict[str, Any]: ...
+    Type Parameters:
+        T: What one step of this sequence gave.
+
+    Attributes:
+        source: The name the sequence has in its dataset.
+        steps: What each step gave, in the order they were measured.
+
+    Raises:
+        ValueError: If there are no steps, since a sequence that measured nothing has
+            nothing to say and a result standing for it would count as covered.
+    """
+
+    source: str
+    steps: tuple[T, ...]
+
+    def __len__(self) -> int:
+        """The number of steps summarised here."""
+        return len(self.steps)
+
+    def __post_init__(self) -> None:
+        """Refuse a sequence that measured nothing, then take the summary."""
+        if not self.steps:
+            msg = f"{type(self).__name__} {self.source!r} covers no step"
+            raise ValueError(msg)
+
+        self._aggregate()
+
+    @abstractmethod
+    def _aggregate(self) -> None:
+        """Take the summary this tier keeps from `steps`.
+
+        Called once, on the way in, with the steps already there and known not to be
+        empty. What the summary is, and so what fields it fills, is a subclass's.
+        """
+        raise NotImplementedError
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the result as plain data, ready to be written as JSON."""
+        return asdict(self)
+
+    @classmethod
+    @abstractmethod
+    def from_dict(cls, document: Mapping[str, Any]) -> Self:
+        """Rebuild a result from what `to_dict` produced.
+
+        Raises:
+            ValueError: If a key the result needs is absent or unreadable.
+        """
+        raise NotImplementedError
+
+
+@dataclass(frozen=True, slots=True)
+class DatasetResult[S: SequenceResult[Any]](ABC):
+    """What a dataset gave, summarised from the sequences it keeps.
+
+    Summarised in one pass over every sequence rather than by merging summaries, so the
+    ends are the real ends and the weights the real weights however the run was split.
+
+    Type Parameters:
+        S: What one sequence of this dataset gave.
+
+    Attributes:
+        source: The dataset root the run read, which is what tells two documents apart
+            when someone comes to merge them.
+        sequences: What each sequence gave, in the order they were summarised.
+
+    Raises:
+        ValueError: If there are no sequences, or if two are filed under one name, which
+            would leave one out of every summary without saying so.
+    """
+
+    source: str
+    sequences: tuple[S, ...]
+
+    def __len__(self) -> int:
+        """The number of sequences summarised here."""
+        return len(self.sequences)
+
+    def __post_init__(self) -> None:
+        """Refuse a dataset that covers nothing or names one twice, then summarise."""
+        if not self.sequences:
+            msg = f"{type(self).__name__} {self.source!r} covers no sequence"
+            raise ValueError(msg)
+
+        names = [one.source for one in self.sequences]
+        if len(set(names)) != len(names):
+            msg = f"a sequence appears twice in {self.source!r}: {sorted(names)}"
+            raise ValueError(msg)
+
+        self._aggregate()
+
+    @abstractmethod
+    def _aggregate(self) -> None:
+        """Take the summary this tier keeps from `sequences`.
+
+        Called once, on the way in, with the sequences already there and known to be
+        neither empty nor repeated. What the summary is, and so what fields it fills, is
+        a subclass's.
+        """
+        raise NotImplementedError
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the result as plain data, ready to be written as JSON."""
+        return asdict(self)
+
+    @classmethod
+    @abstractmethod
+    def from_dict(cls, document: Mapping[str, Any]) -> Self:
+        """Rebuild a result from what `to_dict` produced.
+
+        Raises:
+            ValueError: If a key the result needs is absent or unreadable.
+        """
+        raise NotImplementedError
 
 
 # ========================== #
@@ -502,8 +678,8 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult](DatasetBranc
         """Whether a result on disk stands for what this run would measure.
 
         Two things can have moved since it was written and neither shows in the result's
-        own name: the settings that shaped its numbers, and which frames the source
-        holds. Failing either is stale rather than broken, so it is passed over.
+        own name: the settings that shaped its numbers, and which steps the source owes.
+        Failing either is stale rather than broken, so it is passed over.
 
         Args:
             document: The result as it was read, for the settings it records.
@@ -515,7 +691,7 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult](DatasetBranc
 
         listed = self._expected(self.contents[result.source])
 
-        return tuple(frame.source for frame in result.frames) == tuple(listed)
+        return tuple(step.source for step in result.steps) == tuple(listed)
 
     def _read_result(self, result: Path) -> dict[str, Any]:
         """Read one result off disk, refusing anything that is not a mapping."""

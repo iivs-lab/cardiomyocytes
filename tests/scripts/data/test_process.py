@@ -467,7 +467,7 @@ def test_a_stride_leaves_the_two_outputs_naming_frames_differently(
     ]
     written = PhaseBinFolder(dest / "TL_00" / PHASE_FLOAT_BIN)
 
-    assert [frame["source"] for frame in sequence["frames"]] == [
+    assert [step["source"] for step in sequence["steps"]] == [
         "00000_phase.bin",
         "00002_phase.bin",
     ]
@@ -477,9 +477,9 @@ def test_a_stride_leaves_the_two_outputs_naming_frames_differently(
     ]
 
     # Joined by position, every pair agrees; by name, the second would not.
-    for index, frame in enumerate(sequence["frames"]):
+    for index, frame in enumerate(sequence["steps"]):
         held = np.asarray(written[index])
-        assert (frame["min_value"], frame["max_value"]) == (held.min(), held.max())
+        assert frame["bounds"] == {"min_value": held.min(), "max_value": held.max()}
 
     warned = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
     assert any("renumbers the frames" in message for message in warned)
@@ -656,7 +656,7 @@ def test_the_pool_reports_what_the_lone_path_does(phase_tree, tmp_path):
     assert [s["source"] for s in lone["dataset"]["sequences"]] == [
         f"TL_{index:02d}" for index in range(SEQUENCES)
     ]
-    assert all(len(s["frames"]) == FRAMES for s in lone["dataset"]["sequences"])
+    assert all(len(s["steps"]) == FRAMES for s in lone["dataset"]["sequences"])
     assert _document(tmp_path / "pooled")["dataset"] == lone["dataset"]
 
 

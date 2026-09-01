@@ -171,11 +171,12 @@ def build_normalization(config: NormalizeConfig, dtype: torch.dtype) -> Normaliz
 
     if config.level == "dataset":
         return covering_all(
-            settings.build(dtype, (dataset.min_value, dataset.max_value))
+            settings.build(dtype, (dataset.bounds.min_value, dataset.bounds.max_value))
         )
 
     spans = {
-        each.source: (each.min_value, each.max_value) for each in dataset.sequences
+        each.source: (each.bounds.min_value, each.bounds.max_value)
+        for each in dataset.sequences
     }
     measured = {name: settings.build(dtype, span) for name, span in spans.items()}
 

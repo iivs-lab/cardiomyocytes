@@ -1,23 +1,28 @@
 from __future__ import annotations
 
 __all__ = (
-    "CompositeRange",
+    "Bounds",
     "DatasetRange",
     "FrameRange",
     "RangeDocument",
     "RangeWriter",
     "SequenceRange",
-    "ValueRange",
 )
 
-from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from math import isfinite
 from typing import TYPE_CHECKING, Any, Self, override
 
 from kaparoo.utils import quantify
 
-from iivs_cardio.common.pipeline.document import DocumentBranch, ResultWriter
+from iivs_cardio.common.pipeline.document import (
+    DatasetResult,
+    DocumentBranch,
+    ResultWriter,
+    SequenceResult,
+    StepResult,
+    read_entry,
+    read_number,
+)
 from iivs_cardio.common.range import finite_range
 
 if TYPE_CHECKING:
@@ -31,75 +36,33 @@ if TYPE_CHECKING:
     from iivs_cardio.common.pipeline.base import Named
 
 
-def _entry[T](
-    document: Mapping[str, Any],
-    key: str,
-    kind: type[T] | tuple[type[T], ...],
-) -> T:
-    """Read `key` from a document, refusing it by name when it cannot be read.
-
-    Absent and wrong type are one rejection: a document read back off disk is just data
-    either way, and neither makes it a range document.
-    """
-    value = document.get(key)
-    if not isinstance(value, kind):
-        msg = f"malformed range document: {key!r} is {value!r}"
-        raise ValueError(msg)  # noqa: TRY004
-
-    return value
-
-
-def _number(document: Mapping[str, Any], key: str) -> float:
-    """Read `key` from a document as a bound, refusing what only looks like one.
-
-    `bool` is an `int` to `isinstance`, so `true` would otherwise read as 1.0 and a pair
-    of them as a range running backwards. A non-finite bound is refused here rather than
-    combined: `min` and `max` carry a NaN through or drop it depending on where it sits,
-    so one that got in would combine to whatever the order of the results happened to
-    be.
-
-    Raises:
-        ValueError: If the value is absent, not a number, or not finite.
-    """
-    value = _entry(document, key, (int, float))
-    if isinstance(value, bool) or not isfinite(value):
-        msg = f"malformed range document: {key!r} is {value!r}"
-        raise ValueError(msg)
-
-    return float(value)
-
-
 # ========================== #
 #           Ranges           #
 # ========================== #
 
 
 @dataclass(frozen=True, slots=True)
-class ValueRange(ABC):
-    """The lowest and highest value found in something, and what that was.
+class Bounds:
+    """The lowest and highest value found in something.
+
+    One measurement rather than two, since the pair is what a later run scales by and
+    neither end means anything without the other.
 
     Attributes:
-        source: The thing the range was measured over, named the way a reader of the
-            document would look it up.
         min_value: The lowest value found.
         max_value: The highest value found.
+
+    Raises:
+        ValueError: If the lowest value is above the highest.
     """
 
-    source: str
     min_value: float
     max_value: float
 
     def __post_init__(self) -> None:
-        """Refuse a range whose two ends are the wrong way round.
-
-        A combined range takes each end from the result that holds it, so it cannot
-        invert once its results are this way up.
-
-        Raises:
-            ValueError: If the lowest value is above the highest.
-        """
+        """Refuse a pair whose two ends are the wrong way round."""
         if self.min_value > self.max_value:
-            msg = f"inverted range in {self.source!r}: {self} runs backwards"
+            msg = f"inverted range {self}: the lowest value is above the highest"
             raise ValueError(msg)
 
     def __str__(self) -> str:
@@ -107,174 +70,162 @@ class ValueRange(ABC):
         return f"[{self.min_value:.4g}, {self.max_value:.4g}]"
 
     def to_dict(self) -> dict[str, Any]:
-        """Return the range as plain data, ready to be written as JSON."""
+        """Return the pair as plain data, ready to be written as JSON."""
         return asdict(self)
 
     @classmethod
-    @abstractmethod
     def from_dict(cls, document: Mapping[str, Any]) -> Self:
-        """Rebuild a range from what `to_dict` produced.
+        """Rebuild a pair from its `min_value` and `max_value`.
 
         Raises:
-            ValueError: If a key the range needs is absent or unreadable.
+            ValueError: If either is absent or unreadable, or if the two run backwards.
         """
-        raise NotImplementedError
+        return cls(
+            read_number(document, "min_value"), read_number(document, "max_value")
+        )
 
 
 @dataclass(frozen=True, slots=True)
-class FrameRange(ValueRange):
+class FrameRange(StepResult):
     """The range of one frame.
 
     Attributes:
         source: The file the frame was read from, which is the name it has at the source
             and not necessarily the one a cache of the same run gives it.
-        min_value: The lowest value in the frame.
-        max_value: The highest value in the frame.
+        bounds: The lowest and highest value in the frame.
     """
+
+    bounds: Bounds
 
     @override
     @classmethod
     def from_dict(cls, document: Mapping[str, Any]) -> Self:
-        """Rebuild a frame range from `source`, `min_value` and `max_value`.
+        """Rebuild a frame range from its `source` and its `bounds`.
 
         Raises:
-            ValueError: If any of the three is absent or unreadable, or if the two
-                bounds run backwards.
+            ValueError: If either key is absent, or the bounds cannot be read.
         """
         return cls(
-            _entry(document, "source", str),
-            _number(document, "min_value"),
-            _number(document, "max_value"),
+            read_entry(document, "source", str),
+            Bounds.from_dict(read_entry(document, "bounds", dict)),
         )
 
 
 @dataclass(frozen=True, slots=True)
-class CompositeRange(ValueRange, ABC):
-    """A range combined from smaller ones, keeping where each end came from.
+class SequenceRange(SequenceResult[FrameRange]):
+    """The range of one sequence, summarised from the frames it was measured over.
 
-    The bounds are not given but taken from the results, and each is remembered with the
-    result it came from, so a wide dataset range can be traced back to the one sequence
-    or frame that widened it.
-
-    Attributes:
-        source: The thing the combined range was measured over.
-        min_value: The lowest value across every result.
-        max_value: The highest value across every result.
-        min_index: The position of the result holding the lowest value.
-        max_index: The position of the result holding the highest value.
-
-    Raises:
-        ValueError: If there are no results, since a range over nothing has no meaning
-            to fall back on.
-    """
-
-    min_value: float = field(init=False)
-    max_value: float = field(init=False)
-    min_index: int = field(init=False)
-    max_index: int = field(init=False)
-
-    @property
-    @abstractmethod
-    def results(self) -> Sequence[ValueRange]:
-        """The ranges this one is combined from, in the order they were taken."""
-        raise NotImplementedError
-
-    def __len__(self) -> int:
-        """The number of ranges combined here."""
-        return len(self.results)
-
-    def __post_init__(self) -> None:
-        """Take the bounds from the results, and note which result gave each."""
-        results = self.results
-        if not results:
-            msg = f"value range is undefined: {type(self).__name__} holds nothing"
-            raise ValueError(msg)
-
-        indices = range(len(results))
-        min_index = min(indices, key=lambda i: results[i].min_value)
-        max_index = max(indices, key=lambda i: results[i].max_value)
-
-        object.__setattr__(self, "min_value", results[min_index].min_value)
-        object.__setattr__(self, "max_value", results[max_index].max_value)
-        object.__setattr__(self, "min_index", min_index)
-        object.__setattr__(self, "max_index", max_index)
-
-
-@dataclass(frozen=True, slots=True)
-class SequenceRange(CompositeRange):
-    """The range of one sequence, combined from the frames it was measured over.
-
-    Position is the key, not the name. Each frame is filed under the source it was read
-    from, while a cache the same run writes numbers its frames from zero without a gap,
-    so the two disagree wherever the run read the source with a stride or the source
-    itself was sparse. The nth entry here is the nth frame either way.
+    Position is what the ends are named by, not the frame's own name. Each frame is
+    filed under the source it was read from, while a cache the same run writes numbers
+    its frames from zero without a gap, so the two disagree wherever the run read the
+    source with a stride or the source itself was sparse. The nth entry here is the nth
+    frame either way.
 
     Attributes:
         source: The name the sequence has in its dataset.
-        min_value: The lowest value across every frame.
-        max_value: The highest value across every frame.
+        steps: The range of each frame, in the order they were read, which is the order
+            a cache of the same run writes them in.
+        bounds: The lowest and highest value across every frame.
         min_index: The position of the frame holding the lowest value.
         max_index: The position of the frame holding the highest value.
-        frames: The range of each frame, in the order they were read, which is the order
-            a cache of the same run writes them in.
+
+    Raises:
+        ValueError: If there are no frames, since a range over nothing has no meaning to
+            fall back on.
     """
 
-    frames: tuple[FrameRange, ...]
+    bounds: Bounds = field(init=False)
+    min_index: int = field(init=False)
+    max_index: int = field(init=False)
 
-    @property
+    def __str__(self) -> str:
+        """The two bounds, shortened for reading rather than for reloading."""
+        return str(self.bounds)
+
     @override
-    def results(self) -> tuple[FrameRange, ...]:
-        """The frame ranges this sequence is combined from."""
-        return self.frames
+    def _aggregate(self) -> None:
+        """Take the widest range the frames reach, and note which gave each end."""
+        indices = range(len(self.steps))
+        low = min(indices, key=lambda i: self.steps[i].bounds.min_value)
+        high = max(indices, key=lambda i: self.steps[i].bounds.max_value)
 
+        object.__setattr__(
+            self,
+            "bounds",
+            Bounds(self.steps[low].bounds.min_value, self.steps[high].bounds.max_value),
+        )
+        object.__setattr__(self, "min_index", low)
+        object.__setattr__(self, "max_index", high)
+
+    @override
     @classmethod
-    @override
-    def from_dict(cls, document: Mapping[str, Any]) -> SequenceRange:
-        """Rebuild a sequence range from its `source` and its `frames`.
+    def from_dict(cls, document: Mapping[str, Any]) -> Self:
+        """Rebuild a sequence range from its `source` and its `steps`.
 
         Raises:
             ValueError: If either key is absent, or a frame cannot be read.
         """
-        source = _entry(document, "source", str)
-        frames = _entry(document, "frames", (list, tuple))
-        frames = tuple(FrameRange.from_dict(frame) for frame in frames)
-        return cls(source, frames)
+        steps = read_entry(document, "steps", (list, tuple))
+
+        return cls(
+            read_entry(document, "source", str),
+            tuple(FrameRange.from_dict(step) for step in steps),
+        )
 
 
 @dataclass(frozen=True, slots=True)
-class DatasetRange(CompositeRange):
-    """The range of a whole dataset, combined from the sequences it covers.
+class DatasetRange(DatasetResult[SequenceRange]):
+    """The range of a whole dataset, summarised from the sequences it covers.
+
+    The ends are named rather than numbered, a sequence keeping the name it has at the
+    source wherever a run writes it.
 
     Attributes:
         source: The dataset root the run read, which is what tells two documents apart
             when someone comes to merge them.
-        min_value: The lowest value across every sequence.
-        max_value: The highest value across every sequence.
-        min_index: The position of the sequence holding the lowest value.
-        max_index: The position of the sequence holding the highest value.
-        sequences: The range of each sequence, in the order they were combined.
+        sequences: The range of each sequence, in the order they were summarised.
+        bounds: The lowest and highest value across every sequence.
+        min_source: The sequence holding the lowest value.
+        max_source: The sequence holding the highest value.
+
+    Raises:
+        ValueError: If there are no sequences, or if two are filed under one name.
     """
 
-    sequences: tuple[SequenceRange, ...]
+    bounds: Bounds = field(init=False)
+    min_source: str = field(init=False)
+    max_source: str = field(init=False)
 
-    @property
+    def __str__(self) -> str:
+        """The two bounds, shortened for reading rather than for reloading."""
+        return str(self.bounds)
+
     @override
-    def results(self) -> tuple[SequenceRange, ...]:
-        """The sequence ranges this dataset is combined from."""
-        return self.sequences
+    def _aggregate(self) -> None:
+        """Take the widest range the sequences reach, and name which gave each end."""
+        low = min(self.sequences, key=lambda one: one.bounds.min_value)
+        high = max(self.sequences, key=lambda one: one.bounds.max_value)
 
+        object.__setattr__(
+            self, "bounds", Bounds(low.bounds.min_value, high.bounds.max_value)
+        )
+        object.__setattr__(self, "min_source", low.source)
+        object.__setattr__(self, "max_source", high.source)
+
+    @override
     @classmethod
-    @override
-    def from_dict(cls, document: Mapping[str, Any]) -> DatasetRange:
+    def from_dict(cls, document: Mapping[str, Any]) -> Self:
         """Rebuild a dataset range from its `source` and its `sequences`.
 
         Raises:
             ValueError: If either key is absent, or a sequence cannot be read.
         """
-        source = _entry(document, "source", str)
-        sequences = _entry(document, "sequences", (list, tuple))
-        sequences = tuple(SequenceRange.from_dict(sequence) for sequence in sequences)
-        return cls(source, sequences)
+        sequences = read_entry(document, "sequences", (list, tuple))
+
+        return cls(
+            read_entry(document, "source", str),
+            tuple(SequenceRange.from_dict(one) for one in sequences),
+        )
 
 
 # ========================== #
@@ -336,7 +287,7 @@ class RangeWriter(ResultWriter[SequenceRange]):
             msg = f"no finite value in {path.name} (sequence: {self._source})"
             raise ValueError(msg)
 
-        self._frames.append(FrameRange(path.name, *found))
+        self._frames.append(FrameRange(path.name, Bounds(*found)))
 
     def to_range(self) -> SequenceRange:
         """Combine what has been measured so far into one range for the sequence.
@@ -358,7 +309,7 @@ class RangeWriter(ResultWriter[SequenceRange]):
             return None
 
         frames = quantify(len(self._frames), "frame")
-        return f"measured {self.to_range()} across {frames}"
+        return f"measured {self.to_range().bounds} across {frames}"
 
 
 # ========================== #

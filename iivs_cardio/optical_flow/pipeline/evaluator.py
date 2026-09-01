@@ -123,14 +123,13 @@ class EvaluationWriter(ResultWriter[SequenceEvaluation]):
 
         self._scored.append(
             FrameEvaluation(
-                source=path.name,
-                ssim=float(scored["ssim"]),
-                ssim_floor=float(floor),
-                psnr=float(scored["psnr"]),
-                mse=float(scored["mse"]),
-                mae=float(scored["mae"]),
-                magnitude=float(flow_magnitude(flow)),
-                fb_error=self._reverse(first, second, flow),
+                path.name,
+                {
+                    **{key: float(value) for key, value in scored.items()},
+                    "ssim_floor": float(floor),
+                    "magnitude": float(flow_magnitude(flow)),
+                    "fb_error": self._reverse(first, second, flow),
+                },
             )
         )
 
