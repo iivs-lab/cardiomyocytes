@@ -7,6 +7,7 @@ __all__ = (
     "RunRecord",
     "SharedContext",
     "WorkerLogFolder",
+    "describe_failure",
     "log_compute_config",
     "log_insights",
     "pin_threads",
@@ -83,6 +84,26 @@ class ComputeConfig:
 # ========================== #
 #          Results           #
 # ========================== #
+
+
+def describe_failure(error: BaseException) -> str:
+    """Name what went wrong, in the one line an item's outcome carries.
+
+    A group is spread into what it holds rather than named as itself: closing the
+    outputs of one item raises them together, and `ExceptionGroup: ... (2
+    sub-exceptions)` is the one thing a reader cannot act on. Nested groups are spread
+    the same way, so the line names causes and never a container.
+
+    Args:
+        error: What the item raised, grouped or not.
+
+    Returns:
+        The causes, `; `-joined, each as its type and its message.
+    """
+    if isinstance(error, BaseExceptionGroup):
+        return "; ".join(describe_failure(one) for one in error.exceptions)
+
+    return f"{type(error).__name__}: {error}"
 
 
 class IncompleteRunError(RuntimeError):
@@ -344,7 +365,7 @@ def _run_on_worker(worker_id: int, context: SharedContext, index: int) -> Outcom
         computed = stages.run_stage(index, device)
     except Exception as error:
         logging.getLogger(context.name).exception("%s failed", stages.get_name(index))
-        return Outcome(index, f"{type(error).__name__}: {error}")
+        return Outcome(index, describe_failure(error))
 
     return Outcome(index, None, computed=computed)
 

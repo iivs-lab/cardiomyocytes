@@ -367,7 +367,7 @@ class TestStageRun:
         first, second = _Managed(), _Managed("could not write the part file")
         stage = _Fixed("a").register_hooks(first, second)
 
-        with pytest.raises(OSError, match="could not write the part file"):
+        with pytest.RaisesGroup(pytest.RaisesExc(OSError, match="the part file")):
             stage.run()
 
         assert first.events == ["open", "see0", "close"]
@@ -380,22 +380,33 @@ class TestStageRun:
         first, second = _Managed(), _Managed("gone")
         stage = _Fixed("a", "b").register_hooks(first, second)
 
-        with pytest.raises(OSError, match="gone"):
+        with pytest.RaisesGroup(pytest.RaisesExc(OSError, match="gone")):
             stage.run()
 
         assert first.events[-1] == "close"
 
-    def test_the_first_closing_failure_is_the_one_that_rises(self) -> None:
-        # Closing runs in reverse, so the first failure is the last hook's. A
-        # second one means the destination itself has gone, which the first says
-        # already.
+    def test_every_closing_failure_rises_in_the_order_they_were_closed(self) -> None:
+        # These write to different destinations and can fail for unrelated
+        # reasons, which is why none is told about another's. Carrying one and
+        # dropping the rest would leave a cause unsaid, so they rise together,
+        # in closing order, which is the reverse of registration.
         first, second = _Managed("the writer went first"), _Managed("and so did I")
         stage = _Fixed("a").register_hooks(first, second)
 
-        with pytest.raises(OSError, match="and so did I"):
+        with pytest.RaisesGroup(
+            pytest.RaisesExc(OSError, match="and so did I"),
+            pytest.RaisesExc(OSError, match="the writer went first"),
+        ):
             stage.run()
 
         assert first.events == ["open", "see0", "close"]
+
+    def test_one_closing_failure_is_grouped_too(self) -> None:
+        # A caller reads them one way rather than asking how many there were.
+        stage = _Fixed("a").register_hooks(_Managed(), _Managed("and so did I"))
+
+        with pytest.RaisesGroup(pytest.RaisesExc(OSError, match="and so did I")):
+            stage.run()
 
     def test_a_branch_that_cannot_commit_takes_back_what_did(self) -> None:
         # Closing in turn is not one commit. The document's part is written
@@ -407,7 +418,7 @@ class TestStageRun:
             _Managed("the tree could not move"), reverting
         )
 
-        with pytest.raises(OSError, match="the tree could not move"):
+        with pytest.RaisesGroup(pytest.RaisesExc(OSError, match="could not move")):
             stage.run()
 
         assert reverting.events == ["open", "see0", "close", "revert"]
@@ -426,7 +437,7 @@ class TestStageRun:
         first, second = _Reverting(), _Reverting("could not write the part file")
         stage = _Fixed("a").register_hooks(first, second)
 
-        with pytest.raises(OSError, match="could not write the part file"):
+        with pytest.RaisesGroup(pytest.RaisesExc(OSError, match="the part file")):
             stage.run()
 
         assert first.events == ["open", "see0", "close", "revert"]
@@ -445,7 +456,7 @@ class TestStageRun:
         stage = _Fixed("a").register_hooks(_Managed("the tree could not move"))
         stage.register_hooks(stubborn, first)
 
-        with pytest.raises(OSError, match="the tree could not move"):
+        with pytest.RaisesGroup(pytest.RaisesExc(OSError, match="could not move")):
             stage.run()
 
         assert stubborn.events[-1] == "revert"
@@ -461,7 +472,9 @@ class TestStageRun:
         managed = _Managed("and the branch could not commit")
         stage = _Fixed("a").register_hooks(managed, explode)
 
-        with pytest.raises(OSError, match="could not commit") as failure:
+        with pytest.RaisesGroup(
+            pytest.RaisesExc(OSError, match="could not commit")
+        ) as failure:
             stage.run()
 
         assert managed.events == ["open", "see0", "abort"]

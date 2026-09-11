@@ -1171,7 +1171,10 @@ def test_one_branch_that_cannot_commit_does_not_silence_the_others(phase_tree, c
     # nothing anyway, so the line is only ever about work that landed.
     stages = _factory(phase_tree, _Unclosable(), _Branch("spoke"))
 
-    with caplog.at_level(logging.INFO), pytest.raises(OSError, match="not commit"):
+    with (
+        caplog.at_level(logging.INFO),
+        pytest.RaisesGroup(pytest.RaisesExc(OSError, match="not commit")),
+    ):
         _run_nothing(stages)
 
     assert "spoke" in [record.getMessage().strip() for record in caplog.records]

@@ -428,7 +428,7 @@ def test_a_meter_will_not_replace_a_part_it_did_not_write(tmp_path):
     writer = _meter(tmp_path, "a")
     (tmp_path / "range.results" / "a.json").write_text("{}", encoding="utf-8")
 
-    with pytest.raises(FileExistsError):
+    with pytest.RaisesGroup(FileExistsError):
         _scan(writer, (0.0, 1.0))
 
     assert (tmp_path / "range.results" / "a.json").read_text(encoding="utf-8") == "{}"

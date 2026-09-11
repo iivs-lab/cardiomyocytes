@@ -218,6 +218,10 @@ class StageRun[S: Releasable](ABC):
         another raised, which is the rule the hooks of one item are closed by a level
         down. What committed still says so even when the next one could not, since a
         branch that committed nothing reports nothing anyway.
+
+        Raises:
+            BaseExceptionGroup: What closing the branches raised, as `close_together`
+                groups it. The run's own failure is the context it carries.
         """
         opened: list[AbstractContextManager[object]] = []
 

@@ -199,11 +199,13 @@ def close_together(
             finished.
 
     Raises:
-        BaseException: What closing raised, once everything has been closed rather than
-            at the one that raised it. Only the first is carried, since a second means
-            the destination itself has gone.
+        BaseExceptionGroup: Every closing that failed, once all of them have been closed
+            rather than at the one that raised. Grouped even where only one did, so a
+            caller reads them one way: these write to different destinations and can
+            fail for unrelated reasons, which is the same reason none is told about
+            another's failure, and carrying one would leave the rest unsaid.
     """
-    failure: BaseException | None = None
+    failures: list[BaseException] = []
     closed: list[AbstractContextManager[object]] = []
 
     for hook in reversed(opened):
@@ -213,11 +215,11 @@ def close_together(
             else:
                 hook.__exit__(type(error), error, error.__traceback__)
         except BaseException as closing:  # noqa: BLE001
-            failure = failure or closing
+            failures.append(closing)
         else:
             closed.append(hook)
 
-    if failure is None:
+    if not failures:
         return
 
     for hook in closed:
@@ -227,7 +229,8 @@ def close_together(
             except Exception:
                 _logger.exception("could not take back %r", hook)
 
-    raise failure
+    msg = "could not close what the walk opened"
+    raise BaseExceptionGroup(msg, failures)
 
 
 # ========================== #
@@ -386,6 +389,8 @@ class Stage[T, E = None](ABC):
 
         Raises:
             RuntimeError: If this stage has been walked before.
+            BaseExceptionGroup: What closing the hooks raised, as `close_together`
+                groups it. The walk's own failure is the context it carries.
         """
         if self._walked:
             msg = f"{type(self).__name__} has been run: build a stage per walk"
