@@ -3,7 +3,6 @@ from __future__ import annotations
 __all__ = (
     "JSON_EXT",
     "PRESENT_POLICIES",
-    "STAGING",
     "UNSOURCED_POLICIES",
     "DatasetBranch",
     "PresentPolicy",
@@ -20,7 +19,6 @@ from pathlib import PurePath
 from typing import TYPE_CHECKING, Final, Literal
 
 from kaparoo.filesystem import ensure_file_extension
-from kaparoo.filters import And, EndsWith, StartsWith
 from kaparoo.utils import ensure_one_of, literal_values
 from kaparoo.utils.optional import unwrap_or_default
 
@@ -32,9 +30,6 @@ type UnsourcedPolicy = Literal["keep", "delete"]
 
 PRESENT_POLICIES: Final[tuple[PresentPolicy, ...]] = literal_values(PresentPolicy)
 UNSOURCED_POLICIES: Final[tuple[UnsourcedPolicy, ...]] = literal_values(UnsourcedPolicy)
-
-STAGING: Final = And((StartsWith("."), EndsWith(".tmp")))
-
 
 JSON_EXT: Final = ".json"
 

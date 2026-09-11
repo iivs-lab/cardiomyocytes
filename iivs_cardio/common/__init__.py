@@ -2,7 +2,6 @@ __all__ = (
     "DEVICE_KINDS",
     "JSON_EXT",
     "PRESENT_POLICIES",
-    "STAGING",
     "UNSOURCED_POLICIES",
     "Device",
     "DeviceKind",
@@ -31,7 +30,6 @@ from iivs_cardio.common.logging import log_indented
 from iivs_cardio.common.pipeline import (
     JSON_EXT,
     PRESENT_POLICIES,
-    STAGING,
     UNSOURCED_POLICIES,
     Hook,
     PresentPolicy,

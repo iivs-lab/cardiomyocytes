@@ -400,12 +400,15 @@ def test_dropping_a_nested_unsourced_folder_takes_what_it_empties(tmp_path):
     assert (tmp_path / "plate" / "2026.03.11" / "kept").is_dir()
 
 
-def test_what_a_killed_worker_staged_is_collected_by_the_next_run(tmp_path):
+@pytest.mark.parametrize("staging", (".Bin.k3j2h.tmp", ".Bin.k3j2h.tmp.old"))
+def test_what_a_killed_worker_staged_is_collected_by_the_next_run(tmp_path, staging):
     # The writer climbs back down its own parents only while it is alive. A
     # worker killed outright leaves the staged folder and the shells above it,
-    # and nothing else was in a position to find them.
+    # and nothing else was in a position to find them. Both shapes, since a
+    # replace swaps the old folder aside before moving the new one in and a
+    # crash between the two renames strands the `.old` under its own name.
     _sequence(tmp_path, "kept")
-    staged = tmp_path / "died" / "Phase" / "Float" / ".Bin.k3j2h.tmp"
+    staged = tmp_path / "died" / "Phase" / "Float" / staging
     staged.mkdir(parents=True)
     (staged / "00000_phase.bin").write_bytes(b"")
 

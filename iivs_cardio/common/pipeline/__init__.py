@@ -2,7 +2,6 @@ __all__ = (
     "JSON_EXT",
     "PRESENT_POLICIES",
     "RECORD_FILE",
-    "STAGING",
     "UNSOURCED_POLICIES",
     "Coverage",
     "DatasetBranch",
@@ -48,7 +47,6 @@ from iivs_cardio.common.pipeline.base import (
 from iivs_cardio.common.pipeline.branch import (
     JSON_EXT,
     PRESENT_POLICIES,
-    STAGING,
     UNSOURCED_POLICIES,
     DatasetBranch,
     PresentPolicy,

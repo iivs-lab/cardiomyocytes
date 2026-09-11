@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final, Self
 
 from kaparoo.filesystem import (
+    STAGING,
     StagedDirectory,
     contains,
     ensure_dir_exists,
@@ -20,7 +21,6 @@ from kaparoo.utils import quantify
 
 from iivs_cardio.common.pipeline.base import Named, Step
 from iivs_cardio.common.pipeline.branch import (
-    STAGING,
     DatasetBranch,
     PresentPolicy,
     UnsourcedPolicy,
@@ -456,8 +456,11 @@ class FrameBranch[N: Named, T](DatasetBranch):
     def clear_staging(self) -> None:
         """Drop what a writer that did not live to clear up after itself left.
 
-        Only that shape is taken, a hidden name ending in `.tmp`, and only the folders
-        it leaves empty, since a run writes into the directory that keeps its logs too.
+        Only what `STAGING` matches is taken, and only the folders it leaves empty,
+        since a run writes into the directory that keeps its logs too. The filter is the
+        one the writer builds those names from, rather than a copy of their shape kept
+        here: a copy would go on matching what the names used to look like, and the one
+        it missed is the one nothing else collects.
 
         The whole tree is walked, where the two searches beside this one stop at a
         sequence: staging can be anywhere a writer reached, and bounding the walk means

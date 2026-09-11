@@ -473,13 +473,17 @@ def test_a_document_it_may_not_replace_is_refused_before_anything_is_dropped(tmp
     assert json.loads((tmp_path / "range.json").read_text(encoding="utf-8"))["coverage"]
 
 
-def test_entering_collects_what_an_interrupted_run_only_staged(tmp_path):
-    # A result is staged beside its destination under a hidden `.tmp` name and
-    # moved into place on a clean close, so a worker killed part way leaves one
-    # there. `list_results` cannot see it, the only other hand on it died with
-    # that process, and the folder it sits in cannot be cleared while it is
-    # there, so it accumulates, one per interrupted run.
-    staged = tmp_path / "range.results" / "plate_A" / ".TL_00.json.ctgx5mjr.tmp"
+@pytest.mark.parametrize(
+    "staging", (".TL_00.json.ctgx5mjr.tmp", ".TL_00.json.ctgx5mjr.tmp.old")
+)
+def test_entering_collects_what_an_interrupted_run_only_staged(tmp_path, staging):
+    # A result is staged beside its destination and moved into place on a clean
+    # close, so a worker killed part way leaves one there. `list_results` cannot
+    # see it, the only other hand on it died with that process, and the folder it
+    # sits in cannot be cleared while it is there, so it accumulates, one per
+    # interrupted run. Both shapes the writer stages under, the `.old` being what
+    # a crash between a replace's two renames strands.
+    staged = tmp_path / "range.results" / "plate_A" / staging
     staged.parent.mkdir(parents=True)
     staged.write_text("half a result", encoding="utf-8")
 

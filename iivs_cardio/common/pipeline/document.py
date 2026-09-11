@@ -19,6 +19,7 @@ from math import isfinite
 from typing import TYPE_CHECKING, Any, Self
 
 from kaparoo.filesystem import (
+    STAGING,
     StagedFile,
     ensure_dir_exists,
     ensure_file_extension,
@@ -33,7 +34,6 @@ from kaparoo.utils import quantify
 from iivs_cardio.common.pipeline.base import Named, Step
 from iivs_cardio.common.pipeline.branch import (
     JSON_EXT,
-    STAGING,
     DatasetBranch,
     PresentPolicy,
     UnsourcedPolicy,
@@ -657,9 +657,12 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult](DatasetBranc
     def _list_staging(self) -> list[Path]:
         """Return the staging files an interrupted run left among the results.
 
-        A result is written beside its destination under a hidden name ending in `.tmp`
-        and moved into place on a clean close, so anything of that shape still here
-        belongs to a run that never got to close.
+        A result is written beside its destination under a staged name and moved into
+        place on a clean close, so anything `STAGING` matches belongs to a run that
+        never got to close. The filter is the one the writer builds those names from,
+        rather than a copy of their shape kept here: a copy would go on matching what
+        the names used to look like, and the one it missed is the one nothing else
+        collects.
         """
         return search_files(self.results_root, name_filter=STAGING)
 
