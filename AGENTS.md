@@ -118,6 +118,13 @@ rather than applying them by hand. What it cannot check:
 - Mark an override with `typing.override`, including one that implements
   an `abstractmethod`. A self-evident dunder (`__len__`, `__str__`) does
   not need it.
+- An `@abstractmethod` takes a docstring and then a bare
+  `raise NotImplementedError`, with no message. The decorator is what
+  stops a subclass instantiating without an override, so the body is a
+  convention rather than a guard: `...`, a docstring standing in as the
+  body, and a refusal all behave alike, and keeping one of the three
+  stops the choice reading as a distinction. A `Protocol` member is not
+  one — it declares a signature nothing calls, and keeps `...`.
 - Keep comments to one line, or a few words beside the code. Three is the
   outside limit; anything longer is a docstring or a commit message.
 
