@@ -851,6 +851,10 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult](DatasetBranc
         Returns:
             The sequences whose results were removed, in the order they were filed
             under.
+
+        Raises:
+            OSError: If a result cannot be removed. What went before it is gone either
+                way, so a second call names what is left rather than starting over.
         """
         dropped = []
 
@@ -958,7 +962,10 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult](DatasetBranc
         with it. It is written from what does read instead, and the refusal is raised
         once the document is on disk rather than instead of it.
 
-        Parts of sequences the source has lost go afterwards where the policy says so.
+        Parts of sequences the source has lost go where the policy says so, once the
+        document is on disk and whether or not a refusal is on its way up: that refusal
+        says the run was incomplete, not that the tidying was not asked for. A document
+        that could not be written at all leaves them, there being nothing to tidy up to.
 
         The failure itself is not this branch's to report. It reaches the driver, which
         is what decides the run's verdict.
@@ -966,12 +973,15 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult](DatasetBranc
         Raises:
             ValueError: If one of the results cannot be read, after the document
                 combined from the rest has been written.
+            OSError: If a result the policy asked to remove could not be. It rises where
+                the staging this code left swallows, being what `if_unsourced` asked
+                for, and takes the place of a refusal already on its way up.
         """
         try:
             self.save()
         except ValueError:
             self.save(strict=False)
             raise
-
-        if self.if_unsourced == "delete":
-            self.drop_unsourced()
+        finally:
+            if self._written is not None and self.if_unsourced == "delete":
+                self.drop_unsourced()

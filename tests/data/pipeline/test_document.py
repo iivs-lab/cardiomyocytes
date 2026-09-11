@@ -1425,6 +1425,64 @@ def test_a_stale_part_is_left_out_of_the_fold_as_well_as_of_the_reuse(tmp_path):
     assert _saved(tmp_path)["coverage"]["unselected"] == ["b"]
 
 
+def test_a_part_that_cannot_be_read_does_not_take_the_policy_with_it(tmp_path):
+    # The refusal says the run was incomplete, not that `if_unsourced` was not
+    # asked for: the document is written from what does read, so the tidying has
+    # something to tidy up to and runs against the same results the document
+    # covers. Leaving it undone would strand `gone` for as long as the unreadable
+    # one sits there, which is every run until someone goes and looks.
+    with _reusing(tmp_path, "a", "b", "gone") as first:
+        _measured(first, tmp_path, "a", (0.0, 1.0))
+        _measured(first, tmp_path, "b", (2.0, 3.0))
+        _measured(first, tmp_path, "gone", (4.0, 5.0))
+
+    (tmp_path / "range.results" / "b.json").write_text("half", encoding="utf-8")
+
+    dropping = RangeDocument(
+        tmp_path / "range",
+        contents=_contents("a", "b"),
+        settings=SETTINGS,
+        source="plate_A",
+        if_present="reuse",
+        if_unsourced="delete",
+    )
+    with pytest.raises(ValueError, match=r"unreadable result 'b'"), dropping:
+        pass
+
+    assert not (tmp_path / "range.results" / "gone.json").exists()
+    assert _saved(tmp_path)["coverage"]["skipped"] == ["b"]
+
+
+def test_a_document_that_could_not_be_written_leaves_the_unsourced_alone(
+    tmp_path, monkeypatch
+):
+    # Nothing to tidy up to: removing a result on behalf of a document that is
+    # not there spends the one thing a rerun could still have combined.
+    with _reusing(tmp_path, "a", "gone") as first:
+        _measured(first, tmp_path, "a", (0.0, 1.0))
+        _measured(first, tmp_path, "gone", (2.0, 3.0))
+
+    refusing = RangeDocument(
+        tmp_path / "range",
+        contents=_contents("a"),
+        settings=SETTINGS,
+        source="plate_A",
+        if_present="reuse",
+        if_unsourced="delete",
+    )
+
+    def refuse(self, *, strict: bool = True) -> Path:
+        msg = "the document is already there"
+        raise FileExistsError(msg)
+
+    monkeypatch.setattr(type(refusing), "save", refuse)
+
+    with pytest.raises(FileExistsError, match="already there"), refusing:
+        pass
+
+    assert (tmp_path / "range.results" / "gone.json").exists()
+
+
 def test_a_document_is_written_even_when_the_unsourced_cannot_be_dropped(
     tmp_path, monkeypatch
 ):
