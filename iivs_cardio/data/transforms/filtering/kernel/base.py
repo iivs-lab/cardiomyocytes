@@ -134,6 +134,7 @@ class FilterKernel(ABC):
         Raises:
             ValueError: If `target` is not an index into `window`.
         """
+        raise NotImplementedError
 
     def _validate_target(self, window: Tensor, target: int) -> None:
         """Raise if `target` does not index a frame of `window`."""
@@ -163,3 +164,4 @@ class KernelConfig(ABC):
     @abstractmethod
     def build(self) -> FilterKernel:
         """Construct the kernel these describe."""
+        raise NotImplementedError

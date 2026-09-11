@@ -60,6 +60,7 @@ class OpenCVConfig(EstimatorConfig, ABC):
         Called with `device` resolved and already current, so an implementation asks cv2
         for the factory it wants rather than binding anything itself.
         """
+        raise NotImplementedError
 
     def _backend(self, device: DeviceLike = "cpu") -> Backend:
         """Return the backend that runs the algorithm these settings describe.
@@ -136,6 +137,7 @@ class Backend(ABC):
     @abstractmethod
     def retained(self) -> bool:
         """Whether a frame is retained, so the next `push` yields a flow."""
+        raise NotImplementedError
 
     @abstractmethod
     def push(self, frame: Tensor, out: Tensor | None = None) -> Tensor | None:
@@ -152,6 +154,7 @@ class Backend(ABC):
             The flow, or `None` where nothing was retained yet, in which case `out` is
             left untouched.
         """
+        raise NotImplementedError
 
     @abstractmethod
     def calc(self, prev: Tensor, curr: Tensor, out: Tensor | None = None) -> Tensor:
@@ -162,10 +165,12 @@ class Backend(ABC):
             curr: The frame to flow to.
             out: Where to put the flow, as `push`.
         """
+        raise NotImplementedError
 
     @abstractmethod
     def reset(self) -> None:
         """Forget the retained frame."""
+        raise NotImplementedError
 
     def _as_flow(self, flow: Tensor, out: Tensor | None) -> Tensor:
         """Return cv2's `(H, W, 2)` flow as the `(2, H, W)` torch ops consume.

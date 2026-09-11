@@ -431,6 +431,7 @@ class ResultWriter[S: SequenceResult](ABC):
     @abstractmethod
     def __call__(self, step: Step[Any, Any]) -> None:
         """Take one step of the sequence into what is being measured."""
+        raise NotImplementedError
 
     @abstractmethod
     def _result(self) -> S:
@@ -440,6 +441,7 @@ class ResultWriter[S: SequenceResult](ABC):
             ValueError: If nothing has been measured, since a result standing for a
                 sequence that said nothing would count as covered.
         """
+        raise NotImplementedError
 
     def __enter__(self) -> Self:
         return self

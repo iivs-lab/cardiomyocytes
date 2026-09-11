@@ -295,7 +295,7 @@ class Stage[T, E = None](ABC):
     @abstractmethod
     def __len__(self) -> int:
         """The number of indices this stage answers for."""
-        ...
+        raise NotImplementedError
 
     @abstractmethod
     def _compute(self, index: int) -> T | None:
@@ -312,7 +312,7 @@ class Stage[T, E = None](ABC):
         Returns:
             The value, or `None` where the stage has nothing at that index.
         """
-        ...
+        raise NotImplementedError
 
     def _describe(self, index: int) -> E | None:  # noqa: ARG002
         """Side information about `index`. Nothing unless a subclass says so."""

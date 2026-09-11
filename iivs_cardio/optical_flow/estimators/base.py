@@ -47,10 +47,12 @@ class OpticalFlowEstimator(ABC):
     @abstractmethod
     def reset(self) -> None:
         """Forget the retained previous frame to start a new sequence."""
+        raise NotImplementedError
 
     @abstractmethod
     def push(self, frame: Tensor) -> Tensor | None:
         """Return the flow from the previous frame to `frame`, `None` if first."""
+        raise NotImplementedError
 
     @abstractmethod
     def push_chunk(self, frames: Tensor) -> Tensor:
@@ -60,10 +62,12 @@ class OpticalFlowEstimator(ABC):
         chunk, so `N` frames yield `N` flows (or `N - 1` on the first chunk). Bound the
         chunk size to bound the output memory.
         """
+        raise NotImplementedError
 
     @abstractmethod
     def calc(self, prev: Tensor, curr: Tensor) -> Tensor:
         """Compute the dense flow `prev -> curr` in one shot (stateless)."""
+        raise NotImplementedError
 
     @abstractmethod
     def calc_batch(self, prev: Tensor, curr: Tensor) -> Tensor:
@@ -71,6 +75,7 @@ class OpticalFlowEstimator(ABC):
 
         `prev` and `curr` are `(N, ...)`; returns `(N, ...)` stacked flows.
         """
+        raise NotImplementedError
 
 
 class EstimatorConfig(ABC):
@@ -108,3 +113,4 @@ class EstimatorConfig(ABC):
         Raises:
             ValueError: If `device` is not one of `SUPPORTED_DEVICES`.
         """
+        raise NotImplementedError
