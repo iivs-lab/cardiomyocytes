@@ -221,8 +221,11 @@ class StageRun[S: Releasable](ABC):
 
         Each branch is closed against the run's own outcome and never against what
         another raised, which is the rule the hooks of one item are closed by a level
-        down. What committed still says so even when the next one could not, since a
-        branch that committed nothing reports nothing anyway.
+        down. What committed says so however the run ended, and whether or not the next
+        one could commit: a document is written from the sequences that finished whether
+        or not the rest did, so the line naming what it covers is most worth having
+        exactly where the run gave up. A branch that committed nothing reports nothing
+        anyway.
 
         Raises:
             BaseExceptionGroup: What closing the branches raised, as `close_together`
@@ -241,8 +244,7 @@ class StageRun[S: Releasable](ABC):
         except BaseException as error:
             close_together(opened, error)
             raise
-
-        try:
+        else:
             close_together(opened, None)
         finally:
             for line in _reports(self._branches):

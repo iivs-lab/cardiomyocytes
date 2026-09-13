@@ -1210,6 +1210,20 @@ def test_one_branch_that_cannot_commit_does_not_silence_the_others(phase_tree, c
     assert "spoke" in [record.getMessage().strip() for record in caplog.records]
 
 
+def test_a_run_that_gave_up_still_says_what_committed(phase_tree, caplog):
+    # A document is written from the sequences that finished whether or not the
+    # rest did, which is what `coverage` is for, so the line naming what it
+    # covers is most worth having exactly where the run gave up. Reporting only
+    # on the clean path left a reader of that run's log with no word that
+    # anything had been written at all.
+    stages = _factory(phase_tree, _Branch("spoke"))
+
+    with caplog.at_level(logging.INFO), pytest.raises(RuntimeError, match="gave up"):
+        _give_up(stages)
+
+    assert "spoke" in [record.getMessage().strip() for record in caplog.records]
+
+
 def test_a_run_that_gave_up_reaches_every_branch(phase_tree):
     # The other direction: what the run itself ended with does go to all of
     # them, since that is the outcome they bracket.
