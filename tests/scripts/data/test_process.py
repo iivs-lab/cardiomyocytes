@@ -1116,6 +1116,36 @@ def test_a_run_says_which_outputs_have_no_sequence_behind_them(phase_tree, caplo
     assert "  plate/TL_09" in said
 
 
+def test_the_outputs_with_no_source_are_said_in_order(phase_tree, caplog):
+    # Each branch lists its own sorted, and a set over them is what puts two that
+    # lost the same one on a single line. Iterating that set would hand the block
+    # back in whatever order the hashes fell in, which differs between processes:
+    # two runs over one dataset would read differently and neither could be
+    # diffed against the other.
+    # Enough names that the hashes falling into order by accident is not what a
+    # green run means.
+    stages = _factory(
+        phase_tree,
+        _Unsourced("plate3/TL_07", "plate3/TL_42", "plate2/TL_11"),
+        _Unsourced("plate1/TL_00", "plate1/TL_99", "plate3/TL_07", "plate2/TL_05"),
+    )
+
+    with caplog.at_level(logging.INFO):
+        _run_nothing(stages)
+
+    said = [record.getMessage() for record in caplog.records]
+    listed = said[said.index("6 outputs with no source:") + 1 :]
+
+    assert listed == [
+        "  plate1/TL_00",
+        "  plate1/TL_99",
+        "  plate2/TL_05",
+        "  plate2/TL_11",
+        "  plate3/TL_07",
+        "  plate3/TL_42",
+    ]
+
+
 def test_a_run_says_it_removed_them_and_not_only_that_they_were_due(
     phase_tree, tmp_path, caplog
 ):

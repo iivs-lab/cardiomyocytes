@@ -134,6 +134,11 @@ class StageRun[S: Releasable](ABC):
         after: a dataset that shrank and a share that came up half read the same from
         here, and only whoever started the run can tell them apart. Waiting until the
         end would say it after the frames were spent.
+
+        A set is what puts two branches that lost the same item on one line, and sorting
+        on the way out is what keeps the block in the order each branch listed it in:
+        two runs over the same dataset read the same, and a name is where a reader
+        expects it.
         """
         named: set[str] = set()
         for branch in self._branches:
@@ -145,7 +150,7 @@ class StageRun[S: Releasable](ABC):
 
         self._log("%s with no source:", quantify(len(named), "output"), head=True)
 
-        for name in named:
+        for name in sorted(named):
             self._log("%s", name)
 
     def _log_unchanged(self) -> None:
