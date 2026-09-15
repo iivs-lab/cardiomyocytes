@@ -315,6 +315,8 @@ class FrameBranch[N: Named, T](DatasetBranch):
         self._replaced: list[str] = []
         self._dropped: list[str] = []
 
+        self._entered = False
+
     @abstractmethod
     def _make_writer(
         self,
@@ -511,7 +513,14 @@ class FrameBranch[N: Named, T](DatasetBranch):
             FileExistsError: If `if_present` is `"error"` and a sequence this run would
                 write already has a folder here. Refused here rather than at the writer,
                 which meets them one at a time.
+            RuntimeError: If it has been opened before. What it settled is what
+                `report` counts, so a second opening would count two runs as one.
         """
+        if self._entered:
+            msg = f"{self.root} was opened already: one branch per run"
+            raise RuntimeError(msg)
+
+        self._entered = True
         ensure_dir_exists(self.root, make=True)
 
         self.clear_staging()

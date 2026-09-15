@@ -61,14 +61,17 @@ class _Item:
 
 
 class _Run(StageRun[_Item]):
-    """A run handing out one prebuilt stage."""
+    """A run handing out one prebuilt stage, once every branch was asked for a hook."""
 
-    def __init__(self, stage: Stage[int]) -> None:
-        super().__init__([_Item()], name="demo")
+    def __init__(self, stage: Stage[int], *branches: _Counted) -> None:
+        super().__init__([_Item()], *branches, name="demo")
         self._stage = stage
 
     @override
     def get_stage(self, index: int, device: Device) -> Stage[int]:
+        for branch in self._branches:
+            branch.get_hook(self._items[index])
+
         return self._stage
 
     @override
@@ -78,6 +81,40 @@ class _Run(StageRun[_Item]):
 
 def _said(caplog) -> list[str]:
     return [record.getMessage().strip() for record in caplog.records]
+
+
+class _Counted:
+    """A branch that notes each time it is opened, asked for a hook, closed, and read."""
+
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    def __enter__(self) -> Self:
+        self.events.append("open")
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        self.events.append("close")
+
+    def get_hook(self, source: object) -> None:
+        self.events.append("hook")
+
+    def report(self) -> str:
+        self.events.append("report")
+        return "counted"
+
+
+def test_a_branch_given_twice_is_one_branch(caplog):
+    # It is one object holding one run's judgement, so opening it twice judged
+    # the tree twice over, and its line was said twice for one run.
+    branch = _Counted()
+    run = _Run(_Numbers(1), branch, branch)
+
+    with caplog.at_level(logging.INFO), run.running():
+        run.run_stage(0, Device("cpu"))
+
+    assert branch.events == ["open", "hook", "close", "report"]
+    assert _said(caplog).count("counted") == 1
 
 
 def test_a_hook_on_a_stage_further_down_reports_too(caplog):

@@ -53,7 +53,8 @@ class StageRun[S: Releasable](ABC):
         items: The items to run, in the order they will be offered.
         branches: The branches to watch each item with, such as a writer or a meter.
             Each is asked for a hook per item, which is the subclass's to do since only
-            it knows what a branch is given.
+            it knows what a branch is given. One given twice is one branch, opened and
+            asked once.
         name: The run's name.
     """
 
@@ -64,7 +65,7 @@ class StageRun[S: Releasable](ABC):
         name: str,
     ) -> None:
         self._items = items
-        self._branches = branches
+        self._branches = tuple({id(branch): branch for branch in branches}.values())
 
         self._name = name
         self._logger = logging.getLogger(name)

@@ -44,6 +44,18 @@ def test_a_tree_makes_its_own_root_rather_than_leaving_it_to_a_writer(tmp_path):
     assert root.is_dir()
 
 
+def test_a_tree_is_opened_once(tmp_path):
+    # Opening judges what is already here and the report counts that judgement,
+    # so a second opening put the counts of two runs in one line.
+    tree = _tree(tmp_path, "TL_00")
+
+    with tree, pytest.raises(RuntimeError, match=r"opened already: one branch per run"):
+        tree.__enter__()
+
+    with pytest.raises(RuntimeError, match=r"opened already"), tree:
+        pass
+
+
 def _sequence(tmp_path: Path, name: str) -> Path:
     folder = tmp_path / name / PHASE_FLOAT_BIN
     folder.mkdir(parents=True)
