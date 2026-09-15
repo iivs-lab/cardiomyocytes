@@ -308,6 +308,37 @@ class TestStageHooks:
 
         assert order == ["hook0", "consumer0", "hook1", "consumer1"]
 
+    def test_all_hooks_reach_the_stages_a_stage_is_built_over(self) -> None:
+        # What `run` opens and what a run asks to report are one set, so a hook
+        # registered further down the chain is not one that commits unheard.
+        below, above = _Managed(), _Managed()
+        source = _Fixed("a").register_hooks(below)
+        stage = _Passthrough(source).register_hooks(above)
+
+        assert stage.hooks == (above,)
+        assert stage.all_hooks() == (above, below)
+        assert stage.all_hooks(upward=True) == (below, above)
+
+    def test_all_hooks_keep_a_stage_s_own_order_either_way(self) -> None:
+        # Up and down are between stages, so reading the chain upward does not
+        # turn the hooks of one stage round.
+        below, first, second = _Managed(), _Managed(), _Managed()
+        source = _Fixed("a").register_hooks(below)
+        stage = _Passthrough(source).register_hooks(first, second)
+
+        assert stage.all_hooks() == (first, second, below)
+        assert stage.all_hooks(upward=True) == (below, first, second)
+
+    def test_a_hook_on_two_stages_is_one_of_all_hooks(self) -> None:
+        # One hook, where the order first meets it: at the top going down, at the
+        # bottom going up.
+        shared, own = _Managed(), _Managed()
+        source = _Fixed("a").register_hooks(shared)
+        stage = _Passthrough(source).register_hooks(own, shared)
+
+        assert stage.all_hooks() == (own, shared)
+        assert stage.all_hooks(upward=True) == (shared, own)
+
 
 class TestStageRun:
     def test_it_walks_every_step(self) -> None:

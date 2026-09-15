@@ -285,6 +285,28 @@ class Stage[T, E = None](ABC):
         """The hooks registered on this stage, in the order they were added."""
         return tuple(self._hooks)
 
+    def all_hooks(self, *, upward: bool = False) -> tuple[Hook[Any, Any], ...]:
+        """Return the hooks of this stage and every stage it is built over, each once.
+
+        What `run` opens and what a caller asks to report once it is done, so the two
+        cannot come to cover different hooks. Only the order differs. From this stage
+        down by default, which is the order `run` opens them in. From the bottom of the
+        chain up where `upward` is set, which is the order values are computed and
+        stages close in, and so the order to ask what was committed.
+
+        Within a stage the hooks keep the order they were registered in either way. A
+        hook registered on two stages is one hook, and appears where the order first
+        meets it.
+        """
+        chain = tuple(self._chain())
+        held: list[Hook[Any, Any]] = []
+        for stage in reversed(chain) if upward else chain:
+            for hook in stage.hooks:
+                if not any(hook is other for other in held):
+                    held.append(hook)
+
+        return tuple(held)
+
     def register_hooks(self, *hooks: Hook[T, E]) -> Self:
         """Add hooks to be called once for each index this stage computes.
 
@@ -365,17 +387,17 @@ class Stage[T, E = None](ABC):
         for hook in self._hooks:
             hook(step)
 
-    def _all_hooks(self, seen: set[int] | None = None) -> Iterator[Hook[Any, Any]]:
-        """Yield the hooks of this stage and its sources, each stage once."""
+    def _chain(self, seen: set[int] | None = None) -> Iterator[Stage[Any, Any]]:
+        """Yield this stage and those it is built over, top down, each once."""
         seen = set() if seen is None else seen
         if id(self) in seen:
             return
 
         seen.add(id(self))
-        yield from self._hooks
+        yield self
 
         for source in self._sources:
-            yield from source._all_hooks(seen)  # noqa: SLF001
+            yield from source._chain(seen)  # noqa: SLF001
 
     def run(self) -> None:
         """Walk every index once, with the whole chain's hooks open around it.
@@ -400,9 +422,8 @@ class Stage[T, E = None](ABC):
         opened: list[AbstractContextManager[object]] = []
 
         try:
-            for hook in self._all_hooks():
-                managed = isinstance(hook, AbstractContextManager)
-                if managed and not any(hook is other for other in opened):
+            for hook in self.all_hooks():
+                if isinstance(hook, AbstractContextManager):
                     hook.__enter__()
                     opened.append(hook)
 

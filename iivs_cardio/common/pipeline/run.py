@@ -204,7 +204,7 @@ class StageRun[S: Releasable](ABC):
         finally:
             item.release()
 
-        for line in _reports(stage.hooks):
+        for line in _reports(stage.all_hooks(upward=True)):
             self._log("%s", line)
 
         self._log("done in %.1fs", timer.elapsed)
