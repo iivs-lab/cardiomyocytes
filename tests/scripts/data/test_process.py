@@ -20,7 +20,7 @@ from iivs.dhm.data.phase import (
 from omegaconf import OmegaConf
 
 from iivs_cardio.common.device import Device
-from iivs_cardio.common.pipeline.frames import RECORD_FILE
+from iivs_cardio.common.pipeline.frames import RECORD_FILE, FrameWriter
 from iivs_cardio.data.pipeline import FrameTree, RangeDocument, SequenceStageRun
 from iivs_cardio.data.transforms.filtering.kernel import MedianConfig
 from scripts._common.compute import ComputeConfig, IncompleteRunError, run_all
@@ -958,6 +958,39 @@ def test_a_sequence_holding_a_non_finite_frame_costs_only_that_sequence(
         "skipped": ["TL_01"],
         "unselected": [],
     }
+
+
+def test_a_sequence_whose_frames_could_not_commit_keeps_no_range_either(
+    phase_tree, tmp_path, monkeypatch
+):
+    # Unlike a walk that gives up, here every frame was read and the range was
+    # already written when the frame tree failed to move into place. Left alone,
+    # that range stands for a sequence with no frames and the document counts it
+    # as covered. Taking it back runs through the branches, the hooks made from
+    # them, the reverse close and `SupportsRevert` at once, which no test of one
+    # of them alone can see.
+    dest = tmp_path / "out"
+    commit = FrameWriter._save_record  # noqa: SLF001
+
+    def refuse(writer: FrameWriter) -> None:
+        if "TL_01" in writer._dest.parts:  # noqa: SLF001
+            msg = "the frame tree went away mid-commit"
+            raise OSError(msg)
+        commit(writer)
+
+    monkeypatch.setattr(FrameWriter, "_save_record", refuse)
+
+    with pytest.raises(IncompleteRunError, match=r"1 of 3 failed") as failure:
+        _scan(phase_tree, dest, 0, save_frames=True, save_ranges=True)
+
+    assert "went away mid-commit" in failure.value.failed["TL_01"]
+
+    results = sorted(path.stem for path in (dest / "value_range.results").iterdir())
+    assert results == ["TL_00", "TL_02"]
+
+    subpath = Path(PHASE_FLOAT_BIN).as_posix()
+    assert sorted(_written(dest)) == [f"TL_{s:02d}/{subpath}" for s in (0, 2)]
+    assert _document(dest)["coverage"]["skipped"] == ["TL_01"]
 
 
 class _Hook:
