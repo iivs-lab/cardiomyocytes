@@ -235,10 +235,16 @@ force          4     3, 4, 5 → acceleration 4
   돌았다. 121개짜리 스윕이면 9분대를 통째로 버린다.
 
 - **컨테이너는 스테이지 그래프를 따라 겹친다.** (2)가 오면 (2)의 컨테이너가 (1)의 것을 쥐고,
-  맨 위 하나의 `running()`이 아래 전부의 곁가지를 연다. `Stage._all_hooks`와 같은 알고리즘이고
+  맨 위 하나의 `running()`이 아래 전부의 곁가지를 연다. `Stage.all_hooks`와 같은 알고리즘이고
   **중복 방지가 필수**다 — 다이아몬드에서 (1)의 컨테이너가 두 경로로 닿으므로, 소스의
   `running()`을 중첩해서 부르면 `seen`이 갈려 `RangeDocument`가 두 번 저장한다. 지금은
   소스가 없어 평평한 루프다.
+
+- **컨텍스트 매니저인 훅·곁가지는 한 번만 열린다(AGENTS.md).** 여는 쪽이 같은 객체를 한 번으로
+  줄이고(`Stage.all_hooks`, `StageRun.__init__`), 객체는 두 번째 `__enter__`를 거부한다.
+  `FrameWriter`·`FrameBranch`·`DocumentBranch`는 거부하지만 **`ResultWriter`는 아직 아니다** —
+  `__enter__`가 `self`를 돌려줄 뿐이라, 다시 열면 두 walk의 측정이 섞인 결과를 쓴다. 문서
+  기계(`document.py` 계열)를 다시 설계할 때 넣는다.
 
 ## 열린 것 — `scripts/_common/compute.py`
 

@@ -65,6 +65,10 @@ push.
   something. Give it a `__repr__` naming what it stands for, or
   interpolate that name yourself: a default `<... object at 0x...>` leaves
   a reader with nothing to act on.
+- A hook or branch that is a context manager opens once. Whoever opens a
+  list of them opens each object once however often it was given, and the
+  object refuses a second `__enter__` with a `RuntimeError`, since only it
+  knows it was opened before.
 
 ## Tests
 
