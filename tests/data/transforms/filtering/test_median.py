@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections import UserList
 from dataclasses import FrozenInstanceError
+from math import prod
 from statistics import median
 from typing import TYPE_CHECKING
 
@@ -31,14 +32,43 @@ def _in_bounds(shape: tuple[int, int, int], z: int, y: int, x: int) -> bool:
     return 0 <= z < depth and 0 <= y < height and 0 <= x < width
 
 
+def _neighbours(radius: tuple[int, int, int], shape: str) -> list[tuple[int, int, int]]:
+    """Every `(dx, dy, dz)` the shape admits at `radius`, from the definition alone.
+
+    Takes the kernel's inputs and never its selection. The ellipsoid test is cleared
+    of fractions, so no rounding decides a neighbour lying on the border.
+    """
+    rx, ry, rz = radius
+    box = [
+        (dx, dy, dz)
+        for dx in range(-rx, rx + 1)
+        for dy in range(-ry, ry + 1)
+        for dz in range(-rz, rz + 1)
+    ]
+    if shape == "cuboid":
+        return box
+
+    scale = prod(r * r for r in radius if r)
+
+    return [
+        offset
+        for offset in box
+        if sum(
+            d * d * (scale // (r * r)) for d, r in zip(offset, radius, strict=True) if r
+        )
+        <= scale
+    ]
+
+
 def _brute_median(
     frames: NDArray[np.float32], kernel: MedianKernel, index: int
 ) -> torch.Tensor:
     """Median per pixel from an explicit neighbour list, in plain Python.
 
-    Independent of the implementation: `statistics.median` averages the middle
-    two of an even count by definition, and the bounds check spells out
-    truncation one neighbour at a time.
+    Independent of the implementation: the neighbours come from `_neighbours` rather
+    than `kernel.offsets`, `statistics.median` averages the middle two of an even
+    count by definition, and the bounds check spells out truncation one neighbour at
+    a time.
     """
     _, height, width = frames.shape
     out = torch.zeros(height, width)
@@ -46,7 +76,7 @@ def _brute_median(
         for x in range(width):
             samples = [
                 float(frames[index + dz, y + dy, x + dx])
-                for dx, dy, dz in kernel.offsets
+                for dx, dy, dz in _neighbours(kernel.radius, kernel.shape)
                 if _in_bounds(frames.shape, index + dz, y + dy, x + dx)
             ]
             out[y, x] = median(samples)
@@ -313,12 +343,22 @@ def test_an_odd_count_returns_the_sample_itself_bit_for_bit():
     assert torch.equal(filtered[1], column[0, 0])
 
 
-def test_median_matches_a_brute_force_pass_over_explicit_neighbours():
+@pytest.mark.parametrize(
+    ("radius", "shape"),
+    (
+        pytest.param((2, 1, 1), "ellipsoid", id="unequal-axes"),
+        pytest.param((1, 3, 2), "ellipsoid", id="unequal-every-way"),
+        pytest.param((0, 2, 1), "ellipsoid", id="a-disabled-axis"),
+        pytest.param((2, 1, 1), "cuboid", id="the-whole-box"),
+    ),
+)
+def test_median_matches_a_brute_force_pass_over_explicit_neighbours(radius, shape):
     # Everything at once, meaning offset selection, truncation at all six
     # borders, and even-count averaging, against a computation sharing no code
-    # with it.
+    # with it. The radii differ per axis: an equal radius on every axis selects
+    # the same neighbours under any predicate that weighs the axes alike.
     frames = _frames(5)
-    kernel = MedianKernel((2, 1, 1))
+    kernel = MedianKernel(radius, shape=shape)
     window = torch.from_numpy(frames)
 
     for index in range(len(frames)):
