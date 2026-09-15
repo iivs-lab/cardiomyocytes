@@ -21,8 +21,8 @@ from iivs_cardio.data.transforms.filtering.kernel.base import (
 
 # The stored form is always the triple; `SigmaLike` is what a caller may write.
 # `int` is accepted where `float` is annotated and coerced on the way in.
-SigmaType = tuple[float, float, float]
-SigmaLike = float | tuple[float, float] | SigmaType
+type SigmaType = tuple[float, float, float]
+type SigmaLike = float | tuple[float, float] | SigmaType
 
 
 def _normalize_sigma(sigma: SigmaLike) -> SigmaType:
