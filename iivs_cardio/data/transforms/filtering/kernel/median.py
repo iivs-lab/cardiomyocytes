@@ -37,8 +37,8 @@ _SHARED_TIERS: Final = (32, 128)
 
 _logger = logging.getLogger(__name__)
 
-# What one pass may hold at its peak, over everything it allocates by name.
-# The sort's own workspace sits on top, so the true peak runs a little above it.
+# What one band of the frame may hold at its peak. The padded window and the output
+# frame are allocated once per frame on top of it, and both grow with the frame.
 _TILE_BYTES: Final = 136 << 20
 
 # What ordering the stack adds per sample: `sort` hands back the values again
