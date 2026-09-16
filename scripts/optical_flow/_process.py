@@ -24,11 +24,7 @@ from iivs_cardio.common.pipeline.branch import ensure_json_name
 from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig
 from iivs_cardio.optical_flow.data import FLOW_FLOAT_NPY
 from iivs_cardio.optical_flow.estimators import EstimatorConfig
-from iivs_cardio.optical_flow.pipeline import (
-    EvaluationDocument,
-    FlowStageRun,
-    FlowTree,
-)
+from iivs_cardio.optical_flow.pipeline import EvaluationDocument, FlowStageRun, FlowTree
 from scripts._common.dataset import (
     BranchConfig,
     TreeBranchConfig,
