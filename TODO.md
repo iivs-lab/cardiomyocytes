@@ -164,9 +164,9 @@ force          4     3, 4, 5 → acceleration 4
   고정 모델과 잘 맞는다.
 
 - **장치는 실행 단위로 고른다.** 단계마다 따로 고르지 않는다. `FilteredSequence`가
-  `Tensor`를 내놓고 `tensor_to_gpumat`이 그것을 OpenCV CUDA 추정기에 **복사 없이** 넘기므로
-  (`tests/common/test_cuda_utils.py:28`이 포인터 동일성을 확인), 필터와 flow가 같은 장치면
-  프레임이 장치를 떠나지 않는다. 나누면 프레임당 3.24 MB와 — 더 나쁘게 — 그 전송이 강제하는
+  `Tensor`를 내놓고 `tensor_to_gpumat`이 그것을 OpenCV CUDA 추정기로 **호스트를 거치지 않고**
+  옮기므로(장치 간 복사이고, 무복사인 것은 `gpumat_to_cupy` 쪽이다), 필터와 flow가 같은
+  장치면 프레임이 장치를 떠나지 않는다. 나누면 프레임당 3.24 MB와 — 더 나쁘게 — 그 전송이 강제하는
   동기화를 문다. 워커 수의 최적값도 장치마다 다르므로(GPU당 하나 대 코어당 하나) **하나의
   풀이 둘을 만족할 수 없다**.
 
@@ -188,7 +188,7 @@ force          4     3, 4, 5 → acceleration 4
   **진짜 위험은 온라인 모드다.** (1)(2)(3)이 한 프로세스에서 이어 돌면 필터 버퍼, 추정기
   작업공간, flow 텐서, 지표 중간값이 **서로 다른 모양으로** 같은 풀에 섞인다. 그리고
   `cv2.cuda`는 **torch의 캐시를 모르므로** torch가 쥔 메모리를 추정기가 못 얻을 수 있다 —
-  `tensor_to_gpumat`이 프레임 복사는 없애도 추정기 내부 작업공간은 OpenCV 쪽 할당이다.
+  `tensor_to_gpumat`이 호스트 왕복은 없애도 추정기 내부 작업공간은 OpenCV 쪽 할당이다.
 
   진단은 `torch.cuda.memory_stats()["num_alloc_retries"]`(0이 아니면 일어난 것), 대책은
   `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`(torch 2.12). `empty_cache()`는
@@ -207,11 +207,11 @@ force          4     3, 4, 5 → acceleration 4
   드라이버가 둘이 되어도 그 조립은 한 군데다.
 
 - **누적하는 곁가지는 파일로 집에 온다.** `shared_objects`는 한 방향이라 워커가 채운 복사본이
-  돌아오지 않는다. 시퀀스별 미터가 끝날 때 `<문서>.parts/`에 자기 `SequenceRange`를 떨구고,
-  부모의 `RangeDocument`가 실행이 끝나면 접는다. **드라이버를 지나는 값이 없다** — 예전
+  돌아오지 않는다. 시퀀스별 `ResultWriter`가 끝날 때 `<문서>.results/`에 자기 `SequenceRange`를
+  떨구고, 부모의 `RangeDocument`가 실행이 끝나면 접는다. **드라이버를 지나는 값이 없다** — 예전
   `fresh`/`merge`가 풀려던 문제가 사라진다. 죽은 순회는 아무것도 안 쓰고(접두사는 데이터셋
-  경계에 구멍을 낸다), 끝난 파트는 남으며, 진입 시 지운다(출력 디렉터리가 고정이라 이전
-  실행의 파트가 섞일 수 있다).
+  경계에 구멍을 낸다), 끝난 결과는 남는다. 이전 실행의 결과를 어떻게 할지는 진입 시
+  `if_present`가 정한다 — `overwrite`는 지우고, `error`는 거부하고, `reuse`는 판정한다.
 
   여섯 곁가지 중 **수명이 필요한 것은 둘뿐**이다 — (1)A와 (2)A. 나머지는 시퀀스에서 끝난다.
   구분은 A/B가 아니라 **누적이 어느 층에서 멈추느냐**이고, 그래서 `SideBranch`는 컨텍스트
@@ -221,7 +221,7 @@ force          4     3, 4, 5 → acceleration 4
   `preprocess` 하나가 둘 다 든다.
 
 - **거부된 잡이 로그를 남기지 않는 것은 의도다.** `preprocess`가 스윕에서
-  `target.save_frames`를 거부하면 잡 디렉터리에 0바이트 `preprocess.log`만 남는다. 설정을
+  `target.frames.save`를 거부하면 잡 디렉터리에 0바이트 `preprocess.log`만 남는다. 설정을
   먼저 찍도록 가드를 뒤로 미루는 안을 재보고 **버렸다**.
 
   값이 거의 없다. hydra가 `main`을 부르기 전에 `.hydra/config.yaml`을 이미 쓰므로 거부된
@@ -249,7 +249,7 @@ force          4     3, 4, 5 → acceleration 4
 ## 열린 것 — `scripts/_common/compute.py`
 
 - **로그 안에 시간 형식이 둘 섞인다.** `log_insights`는 `mpire`가 준 `0:00:03.318`을 그대로
-  쓰고, `run_all`과 `stage.py`는 `%.1f` + `s`로 `3.6s`를 쓴다. `insights`에는 포맷된 문자열만
+  쓰고, `run_all`과 `run.py`는 `%.1f` + `s`로 `3.6s`를 쓴다. `insights`에는 포맷된 문자열만
   있고 원시 초 값이 없어 우리 형식으로 다시 그리려면 파싱해야 한다.
 
 - **`unit` 하나가 진행표시줄과 산문 둘 다를 맡는다.** `tqdm`의 관례는 짧은 단수 축약이라
@@ -258,7 +258,7 @@ force          4     3, 4, 5 → acceleration 4
   가르고(`unit` + `noun`) 복수형을 붙여야 한다.
 
 - **복수형 처리가 한 곳 남았다.** `counted`는 `kaparoo.utils.quantify`가 되어 사라졌고,
-  `RangeDocument`·`FrameTree`·`writer.py`·`stage.py`가 모두 그것을 쓴다. 남은 하나는
+  `RangeDocument`·`FrameTree`·`frames.py`·`run.py`가 모두 그것을 쓴다. 남은 하나는
   `scripts/_common/compute.py`의 `f"{num_workers} worker{...}"`인데, 개수가 아니라 `in_process`로
   복수형을 정하므로 `quantify`로는 그대로 바뀌지 않는다.
 
@@ -277,7 +277,7 @@ force          4     3, 4, 5 → acceleration 4
 
 ## 열린 것 — 재사용 구현 뒤에 남긴 판단
 
-- **`RangeDocument`가 같은 파트를 두 번 읽는다.** `__enter__`의 판정(`_read_valid`)과
+- **`RangeDocument`가 같은 결과를 두 번 읽는다.** `__enter__`의 판정(`_read_valid`)과
   `__exit__`의 접기가 같은 파일을 각각 읽고 파싱한다. 실측 121 시퀀스 × 2000 프레임
   (16.2 MB)에서 554 ms + 602 ms = **1.16 s**. 전부 재사용하는 실행에서는 그것이 실행 전체다.
 
@@ -294,66 +294,75 @@ force          4     3, 4, 5 → acceleration 4
 
 ## 결정 — 설정은 셋으로 갈리고, 접두사는 타깃에만 붙는다
 
-> **소스와 선택을 가르는 데까지 반영됐다.** `TreeConfig` + `SelectConfig`가
-> `scripts/_common/dataset.py`에 있고 (1)의 YAML은 `source:` + `select:`다. 남은 것은 타깃 셋의
-> 접두사(`PreprocessTargetConfig` 등)로, (2)의 타깃이 생길 때 같이 붙인다.
+> **반영됐고, 한 군데는 다르게 끝났다.** `SourceConfig`와 `SequenceSelectConfig`가
+> `scripts/_common/dataset.py`에 있고 (1)·(2)의 YAML은 `source:` + `select:`다. 타깃 셋의
+> 접두사도 붙었다 — `PreprocessTargetConfig`와 `FlowTargetConfig`.
+>
+> **프레임 선택은 실행이 아니라 트리마다다.** 아래 초안은 `frame_*`까지 `select:`로 옮기려
+> 했지만, 두 트리가 서로 다른 프레임률일 수 있다는 것이 그것을 막았다 — 20 Hz 소스에서 10 Hz를
+> 얻으려면 한 칸씩 건너뛰고, 이미 10 Hz인 flow 캐시에서는 전부 읽는다. 숫자가 다른 이유는
+> 트리가 다르기 때문이고, 도달하는 프레임률은 같다. 그래서 `SequenceSelectConfig`는
+> `include`/`exclude`만 들고, `FrameSelectConfig`는 `source.frames:`로 트리마다 붙는다.
 
 ### 소스에서 선택을 뗀다
 
 지금 `SourceConfig`는 「트리가 어디 있는가」와 「무엇을 얼마나 읽는가」를 **합쳐** 든다.
 소스가 하나뿐인 (1)에서는 문제가 없었다.
 
-(2)·(3)은 위상과 흐름을 **둘 다** 읽을 수 있다. 합쳐 두면 `include`·`exclude`·`frame_start`·
-`frame_step`·`frame_count`·`if_frames_short`가 **두 벌**이 되고, 둘이 어긋나면 짝이 안 맞는
-프레임을 짝지어 놓고 조용히 계산한다. 같은 실행이 두 소스에서 서로 다른 시퀀스를 고를 이유는
-없으므로, **선택은 소스의 성질이 아니라 실행의 성질이다.**
+(2)·(3)은 위상과 흐름을 **둘 다** 읽을 수 있다. 시퀀스 선택을 합쳐 두면 `include`·`exclude`가
+**두 벌**이 되고, 둘이 어긋나면 짝이 안 맞는 시퀀스를 짝지어 놓고 조용히 계산한다. 같은 실행이
+두 소스에서 서로 다른 시퀀스를 고를 이유는 없으므로, **시퀀스 선택은 소스의 성질이 아니라
+실행의 성질이다.** 프레임 선택은 반대다 — 위 인용의 이유로 트리마다 붙는다.
 
 ```yaml
 select:                  # 실행에 한 벌
   include: null
   exclude: null
-  frame_start: 0
-  frame_step: 1
-  frame_count: null
-  if_frames_short: take
 
-source:                  # 소스마다 — 남는 것은 root + subpath 뿐이다
+source:                  # 소스마다 — 트리의 위치와 그 트리에서 읽을 프레임
   root: ???
+  subpath: null
+  frames:
+    start: 0
+    step: 1
+    count: null
+    if_short: take
 
-flow:                    # (2)가 더하는 두 번째 소스
+flow:                    # (2)가 더할 수 있는 두 번째 소스 (아직 없다)
   root: null
   subpath: null
 ```
 
-**소스에 남는 것이 `TreeConfig` 그 자체가 된다.** 「두 벌이 일치해야 한다」는 검사가 아예
-필요 없어지고, 표현할 수 없는 것이 된다. `_validate_output`이나 `FrameTree.__post_init__`이
-계속 해온 방향이다.
+**소스에 남는 것이 `SourceConfig` 그 자체가 된다.** 「시퀀스 선택 두 벌이 일치해야 한다」는
+검사가 아예 필요 없어지고, 표현할 수 없는 것이 된다. `_validate_output`이나
+`FrameTree.__post_init__`이 계속 해온 방향이다.
 
 ### 모달리티는 클래스가 아니라 키가 말한다
 
-`SourceConfig`에서 위상에 묶인 것은 `DEFAULT_SUBPATH: ClassVar[str] = PHASE_FLOAT_BIN`
-한 줄뿐이다. 나머지 필드는 전부 모달리티와 무관하고 `TargetConfig`도 같다.
+`SourceConfig`에서 위상에 묶인 것은 `DEFAULT_SUBPATH` 한 줄뿐이다. 나머지 필드는 전부
+모달리티와 무관하고 타깃 설정도 같다.
 
-그러니 `PhaseSourceConfig` 같은 이름은 두지 않는다. **키도 마찬가지다** — `phase:`로 바꾸면
-스키마 대신 config 파일에 모달리티를 박는 것이라 같은 실수를 자리만 옮겨 되풀이한다. 주 소스는
-`source:`로 남고, (2)가 더하는 두 번째 소스만 그것이 무엇인지 말하는 이름(`flow:`)을 갖는다.
+**키는 모달리티를 말하지 않는다** — `phase:`로 바꾸면 스키마 대신 config 파일에 모달리티를
+박는 것이라 같은 실수를 자리만 옮겨 되풀이한다. 주 소스는 `source:`로 남고, (2)가 더하는 두
+번째 소스만 그것이 무엇인지 말하는 이름(`flow:`)을 갖는다.
 
-`DEFAULT_SUBPATH`는 당분간 `TreeConfig`에 둔다. 위상만 읽는 동안은 「기본 레이아웃」이 곧
-Koala의 것이고, 두 번째 모달리티가 오면 그것을 아는 쪽 — 리더 — 으로 내려간다. 홀로그램 탐색은
-`subpath`를 아예 받지 않으므로, 레이아웃은 트리가 아니라 리더가 알 일이다. 그때 모달리티는
-`reader:` 같은 config 그룹이 고르고, `TreeConfig`는 `root` + `subpath`만 남는다.
+**클래스 쪽은 다르게 끝났다.** `DEFAULT_SUBPATH`는 값 없이 `SequenceLayout`의 `ClassVar`로
+예약되고, 그 단계가 읽는 트리의 서브클래스가 값을 댄다 — `PhaseSourceConfig`가 Koala의 것을,
+`FlowBranchConfig`가 flow 트리의 것을. 기본 레이아웃을 여덟 군데에서 손으로 넘기던 것을 없애는
+쪽이 이겼다. 두 번째 모달리티가 오면 그때 리더로 내려갈 수 있다 — 홀로그램 탐색은 `subpath`를
+아예 받지 않으므로, 레이아웃은 트리가 아니라 리더가 알 일이다.
 
 ### 접두사는 타깃 셋에만
 
-타깃의 모양은 단계가 정한다 — `save_frames`/`save_ranges`와 `save_flows`/`save_evals`는 그
-단계가 무엇을 내는지 그 자체다. 소스와 `select`는 세 단계가 글자 하나 다르지 않으므로 접두사가
+타깃의 모양은 단계가 정한다 — `target.frames.save`/`target.ranges.save`와
+`target.flows.save`/`target.evaluations.save`는 그 단계가 무엇을 내는지 그 자체다. 소스와 `select`는 세 단계가 글자 하나 다르지 않으므로 접두사가
 붙을 자리가 없다.
 
 ```
-TreeConfig                   root + subpath           소스는 전부 이것
-SelectConfig                 include/exclude/frame_*  실행에 하나
+SourceConfig                 root + subpath + frames  소스는 전부 이것
+SequenceSelectConfig         include/exclude          실행에 하나
 PreprocessTargetConfig
-OpticalFlowTargetConfig
+FlowTargetConfig
 BeatingProfileTargetConfig
 ```
 
@@ -363,8 +372,10 @@ BeatingProfileTargetConfig
 이름이고 (1)은 활동의 이름이다). 어느 쪽으로도 완전히 나란해지지 않으므로 코드에 있는 철자를
 따른다.
 
-`OutputConfig` 같은 중간 층은 두지 않는다. 두 타깃이 `if_sources_gone` 하나를 공유하는데,
-필드 하나로 층을 만들 값은 없다.
+`OutputConfig` 같은 중간 층은 두지 않는다. 대신 **브랜치마다 블록**이다 —
+`BranchConfig`(`save`/`if_present`/`if_unsourced`)와, 트리를 쓰는 브랜치가 더하는
+`TreeBranchConfig`(`subpath`/`record_file`). 두 정책은 묻는 것이 다르므로 브랜치마다 따로 든다:
+쓰려는 시퀀스의 출력을 어떻게 할지, 그리고 아무도 쓰지 않을 출력을 어떻게 할지.
 
 ### 어느 소스가 필요한지는 소비자가 선언한다
 
@@ -400,27 +411,21 @@ source.root="$DATA" source.include="$chunk"
 `sweep.zsh`·`ranges.py`도 `source.include` → `select.include` 한 줄만 고치면 된다
 (`source.root`는 그대로다).
 
-## 열린 것 — `TreeConfig`를 (2)·(3)이 쓰게 하려면
+## 열린 것 — 소스 설정을 (3)이 쓰게 하려면
 
-**모양과 이름은 §「설정은 셋으로 갈리고, 접두사는 타깃에만 붙는다」에서 정했고, 소스와 선택을
-가르는 데까지 반영됐다.** `TreeConfig`·`SelectConfig`·`search_sources`·`build_sequences`·
-`LAST_SEARCH`가 `scripts/_common/dataset.py`와 `scripts/_common/phase.py`에 나뉘어 있다 — 모달리티에
-의존하지 않는 것이 앞, 위상 탐색이 뒤다. (2)가 위상을 읽는 방식이 (1)과 완전히 같으므로 그대로
-쓴다.
+**(2)까지는 끝났다.** `SourceConfig`·`SequenceSelectConfig`·`FrameSelectConfig`·
+`search_sources`·`build_sequences`·`LAST_SEARCH`가 `scripts/_common/dataset.py`와
+`scripts/_common/phase.py`에 나뉘어 있다 — 모달리티에 의존하지 않는 것이 앞, 위상 탐색이 뒤다.
+(2)가 위상을 읽는 방식이 (1)과 완전히 같아 그대로 쓴다. 타깃 셋의 접두사도 붙었다.
 
-여기 남는 것은 둘이다.
-
-- **타깃 셋의 접두사를 언제 붙일 것인가.** `TargetConfig` → `PreprocessTargetConfig`는
-  YAML 키를 건드리지 않는 순수 개명이라 언제든 되지만, 혼자 하면 접두사가 구분하는 대상이
-  아직 하나뿐이다. (2)의 `OpticalFlowTargetConfig`가 생길 때 같이 붙인다.
+여기 남는 것은 하나다.
 
 - **(3)의 target은 프레임 트리가 아닐 수 있다.** 출력이 `{지표: (인덱스, 프레임)}`과
-  문서라, `save_frames`도 폴더 통째 교체도 (3)에는 없을 수 있다. 그래서 겹침 검사는
-  `TreeConfig`에 넣지 않았다 — 그것이 붙는 자리는 「`StagedDirectory`가 시퀀스당 폴더를
-  통째로 갈아끼우는 곳」이지 config 일반이 아니다. 다만 판정 자체는
-  `(source_root, source_subpath)` 대 `(write_root, target_subpath)` 넷이면 끝나 단계에
-  독립이므로, `_validate_output`의 그 절반은 **클래스 계층과 무관하게 함수로 먼저 올라갈**
-  수 있다.
+  문서라, 프레임 트리도 폴더 통째 교체도 (3)에는 없을 수 있다. 그래서 겹침 검사는 소스 설정에
+  넣지 않았다 — 그것이 붙는 자리는 「`StagedDirectory`가 시퀀스당 폴더를 통째로 갈아끼우는
+  곳」이지 config 일반이 아니다. 판정 자체는 `(source_root, source_subpath)` 대
+  `(write_root, target_subpath)` 넷이면 끝나 단계에 독립이고, 그래서 그 절반은 이미
+  `ensure_output_clear`로 나와 있다(`scripts/_common/dataset.py`).
 
 # 재사용 — 구현됨
 
@@ -453,8 +458,9 @@ source.root="$DATA" source.include="$chunk"
 
 ## 아직 열린 것
 
-- **지워진 시퀀스의 캐시 폴더.** 파트는 `if_unsourced=delete`로 지울 수 있지만 프레임 폴더
-  삭제는 파괴적이라 기본이 `keep`이고, 이름만 실행 전에 알린다.
+- **지워진 시퀀스의 캐시 폴더.** 프레임 폴더도 `target.frames.if_unsourced=delete`로 지운다.
+  파괴적이라 기본은 `keep`이고, 그때는 이름만 실행 전에 알린다. 남은 판단은 기본값을 그대로
+  둘지뿐이다.
 - **이름이 바뀐 시퀀스**는 삭제+추가로 보인다(전체 재계산). 그대로 둘지.
 
 ## 순서에 대한 경고
@@ -567,7 +573,8 @@ source.root="$DATA" source.include="$chunk"
 ## 구현됨
 
 `optical_flow/estimators/`에 OpenCV 기반 Farneback·DualTVL1·DeepFlow, `common/warp.py`,
-`optical_flow/evaluation.py`, `optical_flow/data/folder.py`(flow `.npy` 폴더).
+`optical_flow/metrics.py`(지표)와 `optical_flow/pipeline/evaluation.py`(값 타입),
+`optical_flow/data/folder.py`(flow `.npy` 폴더).
 
 **추정기는 세 층이다.** `EstimatorConfig`(파라미터를 든 값) → `Backend`(cv2 알고리즘과
 `Device`를 들고 실제 호출을 하는 것) → `OpticalFlowEstimator`(시퀀스 인터페이스). 알고리즘마다
@@ -581,25 +588,19 @@ estimator 자식을 두던 상속은 사라졌고 `OpenCVEstimator` 하나가 �
 736 MiB가 됐다(시간은 685 ms → 637 ms). `Backend.push`·`calc`의 `out` 인자와 `Backend.retained`가
 그 대가다.
 
-`data/transforms/normalization.py`는 세 모드를 쌍 모양 API로 제공하고 uint8을 낸다.
-**`pairwise`는 단일 정규화 프레임 목록을 만들 수 없다** — 한 프레임이 속한 쌍의 결합 범위로
-스케일되므로 두 번 등장하며 인코딩이 둘이다. API가 쌍(또는 창) 기반이어야 그 모드가 존재할
-수 있다. `perframe`은 위험한 모드다: 프레임마다 자기 극값으로 다시 스케일하면 모든 추정기가
-전제하는 밝기 항상성이 깨진다. `injected`는 밖에서 측정한 범위를 받으므로 시퀀스 범위와
-데이터셋 범위가 같은 코드가 되고 호출자의 선택이 된다.
+`data/transforms/normalization.py`는 프레임 하나를 받는 `FrameNormalizer`와 그것을 만드는
+`NormalizerConfig`다. 쌍 모양 API와 `pairwise`·`perframe`·`injected` 세 모드는 지웠다 —
+무엇을 왜 지웠는지는 §정규화의 「구현됨」에 있다.
 
 레거시가 **버림**하던 것을 **반올림**한다 — 256단계 중 한 단계만큼 화소 절반이 움직인다.
 계통적 하향 편향을 없애는 것이지 잡음을 더하는 것이 아니지만, 전환 이전의 품질 수치와는
 소수점 다섯째 자리에서 비교 불가다.
 
-**`pairwise`는 추정기의 streaming 경로를 막는다.** `push`가 **정규화된** 이전 프레임을
-붙들고 있는데 `pairwise`에서는 다음 프레임이 올 때 그 인코딩이 낡는다 — 비교되는 두
-프레임이 서로 다른 스케일에 놓이며, 이것이 `perframe`을 기각한 바로 그 밝기 항상성 파괴다.
-그래서 `pairwise`는 `calc`를 함의하고, `injected`만 안전하면서 `push`와 양립한다. 다만
-**그 거래에는 값이 없다.** 예전 기록의 「`push`가 1.05배」는 순차 측정의 산물이었다. 900×900
-프레임으로 번갈아 재면 `calc` 5.085 ms/pair, `push` 5.118 ms/pair로 **차이가 노이즈 안**이다
-(회차 편차 8%). `calc`가 더 하는 일은 업로드 한 번 0.047 ms뿐이고, 알고리즘이 4.672 ms로
-**91%**를 쓴다. 그러므로 정규화 방식을 `injected`로 바꾸어도 `push`로 갈 이유가 생기지 않는다.
+**`push`와 `calc` 사이에는 고를 값이 없다.** 예전 기록의 「`push`가 1.05배」는 순차 측정의
+산물이었다. 900×900 프레임으로 번갈아 재면 `calc` 5.085 ms/pair, `push` 5.118 ms/pair로
+**차이가 노이즈 안**이다(회차 편차 8%). `calc`가 더 하는 일은 업로드 한 번 0.047 ms뿐이고,
+알고리즘이 4.672 ms로 **91%**를 쓴다. 파이프라인이 `calc`를 쓰는 이유는 속도가 아니라
+`_compute`가 인덱스의 순수 함수여야 하기 때문이다.
 
 ## 정규화
 
@@ -676,13 +677,13 @@ median 필터는 이 오염에 대한 정확한 대응이고, 창 안 절반 미
 교환성 때문에 정보는 같지만 **표현**은 다르다. 핫 픽셀 하나를 넣은 실측에서 필터 결과가
 `[0,1]`의 **2.23%**만 차지했다 — 이미 제거된 이상치가 상수를 잡아먹기 때문이다. `uint8`로
 양자화하면 256단계 중 5.7단계, **5.5비트 손실**이며 `FrameNormalizer`가 `dtype`과 정수
-`target_range`를 지원하므로 이 경로는 가정이 아니다. 변위가 ~0.3px이라 프레임 간 밝기 변화가
+`target`을 지원하므로 이 경로는 가정이 아니다. 변위가 ~0.3px이라 프레임 간 밝기 변화가
 원래도 작은데 거기서 5.5비트를 더 버리면 추정기가 잡을 신호가 그만큼 준다.
 
 #### 그리고 이미 만들고 있는 문서가 필터 이후 범위다
 
 
-훅은 `PhaseFilteredSequence`를 감싼 스테이지에 붙으므로 `SequenceRangeMeter`가 재는 값은
+훅은 `PhaseFilteredSequence`를 감싼 스테이지에 붙으므로 `RangeWriter`가 재는 값은
 필터를 통과한 프레임이다. 「먼저」를 고르면 지금까지의 범위 문서가 전부 정규화에 쓸 수 없어
 지고 원본 범위를 재는 별도 경로를 새로 만들어야 한다.
 
@@ -692,15 +693,15 @@ median 필터는 이 오염에 대한 정확한 대응이고, 창 안 절반 미
 **상수가 필터 설정에 의존한다.** 커널이 다르면 범위도 달라지므로 서로 다른 필터 설정의
 정규화 출력은 직접 비교되지 않는다. 지금 최우선 실험이 필터 스윕이라 그냥 넘길 문제가
 아니다. 다만 출하될 파이프라인은 필터와 정규화를 **함께** 적용하므로 합성된 것끼리 비교하는
-것이 정직하고, 교차 비교가 필요해지면 `injected`로 **한 기준 설정의 상수를 모든 실행에
-주입**하면 된다.
+것이 정직하고, 교차 비교가 필요해지면 `normalize.level=given`으로 **한 기준 설정의 상수를
+모든 실행에 주입**하면 된다.
 
 ### 결정 — 범위는 측정 실행 하나가 내고, 소비 실행이 주입받는다
 
 
-세 층(프레임·시퀀스·데이터셋)을 한 방식으로 통일한다. `PhaseStageFactory`를 먼저 한 번
-돌리면 `RangeDocument.__exit__`가 파트를 접어 **세 층을 전부 담은 문서**를 내므로, 두 번째
-실행은 원하는 층을 골라 `injected`에 넣기만 하면 된다.
+세 층(프레임·시퀀스·데이터셋)을 한 방식으로 통일한다. `preprocess`를 먼저 한 번 돌리면
+`RangeDocument.__exit__`가 결과를 접어 **세 층을 전부 담은 문서**를 내므로, 두 번째 실행은
+`normalize.range_file`로 그 문서를 가리키고 `normalize.level`로 층을 고르기만 하면 된다.
 
 **한 실행 안에서 2패스로 푸는 길도 있지만 반쪽이다.** 검토 결과는 이렇다.
 
@@ -712,14 +713,15 @@ median 필터는 이 오염에 대한 정확한 대응이고, 창 안 절반 미
 - **새 `SequenceStage`를 만들면 된다.** `_notified`가 스테이지마다 따로라 훅이 정상
   발화한다. 소스는 공유하되 전부 다시 읽고 다시 필터링하며, 실측 **1.71배**다(256×256,
   40프레임, ellipsoid 2×2×2).
-- **1회차의 `SequenceRange`는 살아남는다.** `SequenceRangeMeter`는 `__exit__`에서 파트를 쓴
-  뒤 결과를 들고 있고, `run_stage`가 이미 `stage.run()` 뒤에 `report()`를 부르며 그렇게
+- **1회차의 `SequenceRange`는 살아남는다.** `RangeWriter`는 `__exit__`에서 결과를 쓴
+  뒤 그것을 들고 있고, `run_stage`가 이미 `stage.run()` 뒤에 `report()`를 부르며 그렇게
   쓰고 있다.
-- **그러나 데이터셋 범위는 안 된다.** 파트를 접는 것은 `stages.running()`의 `__exit__`, 즉
+- **그러나 데이터셋 범위는 안 된다.** 결과를 접는 것은 `stages.running()`의 `__exit__`, 즉
   모든 워커가 끝난 뒤다. 어떤 시퀀스도 정규화하기 전에 전부 재야 하므로 실행 전체에 장벽이
   생기고, 그건 사실상 실행 두 번이다.
 
-측정 실행에서 `save_frames=true`로 캐시를 남기면 소비 실행은 **필터링을 다시 하지 않으므로**
+측정 실행에서 `target.frames.save=true`로 캐시를 남기면 소비 실행은 **필터링을 다시 하지
+않으므로**
 1.71배가 사라진다. 대신 470 GB의 캐시 I/O가 드는데, 그 저울은 §「필터 캐시를 둘지는
 조건부다」와 같다.
 
@@ -731,15 +733,17 @@ median 필터는 이 오염에 대한 정확한 대응이고, 창 안 절반 미
 ### 구현됨 — 문서 기계를 뽑았고, 곁가지 둘이 모두 섰다
 
 
-- `DocumentBranch[S, P, D, M]`(`common/pipeline/document.py`)을 `RangeDocument`에서
-  뽑았다. `Coverage`와 문서 라이터가 함께 왔고, `data`에 기대는 것이 하나도 없어
-  `common`에 산다 — 라이터 때문에 `data`에 남은 `FrameBranch`와 갈리는 지점이다.
-- 추상은 계획의 셋이 아니라 **넷**이다. `_expected(names)`가 늘었다. 파트가 몇 개의
+- `DocumentBranch[N, S, D]`(`common/pipeline/document.py`)을 `RangeDocument`에서
+  뽑았다. `Coverage`와 문서 라이터가 함께 왔다. `FrameBranch`도 뒤이어 `common`으로
+  올라가 지금은 둘 다 `common/pipeline/`에 있고, 데이터에 묶인 것은 라이터를 만드는
+  `_make_writer` 한 메서드뿐이다.
+- 추상은 계획의 셋이 아니라 **넷**이다. `_expected(names)`가 늘었다. 결과가 몇 개의
   이름을 대야 하는가는 값이 아니라 **단이 정하는 것**이고, 프레임 곁가지가 답하는 것과
-  같은 질문이다. §「재사용 판정이 1:1을 전제한다」가 여기로 접혔다.
-- `PartMeter[P]`도 뽑았다. `SequenceRangeMeter`와 `SequenceEvaluator`는 파트를 어디에
+  같은 질문이라 지금은 공통 기반 `DatasetBranch`에 있다. §「재사용 판정이 1:1을 전제한다」가
+  여기로 접혔다.
+- `ResultWriter[S]`도 뽑았다. `RangeWriter`와 `EvaluationWriter`는 결과를 어디에
   쓰는지, 오류로 닫으면 아무것도 안 쓴다는 것, 설정을 수치 위에 얹는 것, `revert`가
-  파트를 되가져온다는 것까지 같았다. 자식은 「내가 접히는 것」 하나만 말한다.
+  결과를 되가져온다는 것까지 같았다. 자식은 「내가 접히는 것」 하나만 말한다.
 - `EvaluationDocument`(`optical_flow/pipeline/document.py`)와 `FlowTree`로 (2)의
   곁가지 둘이 섰다. 남은 것은 정규화와 배선이다.
 - `to_range`는 `to_dataset`이 되고 `save_range_document`는 `save_document`가 됐다.
@@ -789,32 +793,44 @@ def get_hook(self, source: S) -> FrameWriter[T] | None:
 흐름 쪽 `_make_writer`는 위상 쪽보다 **짧다** — 헤더가 없다.
 
 ```python
-FrameWriter(dest, save_fn, overwrite=..., record=...)
+FrameWriter(dest, save_fn, source_fn, overwrite=..., record=...)
 ```
 
-`FrameWriter`는 `T`와 저장 함수에 대해 일반적이고, 이름 규약은 `save_fn` 이 쥔다 —
-`koala_frame_name` 이 `00000_flow.npy` 를 내는 것은 흐름 쪽 팩토리의 일이다.
+`FrameWriter`는 `T`와 저장 함수에 대해 일반적이고, 이름 규약은 `save_fn`이 쥔다 —
+`koala_frame_name`이 `00000_flow.npy`를 내는 것은 흐름 쪽 팩토리의 일이다. 기록에 들어갈
+소스 이름을 어떻게 읽는지는 `source_fn`이 쥔다: 둘은 같이 주거나 같이 안 준다.
+
+**구현됨.** `FrameBranch`(`common/pipeline/frames.py`)가 위와 같은 `get_hook`을 들고,
+`FrameTree`와 `FlowTree`는 `_make_writer`와 `_expected`만 말한다.
 
 #### 문서 곁가지 — 18개 중 13개가 이미 값에 무관하다
 
 
-`RangeDocument`에서 값 타입을 언급하는 것은 `get_hook`·`_read_valid`·`to_range`·
-`get_coverage`·`_still_describes` 다섯뿐이다. `list_parts`·`_list_staging`·`_read_part`·
-`_source_of`·`save`·`report`·`__enter__`·`__exit__`·`found`·`_replacing`은 파트 파일과
+`RangeDocument`에서 값 타입을 언급하는 것은 `get_hook`·`_read_valid`·`to_dataset`·
+`get_coverage`·`_still_describes` 다섯뿐이다. `list_results`·`_list_staging`·`_read_result`·
+`_source_of`·`save`·`report`·`__enter__`·`__exit__`·`found`·`_replacing`은 결과 파일과
 스테이징만 다룬다. **`Coverage`는 이름만 세므로 그대로 쓴다.**
 
-`DocumentBranch[S, P, D, M]`을 뽑고 넷만 추상으로 남긴다.
+**구현됨.** `DocumentBranch[N, S, D]`을 뽑았고 추상은 넷이다.
 
 ```
-_make_meter(source) -> M   한 시퀀스를 재는 훅
-_parse(document) -> P      파트 하나를 읽어 들이는 것
-_fold(parts) -> D          전체로 접는 것
-_expected(names)           그 시퀀스가 파트에 대야 하는 이름들
+_make_writer(root, source, ...) -> ResultWriter[S]   한 시퀀스를 재는 훅
+_parse(document) -> S                                결과 하나를 읽어 들이는 것
+_combine(results) -> D                               전체로 접는 것
+_expected(names)                                     그 시퀀스가 결과에 대야 하는 이름들
 ```
 
-`RangeDocument`와 `EvaluationDocument`가 그 자식이 된다.
+`_expected`는 프레임 곁가지와 같은 질문이라 공통 기반 `DatasetBranch`로 올라갔고, 나머지
+셋을 `RangeDocument`와 `EvaluationDocument`가 답한다.
 
-#### 값 타입은 공유하지 않는다 — 접는 방식이 다르다
+#### 값 타입은 공유한다 — 접는 방식만 자식이 말한다
+
+> **이 결정은 뒤집혔다.** 아래 논증(범위는 min/max로, 지표는 가중 평균으로 접는다)은 그대로
+> 맞지만, 그것이 갈라 두어야 했던 것은 **접는 방식**이지 **값의 모양**이 아니었다. 두 계열이
+> 같은 모양을 두 번 쓰면서 JSON 리더와 빈·중복 검사까지 두 벌이 됐고, 그래서
+> `StepResult`·`SequenceResult`·`DatasetResult` 세 계층을 공통으로 두고 「무엇을 재는가」와
+> 「한 단이 어떻게 접는가」만 자식이 말하게 했다. `FrameRange`·`SequenceRange`·`DatasetRange`와
+> `FrameEvaluation`·`SequenceEvaluation`·`DatasetEvaluation`이 각각 그 셋을 상속한다.
 
 
 `CompositeRange.__post_init__`은 **min/max로 접는다.** 결합적이고 가중치가 없다. 지표는
@@ -828,9 +844,9 @@ PSNR은 이미 결정돼 있다. `_metrics`의 주석이 「per sample로 재고
 오차 하나에 log를 씌우는 pooled 형태는 다른 양이다」라고 못박았으므로, 문서의 데이터셋 수치도
 **프레임 수로 가중한 프레임 평균**이다.
 
-그러니 `ValueRange` 계열을 억지로 일반화하지 않는다. `FrameEvaluation`·`SequenceEvaluation`·
-`DatasetEvaluation`을 따로 두되 **모양은 같게** 한다(`Frame<X>` → `Sequence<X>` → `Dataset<X>`).
-공유하는 것은 문서 기계이지 값이 아니다.
+그러니 접는 규칙은 계열마다 따로 쓴다. 모양은 같게 두고(`Frame<X>` → `Sequence<X>` →
+`Dataset<X>`), 공유하는 것은 문서 기계와 **세 계층의 뼈대**다. 한 값의 두 끝을 담던
+`ValueRange`는 `Bounds`가 되어 `FrameRange` 안에 들어갔다.
 
 #### 두 곁가지가 함께 밟는 것 — 재사용 판정이 1:1을 전제한다
 
@@ -846,14 +862,13 @@ return self._count_frames(folder) == len(sources)
 `step.value is None`을 먼저 걸러낸 뒤에 append한다). (1)은 필터링이 1:1이라 이것과
 `contents[name]`이 둘 다 N개다.
 
-**(2)는 N개를 먹고 N-1개를 낸다.** 첫 비교가 `N-1 != N`으로 항상 실패하므로 **흐름 캐시도
-평가 파트도 절대 재사용되지 않는다.** 틀린 답을 내는 것이 아니라 조용히 낭비하는 쪽이라 늦게
-발견된다. 문서 쪽 `_still_describes`도 프레임 이름 목록을 같은 방식으로 비교하므로 같은 함정에
-빠진다.
+**(2)는 N개를 먹고 N-1개를 낸다.** 첫 비교가 `N-1 != N`으로 항상 실패했으므로 흐름 캐시도
+평가 결과도 재사용되지 않았다. 틀린 답을 내는 것이 아니라 조용히 낭비하는 쪽이라 늦게
+발견된다.
 
-§「캐시 폴더는 자기가 어디서부터 시작하는지 말하지 않는다」와 **뿌리가 같다.** 한 번에 고칠
-것: 판정이 「소스가 든 것」이 아니라 **「이 단계가 그 소스로부터 내야 하는 것」**과 비교해야
-한다. 단이 그 수를 아는 유일한 곳이므로, 길이를 단에게 묻는 자리가 필요하다.
+**해결됐다.** 판정이 「소스가 든 것」이 아니라 **「이 단계가 그 소스로부터 내야 하는 것」**과
+비교한다. `DatasetBranch._expected(names)`가 그 자리이고, 프레임 쪽과 문서 쪽이 같은 답을
+쓴다 — `FrameTree`는 전부, `FlowTree`와 `EvaluationDocument`는 `names[:-1]`이다.
 
 ### 결정 — 평가 훅은 소비자가 아니라 조인이다. 프레임 스테이지를 들고 당긴다
 
@@ -865,8 +880,8 @@ return self._count_frames(folder) == len(sources)
 **(2)에서는 한쪽만 맞는다.** 저장은 `flow[i]` 하나면 되지만 워프 일관성은 `frame1`·`frame2`·
 `flow` 셋을 요구한다. `Step`은 flow를 나르고 프레임은 안 나른다.
 
-`extra`에 싣는 안은 **기각한다.** 임자가 이미 있다 — `FrameWriter.write`가
-`Path(str(step.require_extra())).name`으로 기록을 남기므로 경로처럼 생겨야 한다. 프레임 두
+`extra`에 싣는 안은 **기각한다.** 임자가 이미 있다 — `FrameWriter.write`가 `source_fn`으로
+`extra`에서 기록할 이름을 읽으므로, 그 함수가 읽을 수 있는 것이어야 한다. 프레임 두
 장을 겸하는 타입을 만들면 한 타입이 무관한 두 소비자를 섬기고, 평가하지 않는 실행에서도 모든
 스텝이 프레임을 달고 다닌다. 값 자체를 `(flow, prev, curr)`로 뭉치는 안도 마찬가지다 — 곁가지
 하나 때문에 메인 스트림의 타입이 오염된다.
@@ -875,14 +890,14 @@ return self._count_frames(folder) == len(sources)
 `Hook` 타입은 그대로다(여전히 `Step` 하나를 받는 함수), 스테이지를 클로저로 들 뿐이다.
 
 ```python
-class WarpConsistencyMeter:
-    def __init__(self, frames: Stage[Tensor, Path], ...) -> None:
+class EvaluationWriter(ResultWriter[SequenceEvaluation]):
+    def __init__(self, root, source, frames: Stage[Tensor, Path], ...) -> None:
         self._frames = frames
 
     def __call__(self, step: Step[Tensor, Path]) -> None:
-        prev = self._frames[step.index].require()
-        curr = self._frames[step.index + 1].require()
-        ... self._metric(prev, curr, step.value)
+        first = self._frames[step.index].require()
+        second = self._frames[step.index + 1].require()
+        ... self._consistency(first, second, step.require())
 ```
 
 **같은 스테이지 객체여야 한다.** `_cache`와 `_notified`가 인스턴스마다 따로이므로, 새로 만들면
@@ -900,6 +915,9 @@ class WarpConsistencyMeter:
 위상 소스 → Normalize (창 2) → Flow (창 1)
                   ↑                  곁가지: flow 저장, 평가(Normalize를 들고 있음)
 ```
+
+**구현됨.** `NormalizedFrameStage`(창 2)와 `FlowStage`(창 1)이고, `FlowStageRun.get_stage`가
+둘을 쌓아 곁가지에 `FlowSource(name, frames, estimator)`를 건넨다.
 
 **창 2의 근거가 여기 있다.** flow가 `normalize[i]`와 `[i+1]`을 읽은 직후 곁가지가 같은 둘을
 읽으므로 창 2면 적중이다. 창 1이면 `_forget`이 `i`를 버려 다시 읽고 다시 정규화한다. 틀린 답이
@@ -1041,7 +1059,7 @@ psnr    scored 1197,  mean 21.8     <- 2장이 완벽 재구성이라 빠졌다
 | PSNR이 `inf` | 세어서 문서에 싣고, PSNR 평균에서만 제외 |
 | SSIM·MSE·MAE | 그 프레임도 정상 집계 (유계라 문제없음) |
 
-### 결정 — 평균 옆에 시퀀스들의 최소·최대와 그것을 낸 이름을 싣는다
+### 결정 — 평균 옆에 양 끝을 낸 시퀀스의 이름을 싣는다
 
 
 **평균 하나로는 「대부분 좋아지고 몇 개가 무너진」 경우가 안 보인다.** 시퀀스 5개로:
@@ -1076,7 +1094,12 @@ psnr    scored 1197,  mean 21.8     <- 2장이 완벽 재구성이라 빠졌다
 
 **양 끝을 다 든다.** 「최악만」이면 지표마다 어느 쪽이 나쁜지(SSIM gain은 낮은 쪽, MSE와 FB
 error는 높은 쪽)를 문서 코드가 알아야 하고 지표가 늘 때마다 그 표를 고쳐야 한다. 양 끝을 들면
-그 지식이 읽는 쪽에 남는다. 범위 문서가 `min_index`/`max_index`로 하는 것과 같은 모양이다.
+그 지식이 읽는 쪽에 남는다.
+
+**구현은 이름만 싣는다.** `Spread`가 `min_source`/`max_source`를 들고 그 끝값은 싣지 않는다 —
+이름이 가리키는 시퀀스가 자기 평균을 이미 들고 있으므로, 값을 한 번 더 쓰면 같은 수를 두
+군데 두고 어긋날 자리를 만든다. 범위 문서 쪽도 같은 이유로 데이터셋 층에서 `min_index`를
+버리고 `min_source`만 남겼다.
 
 **평균과 같은 집합에서 낸다.** PSNR의 `inf`를 평균에서 뺐으므로 최대에도 넣지 않는다 — 넣으면
 `max_psnr = inf`가 되어 아무 말도 안 하면서 짝이 어긋난다. **유한한 점수만**으로 평균과 양 끝을
@@ -1088,9 +1111,9 @@ error는 높은 쪽)를 문서 코드가 알아야 하고 지표가 늘 때마�
 ## 실행 모양
 
 같은 스테이지 그래프가 세 가지로 배선된다. 스크립트는 하나이고, `flow.root`가 흐름을 어디서
-얻는지를, `save_flows`가 남길 것인지를 정한다.
+얻는지를, `target.flows.save`가 남길 것인지를 정한다.
 
-### 결정 — 실행이 세 모양이고, `flow.root`와 `save_flows`가 정한다
+### 결정 — 실행이 세 모양이고, `flow.root`와 `target.flows.save`가 정한다
 
 
 | | 읽는 것 | 쓰는 것 | 추정기 |
@@ -1099,7 +1122,8 @@ error는 높은 쪽)를 문서 코드가 알아야 하고 지표가 늘 때마�
 | **B** 계산하되 안 남긴다 | 위상 | 평가만 | 씀 |
 | **C** 캐시를 평가한다 | 위상 **+ 흐름** | 평가만 | **안 씀** |
 
-A와 B는 `save_flows` 하나로 갈린다 — (1)의 `save_frames`/`save_ranges`와 같은 짝이다.
+A와 B는 `target.flows.save` 하나로 갈린다 — (1)의 `target.frames.save`/`target.ranges.save`와
+같은 짝이다.
 **C가 새로운 모양이고, 소스가 둘이다.** 워프 일관성이 `frame1`·`frame2`·`flow` 셋을 요구하므로
 캐시를 읽어도 위상은 여전히 필요하다. C를 한 스크립트에 두는 대가는 §「스크립트는 하나다」에서
 다뤘다.
@@ -1123,7 +1147,7 @@ C가 필요한 이유는 비용이다. 448,800 프레임에 흐름을 다시 계
   전부 남긴다. §「주입된 범위」가 요구한 것을 `FrameBranch`를 건드리지 않고 만족시킨다.
 - **공용으로 올린 것**: `PhaseSourceConfig`·`log_short_sequences`(→ `_common/phase.py`),
   `BranchConfig`·`TreeBranchConfig`·`log_branch_policies`·`ensure_output_clear`
-  (→ `_common/dataset.py`). §「`TreeConfig`를 (2)·(3)이 쓰게 하려면」의 첫 항목이 닫혔다.
+  (→ `_common/dataset.py`). §「소스 설정을 (3)이 쓰게 하려면」의 첫 항목이 닫혔다.
 - `FLOW_FLOAT_NPY`를 `optical_flow/data/folder.py`에 두었다. 파일 이름이 이미 거기 있다.
 
 **아직 없는 것 둘.**
@@ -1138,45 +1162,47 @@ C가 필요한 이유는 비용이다. 448,800 프레임에 흐름을 다시 계
 
 
 ```yaml
-source:                    # 위상. 셋 다 필요하다 — 평가가 프레임을 본다
+run_root: ???              # 잡 디렉터리를 놓는 자리
+
+source:                    # 위상. 평가가 프레임을 보므로 C에서도 필요하다
   root: ???
   subpath: null            # Phase/Float/Bin
+  frames:                  # 이 트리에서 무엇을 읽는가
+    start: 0
+    step: 1
+    count: null
+    if_short: take
 
 select:                    # 실행에 한 벌, 소스가 둘이어도 하나다
   include: null
   exclude: null
-  frame_start: 0
-  frame_step: 1
-  frame_count: null
-  if_frames_short: take
 
-flow:                      # 흐름을 어디서 얻는가
+flow:                      # 흐름을 어디서 얻는가 — 아직 없다, C를 넣을 때 선다
   root: null               # null 이면 estimator 로 계산한다
   subpath: null            # Flow/Float/Npy, 읽을 때만
 
 normalize:
   level: dataset           # given | sequence | dataset
-  range_file: ???          # 측정 실행이 남긴 value_range.json (given 이면 불필요)
+  range_file: null         # 측정 실행이 남긴 value_range.json (given 이면 불필요)
   source: null             # given 일 때의 span
   target: null             # null 이면 FRAME_DTYPE 의 span
 
 target:
-  root: ???
-  subpath: null            # Flow/Float/Npy
-  save_flows: false
-  save_evals: true
-  evals_file: flow_evaluation
-  if_flows_exist: error    # error | overwrite | reuse
-  if_evals_exist: error
-  if_sources_gone: keep
+  flows:
+    save: false
+    subpath: null          # Flow/Float/Npy
+    record_file: source
+    if_present: error      # error | overwrite | reuse
+    if_unsourced: keep
+  evaluations:
+    save: true
+    file: flow_evaluation
+    if_present: error
+    if_unsourced: keep
 ```
 
-**필드 이름은 낡았다.** 실제 `configs/optical_flow/estimate/config.yaml`에는
-`target.flows.save`·`target.evaluations.file`·`if_present`·`if_unsourced`로 섰다. `flow` 블록은
-아직 없고, C를 넣을 때 선다.
-
-`evals_file`의 기본값은 (1)의 `range_file: value_range`와 같은 모양이다 — 짧은 필드명에 풀어
-쓴 파일명. `flow_` 접두어는 (3)이 자기 문서를 같은 루트에 쓸 때 값을 한다.
+`target.evaluations.file`의 기본값은 (1)의 `target.ranges.file: value_range`와 같은 모양이다 —
+짧은 필드명에 풀어 쓴 파일명. `flow_` 접두어는 (3)이 자기 문서를 같은 루트에 쓸 때 값을 한다.
 
 `subpath` 기본값은 **`Flow/Float/Npy`**로 둔다. Koala 관례가 `<종류>/<정밀도>/<형식>`이고,
 파일 이름은 `OpticalFlowFolder.FILE_STEM`/`FILE_EXT`가 이미 `00000_flow.npy`로 정해두었다.
@@ -1191,9 +1217,9 @@ source.root=/sdd/.../Off-axis   filter=median_cuboid_3x3x3     원본에서 필�
 source.root=$OUT/filtered       filter=identity                (1)이 남긴 캐시에서
 ```
 
-`search_sources`·`build_sequences`도 그대로다. **여기서 §「`TreeConfig`를 (2)·(3)이 쓰게
-하려면」의 첫 항목이 닫힌다** — 두 번째 쌍이 생겼으니 `TreeConfig`·`SourceConfig`·
-`search_sources`·`build_sequences`를 `scripts.data` 위로 올린다. `TargetConfig`와
+`search_sources`·`build_sequences`도 그대로다. **올렸다** — `SourceConfig`·
+`SequenceSelectConfig`·`FrameSelectConfig`는 `scripts/_common/dataset.py`, `search_sources`·
+`build_sequences`·`PhaseSourceConfig`는 `scripts/_common/phase.py`다. 타깃 설정과
 `build_branches`만 단계별로 남는다.
 
 #### 「캐시에서 읽기」는 estimator 값이 아니다
@@ -1222,11 +1248,14 @@ source.root=$OUT/filtered       filter=identity                (1)이 남긴 캐
 재사용 판정이 `settings`를 비교하므로, **출력을 바꾸는 값이 거기 없으면 조용히 섞인다.**
 그리고 `.npy`가 배열만 나르므로, **나중에 필요한데 파일에 없는 값**도 여기밖에 갈 데가 없다.
 
-- **주입된 범위.** `level: dataset`이면 값이 하나이므로 `settings`에 그대로 넣는다.
-  `level: sequence`면 시퀀스마다 다르므로 공유 `settings`가 아니라 **각 시퀀스의 record**에
-  들어간다 — `FrameWriter`의 `_record`가 `get_hook`에서 시퀀스별로 만들어지므로 자리는
-  있다. `range_file`의 **경로**만 넣는 것으로는 부족하다. 같은 경로의 문서가 다시 쓰였을 수
-  있고, 그것은 `R15`와 같은 함정이다.
+- **주입된 범위.** `range_file`의 **경로**만 넣는 것으로는 부족하다. 같은 경로의 문서가 다시
+  쓰였을 수 있고, 그것은 `R15`와 같은 함정이다. 그래서 범위 자체를 넣는다.
+
+  **구현은 두 경우를 한자리에 넣는다.** `level: dataset`·`given`이면
+  `settings.normalize.range`에 span 하나, `level: sequence`면
+  `settings.normalize.ranges`에 시퀀스 이름을 키로 한 dict 전부다. 시퀀스마다의 record로
+  나누는 것도 자리는 있었지만, 그러면 문서 쪽과 프레임 쪽이 같은 사실을 다른 모양으로 들게
+  된다. 공유 `settings` 하나면 두 곁가지가 같은 블록을 기록한다.
 - **흐름이 계산된 것인지 읽힌 것인지.** 두 실행이 같은 이름의 평가 문서를 낸다.
 - **픽셀 크기와 프레임 간격.** flow는 px/frame이고 (3)이 내려는 것은 속도와 힘이므로 µm/px와
   초/프레임이 있어야 한다. `save_flow_npy`의 docstring이 「the pixel size and frame interval a
@@ -1244,15 +1273,17 @@ source.root=$OUT/filtered       filter=identity                (1)이 남긴 캐
 #### `frame_count`는 소스 프레임 수다
 
 
-`source.frame_count=50`이면 위상 50장을 읽어 **흐름 49장**이 나온다. (1)과 일관되게 소스
+`source.frames.count=50`이면 위상 50장을 읽어 **흐름 49장**이 나온다. (1)과 일관되게 소스
 기준으로 센다. 출력 기준으로 세면 `frame_indices`가 두 단계에서 다른 뜻이 된다.
 
 #### 열어둔 것 — `flow`를 (3)과 나눠 쓸 것인가
 
 
 **(3)도 흐름 폴더를 읽는다.** 그렇다면 `flow`는 (2)만의 항목이 아니라 (3)의 `source`다.
-`TreeConfig`를 상속한 `FlowSourceConfig`로 만들어 (2)에서는 선택적 두 번째 소스,
-(3)에서는 유일한 소스로 쓰는 편이 맞을 수 있다. **(3)의 입력을 정할 때 함께 정한다.**
+`SourceConfig`를 상속한 흐름 소스 설정으로 만들어 (2)에서는 선택적 두 번째 소스, (3)에서는
+유일한 소스로 쓰는 편이 맞을 수 있다. **이름은 비어 있지 않다** — `FlowSourceConfig`는 이미
+(2)가 읽는 **위상** 소스가 쓰고 있으므로 다른 이름이 필요하다. **(3)의 입력을 정할 때 함께
+정한다.**
 
 ### 세 실행 모양에서의 배선
 
@@ -1283,9 +1314,9 @@ SequenceStage(위상)  →  NormalizedFrameStage (창 2)  →  FlowStage (창 1)
   객체를 모든 이름에 매고, `sequence`면 시퀀스마다 다른 것을 맨다. **`level`은 스크립트
   층에 남고 잡은 그것을 모른다.**
 
-**남은 것은 스크립트·config 층이다** — `scripts/optical_flow/`, `TreeConfig`·`SourceConfig`·
-`search_sources`·`build_sequences`를 `scripts.data` 위로 올리는 것, 그리고 범위 문서를 읽어
-`normalizers`를 만드는 자리.
+**그 층도 섰다** — `scripts/optical_flow/`의 `estimate.py`·`_process.py`·`_estimating.py`·
+`_normalizing.py`이고, 공용 소스 설정은 `scripts/_common/`으로 올라갔다. 범위 문서를 읽어
+`normalizers`를 만드는 자리는 `build_normalization`이다.
 
 **A·B**: `normalize`가 `FlowStage`의 소스이면서 곁가지가 든 것이다. 저장 곁가지를 켜고 끄는 것이
 A와 B의 차이 전부다.
@@ -1322,7 +1353,7 @@ C에서는 `normalize`가 `flow.sources`에 없으므로 **그래프 밖**이다
 경계가 사용자가 실제로 생각하는 경계와 다르다. 셋 다 하는 일은 「위상과 흐름을 놓고 점수를
 낸다」이고, 갈리는 것은 흐름을 어디서 얻는가와 남길 것인가 두 축뿐이다.
 
-| | `flow.root` | `save_flows` | 예측 | 저장 | 평가 |
+| | `flow.root` | `target.flows.save` | 예측 | 저장 | 평가 |
 | --- | --- | --- | --- | --- | --- |
 | **A** | null | true | 씀 | 씀 | 씀 |
 | **B** | null | false | 씀 | | 씀 |
@@ -1356,8 +1387,8 @@ B가 기본값인 것이 그대로 남는다. 파라미터 탐색이 쓰는 모�
 
 - **`CachedFlowSequence`.** `OpticalFlowFolder`는 이미 `DataSequence`다(`get_item`·
   `get_meta`·`__len__`). 모자란 것 둘: ndarray를 Tensor로 바꾸는 것과, **`get_meta`가
-  `00000_flow.npy`를 준다**는 것. 두 번째가 중요하다 — `SequenceEvaluator`가 `path.name`을
-  파트에 적으므로 그대로 두면 C의 문서는 프레임을 `00000_flow.npy`로 부르고 A/B는
+  `00000_flow.npy`를 준다**는 것. 두 번째가 중요하다 — `EvaluationWriter`가 `path.name`을
+  결과에 적으므로 그대로 두면 C의 문서는 프레임을 `00000_flow.npy`로 부르고 A/B는
   `00000_phase.bin`으로 불러 **두 문서를 나란히 놓을 수 없다.** record의 `sources`를 들고
   그것을 돌려줘야 하며, 이것이 사이드카를 실제로 쓰는 자리다.
 - **`flow` config 블록.** `FlowCacheConfig(SourceConfig)`, `DEFAULT_SUBPATH =
@@ -1470,7 +1501,8 @@ float 3채널이다. 그러면 평가의 `data_range`가 dtype에서 안 나오�
   **말하는 것은 config가 아니라 드라이버다.** 한 번 config가 직접 `logging.getLogger(__name__)`로
   경고하도록 짰다가 물렸다 — §관측이 정한 것은 로거 이름이 **스테이지**이고 그 이름을 잡이
   준다는 것이며, 얼어붙은 값 객체는 자기가 어느 실행에 속하는지 모른다. `_algorithm(device)`가
-  아니라 `run_estimator.py`가 config를 instantiate하는 자리에 붙일 것. 파라미터 탐색을
+  아니라 config를 읽는 자리, 즉 `scripts/optical_flow/_estimating.py`의
+  `parse_estimator_config`나 그 곁의 `log_estimator_config`에 붙일 것. 파라미터 탐색을
   시작하기 전에 닫을 것.
 
 - **캐시 폴더는 자기가 어디서부터 시작하는지 말하지 않는다.** `FrameWriter`는 도착한
@@ -1507,6 +1539,11 @@ float 3채널이다. 그러면 평가의 `data_range`가 dtype에서 안 나오�
   **(나) 빈 출력을 허용** — 빈 폴더가 남고, 그것은 P8·R5가 없애려던 모양이다. **(다) 커버리지가
   이유를 나눠 셈** — §1순위가 `reused`로 이미 같은 고민을 하고 있으니 거기 붙일 자리가 있다.
   **(가)를 권한다**: 만들 수 없는 것은 시도하지 않는 편이 시도해서 실패로 세는 것보다 정직하다.
+
+  **(2)는 앞에서 거부하는 쪽으로 이미 섰다.** `FlowStageRun.__init__`이 2프레임 미만 시퀀스를
+  이름을 대고 거절한다. 다만 (가)가 말한 「선택 목록에서 빠진다」가 아니라 **실행 전체를
+  거절한다** — 한 시퀀스가 짧으면 나머지도 돌지 않는다. 어느 쪽이 맞는지는 아직 열려 있고,
+  (3)의 힘 계산이 같은 질문을 다시 가져온다.
 
 - **(2)를 붙이는 순간 (1)의 창을 2로 올릴 것.** 지금은 1이다 — 묻는 곳이 `__iter__` 하나뿐이라
   맞다. (2)가 붙으면 한 스텝 안에서 위상 `i-1`(flow 경유)과 `i`(dry mass)가 같이 불리므로,
@@ -1566,11 +1603,9 @@ float 3채널이다. 그러면 평가의 `data_range`가 dtype에서 안 나오�
   저장: flow는 `(2, H, W)` float32로 프레임당 6.48 MB — **위상의 두 배** — 이고 CUDA에서
   1000프레임당 ~4초에 재생성된다. 필터 캐시와 같은 조건부 규칙이다.
 
-- **`evaluation.py`에 identity baseline과 forward-backward error를 올릴 것.** 설계는
-  §곁가지·§평가 문서에서 끝났고 남은 것은 구현이다. 둘 다 `benchmark_opencv.py`에 프로토타입만
-  있었는데 **그 파일은 이미 지워졌다**(`278bb80`, 「Drop the two optical flow scripts CI was
-  failing on」). 옮기기 전에 사라졌으므로
-  `git show 278bb80^:scripts/optical_flow/benchmark_opencv.py`에서 되살릴 것.
+- ~~**identity baseline과 forward-backward error를 올릴 것.**~~ `optical_flow/metrics.py`에
+  `identity_ssim`과 `forward_backward_error`가 있고, `EvaluationWriter`가 쌍마다 둘을 부른다.
+  `ssim_floor`와 `fb_error`가 결과에 실린다.
 
 - **실제 프레임에서 ground-truth flow 벤치마크를 만들 것.** 실제 DHM 프레임을 알려진 매끄러운
   서브픽셀 변위장(~0.3 px, 측정된 규모)으로 워핑하고 endpoint error로 추정기를 채점한다.
@@ -1588,10 +1623,9 @@ float 3채널이다. 그러면 평가의 `data_range`가 dtype에서 안 나오�
   같은 구성이 학습된 flow 모델의 **지도학습 데이터 생성기**로도 쓰인다 — 실제 영상 통계에
   정확한 레이블. 고전적 pseudo-label로 학습하면 모델이 교사를 넘지 못한다.
 
-- **`run_estimator.py`를 쓸 것.** 자리가 비어 있다: `scripts/optical_flow/`는 통째로
-  지워졌고 `scripts/`에 남은 것은 `_common`·`data`·`env`뿐이다. 옛 `benchmark_opencv.py`는
-  샘플 하나를 CPU-대-CUDA 판정으로 채점했고, 필요한 것은 루트 아래 모든 시퀀스를 훑어
-  시퀀스별로 집계하는 모양이다 — 그것이 파라미터 탐색이 요구하는 것이다.
+- ~~**`run_estimator.py`를 쓸 것.**~~ `scripts/optical_flow/`가 섰다 — `estimate.py`가
+  진입점이고, 루트 아래 모든 시퀀스를 훑어 시퀀스별로 집계하는 모양이 그것이다. 아래 제약은
+  그 구현이 서 있는 근거로 남긴다.
 
   워커 API를 규정하는 제약들(전부 확인됨):
 
@@ -1608,9 +1642,9 @@ float 3채널이다. 그러면 평가의 `data_range`가 dtype에서 안 나오�
   - **워커 수는 추정기의 장치를 따른다**: CPU 추정기는 코어 수(이득이 거의 선형), CUDA
     추정기는 GPU 수만큼만(프로세스를 몇 개 세워도 장치에서 직렬화된다).
   - **`hydra.instantiate`가 whitelist 없이 경고한다(1.4).** 설정이 정하는 `_target_`은
-    임의 코드이므로 `_target_whitelist_` 없는 사용은 deprecated다. 우리 설정은 우리 것이라
-    위험은 낮지만, 드라이버의 `instantiate`는 만들려는 추정기/커널 클래스의 whitelist를
-    넘겨야 한다.
+    임의 코드이므로 `_target_whitelist_` 없는 사용은 deprecated다. **반영됨** —
+    `parse_estimator_config`와 `parse_filter_config`가 각각 자기 패키지를 `_target_whitelist_`로
+    넘긴다.
 
   시간이 실제로 어디 가는가(프레임 쌍당): **flow가 전부를 지배한다.** CPU Dual TV-L1이
   median 필터의 ~150배, CPU Farneback의 ~15배. CUDA에서도 순서는 뒤집히지 않는다 —
@@ -1701,14 +1735,19 @@ float 3채널이다. 그러면 평가의 `data_range`가 dtype에서 안 나오�
   data.filter=nope      -> 'nope'      (str)     오타조차 통과한다
   ```
 
-  지금 형태(`filter=nope`)는 하이드라가 즉시 「선택지 없음」과 11개 나열로 거부한다.
+  지금 형태(`filter=nope`)는 하이드라가 즉시 「선택지 없음」과 그룹의 옵션 나열로 거부한다
+  (지금 `configs/filter/`에 21개).
   **슬래시와 점이 다른 뜻인데 사람 눈에는 같아 보이므로**, 그룹의 키는 평평하게 둔다.
 
   *누가 쓰는가* — 어디에 **둘 수 있는지**를 정한다. 모든 단계가 쓰면 `configs/<이름>/`
   최상위(지금 `compute`와 `filter`가 그렇다 — (2)도 `FilteredSequence`를 쓰고, 「정규화는
-  필터링 이후」 결정이 그 순서다). 한 단계만 쓰면 **그 진입 설정 폴더 안**에 두고 그 폴더를
-  `config_path`로 삼는다 — 그러면 키는 여전히 평평하고, 공용 그룹은
-  `hydra.searchpath: [file://${oc.env:CONFIGS_ROOT}]`로 계속 보인다. 셋 다 실측 확인했다.
+  필터링 이후」 결정이 그 순서다). 한 단계만 쓰는 그룹을 그 진입 설정 폴더 안에 두고 그 폴더를
+  `config_path`로 삼는 길도 실측으로 통하는 것을 확인했다.
+
+  **구현은 그 길을 쓰지 않았다.** 두 스크립트 모두 `config_path`가 `configs/` 루트이고
+  (`CONFIGS_ROOT`), `config_name`이 `data/preprocess/config`·`optical_flow/estimate/config`다.
+  그래서 `hydra.searchpath`가 필요 없고, (2)만 쓰는 `estimator`도 최상위 `configs/estimator/`에
+  있다. 그룹이 늘어 섞이기 시작하면 위의 길로 옮길 것.
 
   두 축은 충돌하지 않는다. 진입 설정(`config.yaml`) 자체는 단계 경로 그대로 둔다 — 그것은
   `config_name`으로 지정하는 것이지 오버라이드하는 그룹이 아니다.
@@ -1744,7 +1783,7 @@ float 3채널이다. 그러면 평가의 `data_range`가 dtype에서 안 나오�
 거짓말이 된다. 드라이버는 그 이름을 팩토리에게 물어 쓴다 — 부모와 워커가 한 실행을 두 이름으로
 적을 길이 없다.
 
-워커는 `worker_init`에서 `<잡 디렉터리>/worker<id>.log`를 자기 몫으로 연다. 여러 프로세스가
+워커는 `worker_init`에서 `<잡 디렉터리>/<실행 이름>.worker<id>.log`를 자기 몫으로 연다. 여러 프로세스가
 한 파일에 붙이면 섞이고 Windows에서는 찢어진다. 스테이지별이 아니라 **워커별**이라, 한 잡이
 필터링하고 이어서 추정하면 시간 순으로 읽힌다. `mode="a"`인 것은 `compute.tasks_per_worker`가 워커를
 은퇴시키고 같은 id로 새로 띄우기 때문이고, 지우는 책임은 잡마다 한 번 드라이버에 있다.
@@ -1761,37 +1800,41 @@ float 3채널이다. 그러면 평가의 `data_range`가 dtype에서 안 나오�
 - **스테이지 깊이 들여쓰기도 (2)와 함께.** 오늘은 단계가 하나라 깊이가 항상 0이고, 깊이를
   아래로 내려주는 경로가 「컨테이너는 스테이지 그래프를 따라 겹친다」와 같이 정해질 문제다.
 
-- **워커별 진행표시줄.** 풀 수준 바는 이미 그려진다. `worker_init`이
+- **워커별 진행표시줄 — 아직 없다.** 지금 그려지는 것은 부모가 수집한 결과를 세는 바
+  하나뿐이다(`_tracked`). 프로토타입으로 확인한 모양은 `worker_init`이
   `tqdm(position=worker_id + 1, leave=False)`를 열고(풀의 바가 0번), 작업마다 시퀀스 길이로
-  리셋하고 이름을 바꾸며, `worker_exit`이 닫는다. spawn 아래 7줄이 독립적으로 그려지는 것을
-  확인했다. **무거운 커널에서만 값을 한다** — 몇 초마다 시퀀스가 끝나는 설정은 이미 시퀀스
-  바가 움직이고, 무거운 것은 몇 분씩 멈춰 있어 멎은 것처럼 보인다.
+  리셋하고 이름을 바꾸며, `worker_exit`이 닫는 것이다. spawn 아래 7줄이 독립적으로 그려지는
+  것을 확인했다. **무거운 커널에서만 값을 한다** — 몇 초마다 시퀀스가 끝나는 설정은 이미
+  시퀀스 바가 움직이고, 무거운 것은 몇 분씩 멈춰 있어 멎은 것처럼 보인다.
 
-  `tqdm`은 tty가 아니어도 **조용해지지 않는다** — 리디렉션된 바는 갱신마다 재그리기 줄을
-  로그에 쓴다. `compute.show_progress` 기본값을 참으로 두면 `--multirun` 잡마다 그 소음을
-  문다.
+  `tqdm`은 tty가 아니어도 조용해지지 않으므로, `run_all`이 **stderr가 터미널이 아니면 바를
+  그리지 않고 그렇게 말한다.** 리디렉션된 `--multirun`이 소음을 물던 것은 그것으로 닫혔다.
 
 ## 실패
 
 ### 구현됨
 
-워커는 실패를 **예외가 아니라 결과로** 돌려준다(`(index, 사유)` 문자열). `mpire`가 작업의
+워커는 실패를 **예외가 아니라 결과로** 돌려준다(`Outcome(index, reason, computed)`). `mpire`가 작업의
 예외를 부모에서 다시 던지고 풀을 무너뜨리므로, 그대로 두면 이미 끝난 시퀀스가 전부 사라진다.
 실행이 다 끝난 뒤 `IncompleteRunError`가 `failed`(무엇이, 왜)와 `total`을 통째로 들고
 오른다 — 메시지 한 줄로 눌러 담으면 재시도할 인덱스를 잃는다.
 
-**부분 실행은 문서가 스스로 말한다.** `coverage`가 `{total, covered, skipped}`로 `dataset`
-바로 앞에 실린다 — 경계 숫자를 읽으러 온 사람이 지나칠 수 없는 자리다. 완전한 실행에서도
-항상 쓰므로 키의 부재를 "완전함"으로 읽을 수 없고, 명단을 못 받은 문서는 아예 쓰지 않는다.
-`skipped`는 전달받는 것이 아니라 **명단과 디스크의 차**로 구한다: 예외로 죽었든, 워커가
-통째로 죽었든, 애초에 안 돌았든 파트가 없다는 사실은 하나다.
+**부분 실행은 문서가 스스로 말한다.** `coverage`가
+`{found, selected, covered, reused, skipped, unselected}`로 `dataset` 바로 앞에 실린다 —
+경계 숫자를 읽으러 온 사람이 지나칠 수 없는 자리다. 완전한 실행에서도 항상 쓰므로 키의
+부재를 "완전함"으로 읽을 수 없고, 명단을 못 받은 문서는 아예 쓰지 않는다. `skipped`는
+전달받는 것이 아니라 **명단과 디스크의 차**로 구한다: 예외로 죽었든, 워커가 통째로 죽었든,
+애초에 안 돌았든 결과가 없다는 사실은 하나다.
 
 **곁가지가 닫히지 못해도 판정은 남는다.** 예전에는 `running()`의 `__exit__`에서 난 예외가
 그 뒤의 「N of M done」과 `IncompleteRunError`를 통째로 덮어, 사용자가 보는 것이 파일 존재
 오류 하나뿐이었다. 지금은 **모든 항목을 본 뒤에 난 예외만** 삼켜 `logger.exception`으로
-남기고 판정을 계속 올린다 — 재시도에 필요한 것이 실패한 이름 목록이기 때문이다. 순회 도중
-풀이 무너진 경우는 보고할 것이 없으므로 그대로 터지고, 실패가 하나도 없이 닫기만 실패하면
-그 예외가 유일한 소식이라 그대로 오른다.
+남기고 판정을 계속 올린다 — 재시도에 필요한 것이 실패한 이름 목록이기 때문이다. 실패가
+하나도 없이 닫기만 실패하면 그 예외가 유일한 소식이라 그대로 오른다.
+
+**다만 조건이 「모든 항목을 봤는가」가 아니라 「실패가 하나라도 기록됐는가」다.** 그래서 순회
+도중 풀이 무너져도 그 전에 실패가 하나 있었으면 삼켜지고, 로그는 「every item was seen」이라고
+말한다 — §「열린 것 — 리뷰에서 나온 것」의 첫 항목이다.
 
 **비유한 값은 아예 들이지 않는다.** 전제는 **위상 프레임의 NaN이 마스킹이 아니라 파손**이라는
 것이다(결정). 그래서 건너뛰기가 아니라 거절이고, 한 픽셀이 시퀀스 전체를 무르게 한다.
@@ -1801,15 +1844,12 @@ GPU 업로드 전이라 호스트에서 검사할 수 있는 마지막 자리 �
 여기서 쓰는 것이 다음 단계가 읽을 캐시라, 통과시킨 NaN은 나중에 만나는 실행이 출처를 추적할
 수 없다. iivs-lib은 비유한 값을 읽고 쓰는 것을 허용하므로 이 거절은 이 프로젝트의 몫이다.
 
-- **`overwrite=false` 재실행은 재개가 아니라 깨진 상태다.** 이미 있는 시퀀스는 `get_stage`가
-  `FrameWriter`를 만들 때 `FileExistsError`로 실패한다 — 필터링 전이라 계산이 낭비되지는
-  않는다. 그런데 `RangeDocument.__enter__`가 파트를 이미 전부 지운 뒤이고, `save()`는
-  `value_range.json`이 있어 또 실패하므로 **낡은 문서가 그대로 남아 디스크와 모순된다.**
-  실측: 4개 중 3개가 이미 있는 상태에서 재실행하면, 문서는 방금 완성된 하나를 "빠진 것"으로
-  지목한다. 위 §1순위가 이것을 함께 푼다.
+- ~~**`overwrite=false` 재실행은 재개가 아니라 깨진 상태다.**~~ `if_present`가 그것을 풀었다.
+  문서는 진입에서 자기 경로를 먼저 예약하고, 결과가 있으면 지우기 전에 거절한다. 프레임 쪽도
+  진입에서 거절한다. 실행을 이어가려면 `reuse`, 다시 쓰려면 `overwrite`다.
 
-- **`filtering N frames`를 일이 실패할 수 있기 전에 찍는다.** `run_stage`이 그 줄을 찍고 나서
-  `get_stage`를 부르므로, 훅 생성이 실패하면 한 장도 거르지 않고 "거르는 중"이라고 남는다.
+- ~~**`filtering N frames`를 일이 실패할 수 있기 전에 찍는다.**~~ `run_stage`가 `get_stage`를
+  먼저 부르고 그다음 작업 줄을 찍는다.
 
 - **`Ctrl-C`가 섞인 닫기 실패는 판정을 통째로 건너뛴다.** `close_together`는 이제 닫기에 실패한
   것을 전부 `BaseExceptionGroup`으로 올린다. 그런데 생성자가 타입을 좁히므로, 멤버가 전부
@@ -1820,3 +1860,75 @@ GPU 업로드 전이라 호스트에서 검사할 수 있는 마지막 자리 �
   세운 계약이 그 경우에만 깨진다. 전에는 `KeyboardInterrupt`가 조용히 버려져 run이 정상 보고를
   하고 끝났으니 지금이 더 낫지만, 중단을 요청한 사람도 무엇이 실패했는지는 알아야 한다.
   `compute.py`의 몫이고, 그 층을 리뷰할 때 `finally` 구조와 함께 본다.
+
+---
+
+# 열린 것 — 리뷰에서 나온 것
+
+스크립트 층과 optical_flow 층 리뷰, 합성 데이터셋 끝-끝 실행, 뮤테이션 감사에서 나온 것들.
+전부 재현했고 **고치지는 않았다.** 수치는 그때의 측정이다.
+
+## 판정과 실행
+
+- **풀이 무너지면 판정이 틀린다.** `run_all`의 `except Exception`이 삼킬지 말지를 「모든 항목을
+  봤는가」가 아니라 **「실패가 하나라도 기록됐는가」**로 정한다. 그래서 실패 하나 뒤에 워커가
+  죽으면 로그가 「every item was seen」이라고 말하고, 돌아오지 못한 항목이
+  `IncompleteRunError.failed`에서 빠져 재시도 목록이 불완전해진다. 실패 없이 죽으면
+  `RuntimeError`가 그대로 올라와 두 경우의 동작이 다르다. 재현: 6개 중 하나는 예외, 하나는
+  `os._exit`, 워커 2개.
+
+- **장치를 지원하지 않는 추정기를 앞에서 거절하지 않는다.** `estimator=deepflow compute=cuda`는
+  시퀀스마다 실패하고 **0/4를 덮는 평가 문서**를 쓴다. 그 문서 때문에 같은 `run_root`로 cpu에서
+  다시 돌리면 `FileExistsError`다. 거절할 자리는 곁가지를 열기 전, `build_flow_stages`다 —
+  `EstimatorConfig.SUPPORTED_DEVICES`와 `compute.device`를 맞춰 보면 된다.
+
+- **Windows에서 문서 커밋이 간헐적으로 거부된다.** `StagedFile.commit`의 `os.replace`가
+  `PermissionError [WinError 5]`를 내고, 계산을 다 끝낸 실행이 문서 없이 실패로 끝난다. CLI
+  재실행 16회 중 8회. `os.replace`에 재시도를 걸어 재면 **10~17 ms 뒤 한 번에 통과**하고 그
+  시점에 살아 있는 자식 프로세스가 없다 — 우리가 쥔 핸들이 아니라 외부의 일시적 잠금으로
+  보인다. 대책은 커밋에 짧은 재시도를 두는 것이고, 자리는 `kaparoo` 쪽이다.
+
+- **작은 것 둘.** 짧은 시퀀스 거절이 「holds 1 frames」라고 쓴다. flow 트리의 `report`가
+  「wrote 7 frames」라고 써서 프레임을 쓴 것처럼 읽힌다.
+
+## 재사용과 기록
+
+- **재사용이 소스가 바뀐 것을 알아채지 못한다.** 판정에 쓰는 `settings`에 `source.root`가 없어,
+  이름과 프레임 수만 같으면 다른 트리의 결과를 그대로 쓴다. 재현: 값을 1.5배 한 트리를 같은
+  `run_root`에 `if_present=reuse`로 돌리면 문서가 예전 범위(`[-3.495, 3.807]`)를 그대로 「4
+  reused」로 실었다 — 새로 재면 `[-5.243, 5.711]`이다. root를 기록하면 §「청크로 나눠 돌린 뒤의
+  병합」과 마운트 경로 변경이 막히므로 **결정이 필요하다.**
+
+## 평가의 타당성
+
+- **uint8 프레임을 워프하면 재구성이 반올림된다.** `backward_warp`가 정수 이미지를 반올림해
+  되돌려 주므로 mse가 부풀고 psnr·ssim이 내려간다. 비교 기준인 `ssim_floor`는 워프를 거치지
+  않아 반올림이 없어, **이득이 체계적으로 작게 나온다**(측정: mse +17%, SSIM 이득 −19%).
+  float으로 채점하려면 `data_range`가 필요하고, 그것이 위 §「평가가 정규화 목표가 아니라 프레임
+  dtype으로 채점한다」와 같은 자리다.
+
+- **SSIM은 torchmetrics 관례다.** 반사 패딩 뒤 **전체 평균**이라 가장자리를 잘라내는
+  skimage와 소수 3~4째 자리가 다르다. 프로젝트 안의 비교는 일관되므로 결함은 아니지만, 외부
+  수치와 맞댈 때 알고 있어야 한다.
+
+- **`FrameEvaluation`의 docstring이 `ssim`을 「두 번째 프레임과 비교」라고 적는다.** 실제로는
+  재구성을 **첫 프레임**과 비교한다. 문서 기계를 다시 설계할 때 고칠 것.
+
+## 장치·자원
+
+- **훅을 묻기 전에 추정기를 만든다.** `FlowStageRun.get_stage`가 `_get_estimator(device)`를 먼저
+  부르므로, 전부 재사용이라 훅을 하나도 만들지 않는 시퀀스에서도 장치가 활성화된다.
+  `StageRun.get_stage`의 계약(「아무도 원하지 않으면 장치는 건드리지 않는다」)과 어긋난다.
+
+- **CPU와 CUDA의 정규화가 비트 단위로 같지 않다.** 524,288 픽셀 중 4개가 한 단계 다르고(.5
+  경계), 그만큼 flow도 갈린다(최대 0.006 px). `FrameNormalizer`를 다시 쓸 때 볼 것.
+
+## 테스트가 잡지 못하는 것
+
+코드를 일부러 틀리게 바꿔 테스트가 잡는지 본 27건 중 23건은 잡혔고, 아래 넷은 통과했다.
+
+- CUDA TV-L1의 `iterations` 전달을 빼도 통과한다.
+- CUDA `push`의 버퍼 순서를 뒤집어도 통과한다(파이프라인은 `calc`만 쓰므로 실사용 영향은 작다).
+- `flow_magnitude`를 L2에서 L1 노름으로 바꿔도 통과한다.
+- Farneback의 `poly_sigma` 전달을 빼도 통과한다.
+
