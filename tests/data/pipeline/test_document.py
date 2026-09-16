@@ -450,6 +450,16 @@ def test_a_document_is_opened_once(tmp_path):
     assert (tmp_path / "range.results" / "a.json").exists()
 
 
+def test_a_result_writer_is_opened_once(tmp_path):
+    # What it measured stays in it, so a second walk would leave one result
+    # standing for both -- and the document counts a result as one sequence.
+    writer = _meter(tmp_path, "a")
+    _scan(writer, (0.0, 1.0))
+
+    with pytest.raises(RuntimeError, match=r"opened already: one writer per walk"):
+        writer.__enter__()
+
+
 def test_a_document_it_may_not_replace_is_refused_before_anything_is_dropped(tmp_path):
     # Clearing cannot be undone and the document is only written once every
     # sequence has run, so refusing at the end meant paying for the whole

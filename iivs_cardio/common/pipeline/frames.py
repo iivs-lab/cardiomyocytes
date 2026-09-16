@@ -6,7 +6,7 @@ import json
 import shutil
 from abc import abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Self
+from typing import TYPE_CHECKING, ClassVar, Final, Self
 
 from kaparoo.filesystem import (
     STAGING,
@@ -19,7 +19,7 @@ from kaparoo.filesystem import (
 )
 from kaparoo.utils import quantify
 
-from iivs_cardio.common.pipeline.base import Named, Step
+from iivs_cardio.common.pipeline.base import Named, SingleUse, Step
 from iivs_cardio.common.pipeline.branch import (
     DatasetBranch,
     PresentPolicy,
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 RECORD_FILE: Final = "source.json"
 
 
-class FrameWriter[T, E = Path]:
+class FrameWriter[T, E = Path](SingleUse):
     """A hook that writes the frames it is given, one file each.
 
     Frames are numbered from the first that arrives rather than from the source, and
@@ -66,6 +66,8 @@ class FrameWriter[T, E = Path]:
         ValueError: If `record_file` carries a directory part.
     """
 
+    _USE: ClassVar[str] = "one writer per walk"
+
     def __init__(
         self,
         dest: StrPath,
@@ -93,7 +95,6 @@ class FrameWriter[T, E = Path]:
         self._last_index: int | None = None
 
         self._staged: StagedDirectory | None = None
-        self._entered = False
         self._committed = False
 
     @property
@@ -188,11 +189,8 @@ class FrameWriter[T, E = Path]:
             RuntimeError: If it has been opened before. Closing takes the staged folder
                 away, so a second walk writes where nothing is.
         """
-        if self._entered:
-            msg = f"{self._dest} was opened already: one writer per walk"
-            raise RuntimeError(msg)
+        self._begin_use(self._dest)
 
-        self._entered = True
         self._staged = StagedDirectory(
             self._dest, overwrite=self._overwrite, make_parents=True
         )
@@ -233,7 +231,7 @@ class FrameWriter[T, E = Path]:
         self._committed = True
 
 
-class FrameBranch[N: Named, T](DatasetBranch):
+class FrameBranch[N: Named, T](SingleUse, DatasetBranch):
     """The side branch that writes each sequence back out under a new root.
 
     A written sequence keeps the name and the layout it had in the source, so the result
@@ -277,6 +275,8 @@ class FrameBranch[N: Named, T](DatasetBranch):
             contents does not hold.
     """
 
+    _USE: ClassVar[str] = "one branch per run"
+
     def __init__(
         self,
         root: StrPath,
@@ -314,8 +314,6 @@ class FrameBranch[N: Named, T](DatasetBranch):
         self._reused: set[str] = set()
         self._replaced: list[str] = []
         self._dropped: list[str] = []
-
-        self._entered = False
 
     @abstractmethod
     def _make_writer(
@@ -516,11 +514,8 @@ class FrameBranch[N: Named, T](DatasetBranch):
             RuntimeError: If it has been opened before. What it settled is what
                 `report` counts, so a second opening would count two runs as one.
         """
-        if self._entered:
-            msg = f"{self.root} was opened already: one branch per run"
-            raise RuntimeError(msg)
+        self._begin_use(self.root)
 
-        self._entered = True
         ensure_dir_exists(self.root, make=True)
 
         self.clear_staging()

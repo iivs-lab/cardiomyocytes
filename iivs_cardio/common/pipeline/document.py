@@ -16,7 +16,7 @@ import json
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from math import isfinite
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from kaparoo.filesystem import (
     STAGING,
@@ -31,7 +31,7 @@ from kaparoo.filesystem import (
 from kaparoo.filters import EndsWith
 from kaparoo.utils import quantify
 
-from iivs_cardio.common.pipeline.base import Named, Step
+from iivs_cardio.common.pipeline.base import Named, SingleUse, Step
 from iivs_cardio.common.pipeline.branch import (
     JSON_EXT,
     DatasetBranch,
@@ -377,7 +377,7 @@ def save_document(
 # ========================== #
 
 
-class ResultWriter[S: SequenceResult](ABC):
+class ResultWriter[S: SequenceResult](SingleUse, ABC):
     """Measure one sequence as its frames go by, then write down the result.
 
     This is the hook a document hands to a sequence. Writing is how the result gets
@@ -408,6 +408,8 @@ class ResultWriter[S: SequenceResult](ABC):
             something else: two sequences whose names came out the same, most likely,
             which is a mistake rather than a second attempt. Defaults to `False`.
     """
+
+    _USE: ClassVar[str] = "one writer per walk"
 
     def __init__(
         self,
@@ -444,6 +446,14 @@ class ResultWriter[S: SequenceResult](ABC):
         raise NotImplementedError
 
     def __enter__(self) -> Self:
+        """Take the writer up for the one walk it measures.
+
+        Raises:
+            RuntimeError: If it has been opened before. What it measured stays in it,
+                so a second walk would write a result standing for both.
+        """
+        self._begin_use(self._path)
+
         return self
 
     def __exit__(
@@ -496,7 +506,9 @@ class ResultWriter[S: SequenceResult](ABC):
 # ========================== #
 
 
-class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult](DatasetBranch):
+class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult](
+    SingleUse, DatasetBranch
+):
     """The side branch that gathers a dataset's results into one document.
 
     It hands each sequence a writer, and each writer leaves its own result in a folder
@@ -547,6 +559,8 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult](DatasetBranc
 
     RESULTS_SUFFIX = ".results"
 
+    _USE: ClassVar[str] = "one document per run"
+
     def __init__(
         self,
         path: StrPath,
@@ -575,7 +589,6 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult](DatasetBranc
 
         self.source = source
 
-        self._entered = False
         self._reused: frozenset[str] = frozenset()
         self._saved: D | None = None
         self._written: Path | None = None
@@ -920,11 +933,8 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult](DatasetBranc
                 a result here, and this one was not told it may replace them.
             RuntimeError: If this document has been opened before.
         """
-        if self._entered:
-            msg = f"{self.path.name} was opened already: open it once per run"
-            raise RuntimeError(msg)
+        self._begin_use(self.path.name)
 
-        self._entered = True
         reserve_path(self.path, exist_ok=self._replacing, make_parents=True)
 
         ensure_dir_exists(self.results_root, make=True)

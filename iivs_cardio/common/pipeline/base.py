@@ -5,6 +5,7 @@ __all__ = (
     "Named",
     "SequenceStage",
     "SideBranch",
+    "SingleUse",
     "Stage",
     "Step",
     "SupportsReport",
@@ -17,7 +18,15 @@ import logging
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, Self, override, runtime_checkable
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Protocol,
+    Self,
+    override,
+    runtime_checkable,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
@@ -174,6 +183,44 @@ class SupportsRevert(Protocol):
         that committed nothing.
         """
         ...
+
+
+class SingleUse:
+    """Something used for one walk or one run, which refuses a second.
+
+    A hook is opened around the walk that fires it and a branch around the run that
+    hands out its hooks, and either keeps what it did there: a staged folder that
+    closing moved away, a judgement of the outputs already on disk, the measurements
+    taken so far. Opening one again would work from that rather than from nothing, so it
+    is refused where the state is, which is the only place that knows.
+
+    Whoever opens several of them opens each object once however often it was given, so
+    the refusal answers reuse rather than a duplicate in one list.
+
+    Attributes:
+        _USE: What one use of this is, named as the refusal should say it.
+    """
+
+    _USE: ClassVar[str]
+
+    # A class default, so a subclass adds nothing to its `__init__` to take this.
+    _used: bool = False
+
+    def _begin_use(self, what: object) -> None:
+        """Take this up for its one use, refusing one that is spent.
+
+        Args:
+            what: The output or destination this stands for, which the refusal names
+                before it says what one use is.
+
+        Raises:
+            RuntimeError: If it has been opened before.
+        """
+        if self._used:
+            msg = f"{what} was opened already: {self._USE}"
+            raise RuntimeError(msg)
+
+        self._used = True
 
 
 # ========================== #
