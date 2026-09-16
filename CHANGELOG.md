@@ -798,6 +798,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   before whatever rises. An interrupt reaches that too, where `except Exception`
   had let it past the summary entirely: `Ctrl-C` still stops the run, but the
   person who pressed it is told what had finished.
+- A reconstruction is scored as warped, not as rounded. `warp_consistency` warped
+  a uint8 frame as uint8, and a warp rounds an integer image's samples back to
+  its dtype, while the floor a score is read against warps nothing: the rounding
+  was charged to the flow alone, and most heavily where motion is sub-pixel.
+  The frame is warped as a float copy now, the value range still taken from the
+  frames as given.
+- A pixel a zero offset leaves reads its own value. Sampling there makes a float
+  round trip through normalized coordinates and comes back close rather than
+  exact, which rounding had hidden for integer images: a float frame under a
+  zero flow did not come back as itself, and two identical frames did not
+  reconstruct exactly. The gradient at those pixels is still the sampling's.
+- A report line names what was written: a flow tree says `wrote 7 flows`, where
+  it said frames.
 - An estimator with no implementation for the device a run was sent to is
   refused while the configuration is still being read. It was refused per
   sequence instead, once the branches were open, so `estimator=deepflow
