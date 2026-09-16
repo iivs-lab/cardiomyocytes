@@ -139,8 +139,8 @@ def identity_ssim(
     """SSIM of a zero flow: the floor every real flow's score is read against.
 
     Inter-frame motion here is sub-pixel, so two consecutive frames are already nearly
-    alike and a flow of exactly zero scores around 0.95. Raw SSIM therefore says almost
-    nothing, and what a search compares is the gain above this.
+    alike and a flow of exactly zero scores high on its own. Raw SSIM therefore says
+    almost nothing, and what a search compares is the gain above this floor.
 
     No warp is done. Sampling at `grid + 0` gives the frame back unchanged, so the floor
     is `frame2` scored against `frame1` as they stand.

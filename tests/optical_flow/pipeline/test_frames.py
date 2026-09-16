@@ -122,3 +122,19 @@ def test_a_folder_written_from_another_source_is_not_reused(tmp_path):
     grown = _tree(tmp_path, source.name, 6, settings=settings, if_present="reuse")
     with grown:
         assert grown.get_hook(source) is not None
+
+
+def test_a_flow_tree_reports_flows_rather_than_frames(tmp_path):
+    # A flow folder holds one field per pair, and a line counting frames in it
+    # would be counting what went in rather than what came out.
+    source = _Sequence("TL_00")
+    tree = _tree(tmp_path, source.name, 4)
+
+    with tree:
+        writer = tree.get_hook(source)
+        assert writer is not None
+        with writer:
+            for index in range(3):
+                writer.write(Step(index, _flow(), Path(f"{index:05d}_phase.bin")))
+
+        assert writer.report() == "wrote 3 flows"

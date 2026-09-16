@@ -119,6 +119,7 @@ def flow_frame_writer(
         dest,
         save_fn,
         source_fn,
+        writes="flow",
         overwrite=overwrite,
         record=record,
         record_file=record_file,

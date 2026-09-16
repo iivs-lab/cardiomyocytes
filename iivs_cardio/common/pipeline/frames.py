@@ -55,6 +55,10 @@ class FrameWriter[T, E = Path](SingleUse):
             format itself are one choice.
         source_fn: A function naming where one frame came from, from what its step
             carries. Read only where a `record` is filed.
+        writes: What one of the things written here is called, for the line `report`
+            gives back. A stage that answers something other than a frame says so, since
+            a reader counting frames in a folder of flows would be counting the wrong
+            thing. Defaults to `"frame"`.
         overwrite: Whether an existing folder may be replaced. Defaults to False.
         record: The block the folder should carry about itself, beside the source names
             the writer collects. Defaults to `None`, which files nothing and asks
@@ -74,6 +78,7 @@ class FrameWriter[T, E = Path](SingleUse):
         save_fn: Callable[[Path, int, T], object],
         source_fn: Callable[[E], str],
         *,
+        writes: str = "frame",
         overwrite: bool = False,
         record: Mapping[str, object] | None = None,
         record_file: str = RECORD_FILE,
@@ -86,6 +91,7 @@ class FrameWriter[T, E = Path](SingleUse):
 
         self._save_fn = save_fn
         self._source_fn = source_fn
+        self._writes = writes
 
         self._record = record
         self._record_file = ensure_json_name(record_file)
@@ -142,15 +148,16 @@ class FrameWriter[T, E = Path](SingleUse):
         self._last_index = step.index
 
     def report(self) -> str | None:
-        """Return one line naming how many frames landed, or `None` before any did.
+        """Return one line naming how many landed, or `None` before any did.
 
-        Nothing is reported until the folder reaches its destination, since a sequence
-        that gave up has none to point at however many it staged.
+        What one of them is called is `writes`, so a folder of flows is not reported as
+        frames. Nothing is reported until the folder reaches its destination, since a
+        sequence that gave up has none to point at however many it staged.
         """
         if not self._committed:
             return None
 
-        return f"wrote {quantify(self._written, 'frame')}"
+        return f"wrote {quantify(self._written, self._writes)}"
 
     def _save_record(self) -> None:
         """Write what the folder says about itself, into the staged folder.
