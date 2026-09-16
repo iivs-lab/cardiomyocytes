@@ -69,6 +69,13 @@ def _warp_with_grid(
 
     A float `image` keeps the fractional values sampling produces; an integer one is
     rounded and clamped back to its own range.
+
+    A pixel whose offset is exactly zero reads its own value. Sampling there only comes
+    close to it, the coordinates making a float round trip into `[-1, 1]` and back, and
+    rounding hid that for an integer image but not for a float one: a frame warped by a
+    zero flow has to come back as itself for an exact reconstruction to be told apart
+    from a nearly exact one. Its gradients are still the sampling's, so a flow that
+    starts at zero is not left without any.
     """
     *batch, height, width = image.shape
     images = image.reshape(-1, 1, height, width)  # the (N, C, H, W) grid_sample wants
@@ -84,6 +91,11 @@ def _warp_with_grid(
         padding_mode=padding_mode,
         align_corners=True,
     )[:, 0]  # remove redundant channel dim, back to (N, H, W)
+
+    own = images[:, 0].float()
+    if sampled.requires_grad:  # own value, sampling's gradient
+        own = own.detach() + (sampled - sampled.detach())
+    sampled = torch.where((offsets == 0).all(dim=1), own, sampled)
 
     if image.dtype.is_floating_point:
         warped = sampled.to(image.dtype)

@@ -272,3 +272,50 @@ def test_backward_warp_matches_a_sampler_written_out_by_hand(padding_mode):
     expected = bilinear_sample(image, xs + offset[0], ys + offset[1], mode=padding_mode)
 
     assert warped.numpy() == pytest.approx(expected, abs=1e-3)
+
+
+def test_a_float_image_under_a_zero_offset_comes_back_as_itself():
+    # Rounding hid it for an integer image: sampling at `grid + 0` only comes
+    # close to the pixel, the coordinates making a float round trip into
+    # [-1, 1] and back, and the gap grows with the frame. Without this an exact
+    # reconstruction could not be told apart from a nearly exact one.
+    image = torch.rand(900, 900) * 255
+
+    assert torch.equal(backward_warp(image, torch.zeros((2, 900, 900))), image)
+
+
+def test_only_the_pixels_a_zero_offset_leaves_read_their_own_value():
+    rng = np.random.default_rng(3)
+    image = torch.from_numpy(rng.random((23, 31)) * 100).float()
+    offset = torch.from_numpy(rng.normal(0.0, 1.5, (2, 23, 31))).float()
+    offset[:, 5:9, 7:12] = 0.0
+
+    warped = backward_warp(image, offset)
+
+    assert torch.equal(warped[5:9, 7:12], image[5:9, 7:12])
+
+    ys, xs = np.mgrid[0:23, 0:31]
+    moved = (offset != 0).any(dim=0).numpy()
+    expected = bilinear_sample(
+        image.numpy(), xs + offset[0].numpy(), ys + offset[1].numpy()
+    )
+    assert warped.numpy()[moved] == pytest.approx(expected[moved], abs=1e-3)
+
+
+def test_a_zero_offset_keeps_the_gradient_sampling_gives_it():
+    # A flow that starts at zero has to be able to move: taking the pixel's own
+    # value there must not take the gradient with it. An offset too small to
+    # move a float32 coordinate samples exactly where zero does, but is not
+    # zero, so it is the gradient the sampling alone gives.
+    image = _textured().float()
+
+    def gradient(start: float) -> torch.Tensor:
+        offset = torch.full((2, 64, 64), start, requires_grad=True)
+        backward_warp(image, offset).sum().backward()
+        assert offset.grad is not None
+        return offset.grad
+
+    at_zero = gradient(0.0)
+
+    assert at_zero.abs().sum() > 0
+    assert torch.allclose(at_zero, gradient(1e-30))
