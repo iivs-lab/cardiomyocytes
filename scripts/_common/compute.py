@@ -547,6 +547,34 @@ def _run_in_pool(
             log_insights(pool.get_insights(), context.name, unit=unit)
 
 
+def _log_verdict(record: RunRecord, total: int, elapsed: float, logger: Logger) -> None:
+    """Log what a run got through, and name what it did not.
+
+    Written however the run ended, since a run that stopped early is the one whose
+    numbers a retry is built from. Naming is all that happens here: what to raise is the
+    caller's, a failure raised from a `finally` taking the place of whatever is already
+    on its way up.
+
+    Args:
+        record: What the run learned about its items as they came back.
+        total: How many items it was given.
+        elapsed: How long it ran, in seconds.
+        logger: The logger the lines go to.
+    """
+    ready = record.ready
+    unchanged = len(record.unchanged)
+    counted = f"{ready - unchanged} computed, {unchanged} unchanged"
+    split = f" ({counted})" if unchanged else ""
+
+    logger.info("%d of %d ready in %.1fs%s", ready, total, elapsed, split)
+
+    if (missing := total - len(record.returned)) > 0:
+        logger.error("%d never came back: the run stopped before they did", missing)
+
+    for stage, reason in record.failed.items():
+        logger.error("%s: %s", stage, reason)
+
+
 def run_all(
     stages: StageRun[Any],
     config: ComputeConfig,
@@ -561,6 +589,11 @@ def run_all(
     failure while closing it does not take the verdict with it: once every item has been
     seen, the run still says which of them failed.
 
+    What the run ended with decides what rises, and the verdict is logged either way. A
+    run that stopped before every item had been seen raises what stopped it, since the
+    items still to come are not the caller's to infer; so does an interrupt, which was
+    asked for. Only a failure after every item has been seen is swallowed, and logged.
+
     Args:
         stages: The items to run, and how to run one.
         config: The device to run them on, and what to report.
@@ -574,6 +607,8 @@ def run_all(
             filed under one name and the parent's own under another, which no reader
             could pair up again.
         IncompleteRunError: If any item failed, raised once the rest have finished.
+        BaseException: What stopped a run that did not see every item, or the interrupt
+            that asked it to stop. The verdict is logged before either rises.
     """
     name = stages.name
     logger = logging.getLogger(name)
@@ -613,29 +648,25 @@ def run_all(
     record = RunRecord()
 
     try:
-        with _drawing(progress=progress), Timer("s") as timer, stages.running():
+        # The timer opens first, so the verdict below has an elapsed to read
+        # whatever the two contexts inside it did.
+        with Timer("s") as timer, _drawing(progress=progress), stages.running():
             if in_process:
                 _run_in_process(context, record, unit=unit, show_progress=progress)
             else:
                 _run_in_pool(context, config, record, unit=unit, show_progress=progress)
-    except Exception:
-        if not record.failed:
+    except BaseException as error:
+        # Swallowed only where there is a verdict to protect: every item seen,
+        # a failure among them to report, and nothing that was asked for. A run
+        # that stopped early has items nobody can account for, one that lost
+        # nothing has only this to say, and an interrupt is a request.
+        seen_all = len(record.returned) == num_stages
+        if not (seen_all and record.failed and isinstance(error, Exception)):
             raise
 
         logger.exception("every item was seen, but the run could not be closed")
-
-    ready = record.ready
-    unchanged = len(record.unchanged)
-    counted = f"{ready - unchanged} computed, {unchanged} unchanged"
-    split = f" ({counted})" if unchanged else ""
-
-    logger.info("%d of %d ready in %.1fs%s", ready, num_stages, timer.elapsed, split)
-
-    if (missing := num_stages - len(record.returned)) > 0:
-        logger.error("%d never came back: the pool went down with them", missing)
+    finally:
+        _log_verdict(record, num_stages, timer.elapsed, logger)
 
     if record.failed:
-        for stage, reason in record.failed.items():
-            logger.error("%s: %s", stage, reason)
-
         raise IncompleteRunError(record.failed, num_stages)

@@ -529,6 +529,10 @@ def test_items_the_pool_took_down_with_it_are_not_counted_ready(
     # difference between those two numbers is what a retry is built from.
     # Patched at the worker, since what tears down is the pool rather than an
     # item: an item that raises comes back as a failure and is counted.
+    #
+    # What rises is the pool going down, not the one item that failed before it:
+    # the run stopped with two items unseen, and a verdict naming only the
+    # failure would read as a run that finished.
     outcomes = iter([Outcome(0, "boom"), Outcome(1, None, computed=True)])
 
     def vanish(worker_id, context, index):
@@ -542,13 +546,61 @@ def test_items_the_pool_took_down_with_it_are_not_counted_ready(
 
     with (
         caplog.at_level(logging.INFO),
-        pytest.raises(IncompleteRunError, match=r"1 of 4 failed"),
+        pytest.raises(RuntimeError, match="died unexpectedly"),
     ):
         run_all(_Stages(4, tmp_path / "done"), _compute(0))
 
     said = " ".join(caplog.messages)
     assert "1 of 4 ready" in said
     assert "2 never came back" in said
+    assert "item0: boom" in said  # the verdict is logged before the crash rises
+
+
+class _Interrupted(_Stages):
+    """A run that is asked to stop part way, as a `Ctrl-C` asks."""
+
+    @override
+    def run_stage(self, index: int, device: Device) -> bool:
+        if index == 1:
+            raise KeyboardInterrupt
+
+        return super().run_stage(index, device)
+
+
+def test_an_interrupt_still_leaves_the_verdict_behind(tmp_path, caplog):
+    # `except Exception` let an interrupt past the whole summary, so someone who
+    # pressed `Ctrl-C` learned nothing about what had finished. It still rises,
+    # stopping having been asked for, but the numbers are logged first.
+    with caplog.at_level(logging.INFO), pytest.raises(KeyboardInterrupt):
+        run_all(_Interrupted(4, tmp_path / "done"), _compute(0))
+
+    said = " ".join(caplog.messages)
+    assert "1 of 4 ready" in said
+    assert "3 never came back" in said
+
+
+class _InterruptedClose(_Stages):
+    """A run interrupted as its branches close, once every item has been seen."""
+
+    @override
+    @contextmanager
+    def running(self) -> Iterator[_Stages]:
+        self._dest.mkdir(parents=True, exist_ok=True)
+        yield self
+        raise KeyboardInterrupt
+
+
+def test_an_interrupt_while_closing_is_not_swallowed_with_the_closing_failures(
+    tmp_path, caplog
+):
+    # Every item was seen, which is when a failure on the way out is logged and
+    # let go so the verdict can rise instead. An interrupt is not one of those.
+    with caplog.at_level(logging.INFO), pytest.raises(KeyboardInterrupt):
+        run_all(_InterruptedClose(3, tmp_path / "done", explode_at=[1]), _compute(0))
+
+    said = " ".join(caplog.messages)
+    assert "2 of 3 ready" in said
+    assert "item1: ValueError: item 1 gave up" in said
 
 
 def test_an_unset_worker_count_falls_back_to_the_machine(monkeypatch):
