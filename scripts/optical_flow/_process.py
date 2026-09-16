@@ -63,6 +63,7 @@ if TYPE_CHECKING:
     from omegaconf import DictConfig
     from torch import Tensor
 
+    from iivs_cardio.common.device import DeviceKind
     from iivs_cardio.common.pipeline import SideBranch
     from iivs_cardio.data.transforms.filtering.kernel import KernelConfig
     from iivs_cardio.optical_flow.pipeline import FlowSource
@@ -211,6 +212,27 @@ def _evaluation_file(target_config: FlowTargetConfig) -> str:
     except ValueError as error:
         msg = f"`target.evaluations.file`: {error}"
         raise ValueError(msg) from error
+
+
+def _validate_estimator(estimator_config: EstimatorConfig, device: DeviceKind) -> None:
+    """Raise unless the estimator has an implementation for the device asked for.
+
+    Refused where both settings are in view, which is before a branch opens. The
+    estimator is built per item and per device, so left to that the refusal arrives once
+    per sequence, with the outputs already open: the run then writes a document covering
+    nothing, and that document refuses the corrected run the name it would write under.
+
+    Raises:
+        ValueError: If `device` is not one the estimator runs on.
+    """
+    if device in estimator_config.SUPPORTED_DEVICES:
+        return
+
+    kind = describe_estimator_config(estimator_config)["kind"]
+    runs = ", ".join(sorted(estimator_config.SUPPORTED_DEVICES))
+    fix = "set `compute` to one of those, or select another `estimator`"
+    msg = f"{kind} runs on {runs}, not on {device}: {fix}"
+    raise ValueError(msg)
 
 
 def _validate_output(
@@ -410,6 +432,7 @@ def build_flow_stages(
     kernel_config: KernelConfig | None = None,
     target_config: FlowTargetConfig | None = None,
     *,
+    device: DeviceKind = "cpu",
     output_root: StrPath,
     name: str,
 ) -> FlowStageRun:
@@ -419,8 +442,8 @@ def build_flow_stages(
     was asked to do even when it cannot do it. The scaling is settled first for that
     reason: a measured level says which numbers it landed on rather than which document
     it was pointed at, and reading that document is what makes the line sayable at all.
-    A target that writes nothing, or that would write over the source, is refused at the
-    same point.
+    A target that writes nothing, one that would write over the source, and an estimator
+    that does not run where the run was sent are refused at the same point.
 
     Args:
         source_config: The tree the sequences are read from.
@@ -433,6 +456,8 @@ def build_flow_stages(
             as they are, and is what a run reading a filtered cache takes.
         target_config: The settings saying what to write. Defaults to `None`, for a run
             that only reads.
+        device: The kind of device the run will be carried out on, which the estimator
+            has to have an implementation for. Defaults to `"cpu"`.
         output_root: The folder the branches write under.
         name: The name the run is called by.
 
@@ -441,8 +466,8 @@ def build_flow_stages(
 
     Raises:
         ValueError: If the target writes nothing, if it would write over the source, if
-            the source search finds nothing to run, or if a sequence it found has no
-            range to be scaled by.
+            the estimator does not run on `device`, if the source search finds nothing
+            to run, or if a sequence it found has no range to be scaled by.
     """
     kernel_config = unwrap_or_factory(kernel_config, IdentityConfig)
     normalize_config = unwrap_or_factory(normalize_config, NormalizeConfig)
@@ -459,6 +484,8 @@ def build_flow_stages(
         output_root=output_root,
         name=name,
     )
+
+    _validate_estimator(estimator_config, device)
 
     if target_config is not None:
         _validate_output(source_config, target_config, output_root)

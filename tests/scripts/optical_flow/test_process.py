@@ -11,7 +11,7 @@ from iivs.dhm.data.phase import PhaseBinFolder
 
 from iivs_cardio.common.device import Device
 from iivs_cardio.optical_flow.data import FLOW_FLOAT_NPY, OpticalFlowFolder
-from iivs_cardio.optical_flow.estimators import FarnebackConfig
+from iivs_cardio.optical_flow.estimators import DeepFlowConfig, FarnebackConfig
 from scripts._common.dataset import FrameSelectConfig, SequenceSelectConfig
 from scripts._common.phase import LAST_SEARCH
 from scripts.optical_flow._normalizing import NormalizeConfig
@@ -337,3 +337,28 @@ def test_a_written_flow_is_what_cv2_answers_for_the_frames_it_was_given(tree, tm
     for index in range(len(written)):
         direct = algorithm.calc(frames[index], frames[index + 1], None)
         assert np.array_equal(written[index], direct.transpose(2, 0, 1))
+
+
+def test_an_estimator_that_cannot_run_on_the_device_is_refused(tree, tmp_path):
+    # Before a branch opens. The estimator is built per item and per device, so
+    # left to that the refusal arrives once per sequence with the outputs
+    # already open: the run then writes a document covering nothing, and that
+    # document refuses the corrected run the name it would write under.
+    source, select, normalize = _configs(tree, tmp_path)
+    output = tmp_path / "out"
+    output.mkdir()
+
+    with pytest.raises(ValueError, match=r"deepflow runs on cpu, not on cuda"):
+        build_flow_stages(
+            source,
+            select,
+            DeepFlowConfig(),
+            normalize,
+            None,
+            _target(),
+            device="cuda",
+            output_root=output,
+            name="optical_flow",
+        )
+
+    assert list(output.iterdir()) == []

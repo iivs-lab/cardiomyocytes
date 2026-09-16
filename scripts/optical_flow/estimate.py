@@ -42,6 +42,7 @@ def main(config: DictConfig) -> None:
         inputs.normalize,
         inputs.kernel,
         inputs.target,
+        device=inputs.compute.device,
         output_root=output_root,
         name=STAGE,
     )
