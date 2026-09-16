@@ -618,6 +618,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   once.
 - `kaparoo-python` moves to `>=0.14.0`, which is what exports the staging
   filter the branches now collect by.
+- A hook or branch that may be opened once takes `SingleUse`, which carries the
+  flag and the refusal; a class taking it says only what one use of it is. Four
+  classes had written that out, or in `ResultWriter`'s case had not: it kept
+  what it measured across a second opening and would have written one result
+  standing for both walks. `Stage` keeps its own, since what it refuses is a
+  second walk rather than a second opening and the two read differently to
+  whoever meets the refusal.
 - The shape aliases in `warp.py`, `metrics.py`, the OpenCV estimator and the
   gaussian kernel's `sigma` take `type`, as the rest of the package already
   did. Checked rather than assumed, `jaxtyped` / `beartype` resolving these at

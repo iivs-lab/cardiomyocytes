@@ -68,7 +68,8 @@ push.
 - A hook or branch that is a context manager opens once. Whoever opens a
   list of them opens each object once however often it was given, and the
   object refuses a second `__enter__` with a `RuntimeError`, since only it
-  knows it was opened before.
+  knows it was opened before. `SingleUse` carries that flag and the
+  refusal; a class taking it says what one use of it is (`_USE`).
 
 ## Tests
 

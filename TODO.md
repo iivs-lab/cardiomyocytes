@@ -242,9 +242,10 @@ force          4     3, 4, 5 → acceleration 4
 
 - **컨텍스트 매니저인 훅·곁가지는 한 번만 열린다(AGENTS.md).** 여는 쪽이 같은 객체를 한 번으로
   줄이고(`Stage.all_hooks`, `StageRun.__init__`), 객체는 두 번째 `__enter__`를 거부한다.
-  `FrameWriter`·`FrameBranch`·`DocumentBranch`는 거부하지만 **`ResultWriter`는 아직 아니다** —
-  `__enter__`가 `self`를 돌려줄 뿐이라, 다시 열면 두 walk의 측정이 섞인 결과를 쓴다. 문서
-  기계(`document.py` 계열)를 다시 설계할 때 넣는다.
+  거부하는 자리는 `SingleUse` 하나이고 `FrameWriter`·`FrameBranch`·`ResultWriter`·
+  `DocumentBranch` 넷이 그것을 든다. 각자 말하는 것은 「한 번」이 무엇인가(`_USE`)뿐이다 —
+  walk 하나이거나 실행 하나다. `Stage`의 `_walked`는 그대로 두었다: 그쪽은 여는 것이 아니라
+  도는 것이라, 한 문장으로 맞추면 메시지가 추상화되면서 구체성을 잃는다.
 
 ## 열린 것 — `scripts/_common/compute.py`
 
