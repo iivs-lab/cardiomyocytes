@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 import torch
 
 from iivs_cardio.common.warp import backward_warp
-from iivs_cardio.optical_flow.metrics import WarpConsistency, warp_consistency
+from iivs_cardio.optical_flow.metrics import (
+    WarpConsistency,
+    identity_ssim,
+    warp_consistency,
+)
 
 METRICS = {"ssim", "psnr", "mse", "mae"}
 
@@ -267,3 +273,65 @@ def test_warp_consistency_stays_on_device():
             pytest.skip(f"torch cuDNN unavailable for GPU conv (environment): {exc}")
         raise
     assert all(v.device.type == "cuda" for v in out.values())
+
+
+def test_psnr_is_the_ratio_the_formula_gives():
+    # Worked out from the residual rather than read back from torchmetrics: the
+    # pooled form (one log over the batch's total error) is a different quantity
+    # and would pass a comparison against the library with itself.
+    frame1 = _textured()
+    frame2 = _shifted(frame1)
+
+    out = warp_consistency(frame1, frame2, _zero_flow())
+
+    residual = frame2.numpy().astype(np.float64) - frame1.numpy()
+    mse = float(np.mean(residual**2))
+
+    assert out["psnr"].item() == pytest.approx(
+        10.0 * math.log10(255.0**2 / mse), rel=1e-6
+    )
+
+
+def _gaussian_ssim(first: np.ndarray, second: np.ndarray) -> float:
+    """Return SSIM the way this project scores it, written out rather than called."""
+    taps = np.exp(-0.5 * (np.arange(-5, 6) / 1.5) ** 2)
+    taps /= taps.sum()
+
+    def blur(field: np.ndarray) -> np.ndarray:
+        for axis in (0, 1):
+            width = [(5, 5) if a == axis else (0, 0) for a in (0, 1)]
+            padded = np.pad(field, width, mode="reflect")
+            taken = [
+                np.take(padded, range(start, start + field.shape[axis]), axis=axis)
+                for start in range(len(taps))
+            ]
+            field = sum(w * t for w, t in zip(taps, taken, strict=True))
+
+        return field
+
+    stable_1, stable_2 = (0.01 * 255.0) ** 2, (0.03 * 255.0) ** 2
+    mean_1, mean_2 = blur(first), blur(second)
+    var_1 = blur(first * first) - mean_1**2
+    var_2 = blur(second * second) - mean_2**2
+    covariance = blur(first * second) - mean_1 * mean_2
+
+    top = (2 * mean_1 * mean_2 + stable_1) * (2 * covariance + stable_2)
+    bottom = (mean_1**2 + mean_2**2 + stable_1) * (var_1 + var_2 + stable_2)
+
+    return float((top / bottom).mean())
+
+
+def test_ssim_is_the_gaussian_pass_this_project_scores_by():
+    # Two conventions at once: an 11-tap gaussian of sigma 1.5, and the mean
+    # over the *whole* image rather than over the interior a windowed SSIM
+    # keeps. The second is why these numbers sit a few thousandths from
+    # skimage's, which a reader holding one of the two has to know.
+    frame1 = _textured()
+    frame2 = _shifted(frame1)
+
+    scored = identity_ssim(frame1, frame2).item()
+
+    expected = _gaussian_ssim(
+        frame1.numpy().astype(np.float64), frame2.numpy().astype(np.float64)
+    )
+    assert scored == pytest.approx(expected, abs=2e-5)

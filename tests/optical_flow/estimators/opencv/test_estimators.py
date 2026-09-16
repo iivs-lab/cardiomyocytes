@@ -576,3 +576,105 @@ def test_push_rejects_tensor_on_wrong_device():
     cpu_frame = torch.zeros((64, 64), dtype=torch.uint8)  # on cpu, estimator on cuda
     with pytest.raises(ValueError, match="expects a cuda:0 tensor"):
         of.push(cpu_frame)
+
+
+# ========================== #
+#          Settings          #
+# ========================== #
+
+
+# Every field a config holds, against the getter cv2 answers it by and a value
+# that is not the default. A field that never leaves the config is a sweep that
+# runs to the end and reports no difference.
+_FARNEBACK_FIELDS = {
+    "num_levels": ("getNumLevels", 4),
+    "pyr_scale": ("getPyrScale", 0.4),
+    "fast_pyramids": ("getFastPyramids", True),
+    "win_size": ("getWinSize", 9),
+    "num_iters": ("getNumIters", 5),
+    "poly_n": ("getPolyN", 7),
+    "poly_sigma": ("getPolySigma", 1.5),
+    "flags": ("getFlags", cv2.OPTFLOW_FARNEBACK_GAUSSIAN),
+}
+
+# TV-L1 the same way, split by which device reads what. The names differ between
+# the two cv2 factories even where the setting is the same one.
+_TVL1_FIELDS = {
+    "tau": ("getTau", 0.2),
+    "lambda_": ("getLambda", 0.1),
+    "theta": ("getTheta", 0.4),
+    "epsilon": ("getEpsilon", 0.01),
+    "scale_step": ("getScaleStep", 0.7),
+    "gamma": ("getGamma", 0.1),
+}
+_TVL1_CPU_FIELDS = {
+    "nscales": ("getScalesNumber", 4),
+    "warps": ("getWarpingsNumber", 2),
+    "inner_iterations": ("getInnerIterations", 11),
+    "outer_iterations": ("getOuterIterations", 7),
+    "median_filtering": ("getMedianFiltering", 3),
+}
+_TVL1_CUDA_FIELDS = {
+    "nscales": ("getNumScales", 4),
+    "warps": ("getNumWarps", 2),
+    "iterations": ("getNumIterations", 123),
+}
+
+both_devices = pytest.mark.parametrize(
+    "device", ("cpu", pytest.param("cuda", marks=requires_cuda))
+)
+
+
+def _asked_for(fields: dict) -> dict:
+    return {name: value for name, (_, value) in fields.items()}
+
+
+def _read_back(algorithm, fields: dict) -> dict:
+    return {name: getattr(algorithm, getter)() for name, (getter, _) in fields.items()}
+
+
+@both_devices
+def test_every_farneback_field_reaches_the_algorithm(device):
+    # Field by field, and on each device: the two paths ask cv2 for different
+    # factories, so a field dropped from one of the calls is a setting that
+    # reads as honoured wherever it is written down.
+    asked = _asked_for(_FARNEBACK_FIELDS)
+
+    algorithm = FarnebackConfig(**asked).build(device).algorithm
+
+    assert _read_back(algorithm, _FARNEBACK_FIELDS) == pytest.approx(asked)
+
+
+@both_devices
+def test_every_dualtvl1_field_the_device_reads_reaches_the_algorithm(device):
+    # cv2 offers no way to ask an algorithm what it ignored, so what can be
+    # checked is what this device reads, and it has to be checked here rather
+    # than once for both.
+    own = _TVL1_CUDA_FIELDS if device == "cuda" else _TVL1_CPU_FIELDS
+    settings = (
+        _asked_for(_TVL1_FIELDS)
+        | _asked_for(_TVL1_CPU_FIELDS)
+        | _asked_for(_TVL1_CUDA_FIELDS)
+    )
+
+    algorithm = DualTVL1Config(**settings).build(device).algorithm
+
+    read = _read_back(algorithm, _TVL1_FIELDS | own)
+    assert read == pytest.approx(_asked_for(_TVL1_FIELDS | own))
+
+
+@requires_cuda
+def test_a_cuda_push_pairs_each_frame_with_the_one_before_it():
+    # The CUDA backend alternates between two buffers where the CPU one keeps
+    # the frame itself, so on this path the pairing is slot arithmetic. What it
+    # has to come to is the pair `calc` would have been given, whichever buffer
+    # the newest frame went into.
+    frames = _sequence(4, device="cuda")
+    of = FarnebackConfig().build("cuda")
+
+    pushed = [of.push(frame) for frame in frames]
+
+    assert pushed[0] is None
+    for index, flow in enumerate(pushed[1:]):
+        fresh = FarnebackConfig().build("cuda").calc(frames[index], frames[index + 1])
+        assert torch.equal(flow, fresh)

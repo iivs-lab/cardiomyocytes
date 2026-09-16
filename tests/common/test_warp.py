@@ -5,6 +5,7 @@ import pytest
 import torch
 
 from iivs_cardio.common.warp import BackwardWarp, backward_warp
+from tests.common.helpers import bilinear_sample
 
 requires_cuda = pytest.mark.skipif(
     not torch.cuda.is_available(),
@@ -250,3 +251,24 @@ def test_backward_warp_module_stays_on_cuda():
     # on a device mismatch; a successful on-device result proves it.
     out = BackwardWarp()(_textured().cuda(), _uniform_offset(3.0, 2.0).cuda())
     assert out.device.type == "cuda"
+
+
+@pytest.mark.parametrize("padding_mode", ("border", "zeros", "reflection"))
+def test_backward_warp_matches_a_sampler_written_out_by_hand(padding_mode):
+    # Against four weighted neighbours and each policy spelled out, rather than
+    # against `grid_sample` a second time. The offsets reach past every edge, so
+    # what is compared is the policy as much as the interpolation.
+    rng = np.random.default_rng(11)
+    image = rng.random((23, 31)) * 100
+    offset = rng.normal(0.0, 3.0, (2, 23, 31))
+
+    warped = backward_warp(
+        torch.from_numpy(image).float(),
+        torch.from_numpy(offset).float(),
+        padding_mode=padding_mode,
+    )
+
+    ys, xs = np.mgrid[0:23, 0:31]
+    expected = bilinear_sample(image, xs + offset[0], ys + offset[1], mode=padding_mode)
+
+    assert warped.numpy() == pytest.approx(expected, abs=1e-3)

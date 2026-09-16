@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 import logging
 
+import cv2
+import numpy as np
 import pytest
+from iivs.dhm.data.koala import PHASE_FLOAT_BIN
+from iivs.dhm.data.phase import PhaseBinFolder
 
 from iivs_cardio.common.device import Device
 from iivs_cardio.optical_flow.data import FLOW_FLOAT_NPY, OpticalFlowFolder
@@ -287,3 +291,49 @@ def test_the_policies_a_branch_was_given_are_said_under_its_output(
 
     assert "overwriting the flows it finds" in said
     assert "dropping the flows a source no longer has" in said
+
+
+def test_a_written_flow_is_what_cv2_answers_for_the_frames_it_was_given(tree, tmp_path):
+    # End to end against a computation of its own: the phase is read with the
+    # library reader, scaled by the span the document holds, and handed to cv2
+    # directly. Everything between -- the filter, the stage graph, the writer --
+    # has to leave that answer untouched, bit for bit.
+    output = _run(tree, tmp_path, _target(save=True))
+
+    folder = PhaseBinFolder(tree / NAMES[0] / PHASE_FLOAT_BIN)
+    low, high = SPANS[NAMES[0]]
+    frames = [
+        np.clip(
+            np.round(
+                np.clip(
+                    (np.asarray(folder[index], dtype=np.float32) - np.float32(low))
+                    / np.float32(high - low),
+                    0.0,
+                    1.0,
+                )
+                * np.float32(255.0)
+            ),
+            0,
+            255,
+        ).astype(np.uint8)
+        for index in range(len(folder))
+    ]
+
+    config = FarnebackConfig()
+    algorithm = cv2.FarnebackOpticalFlow.create(
+        numLevels=config.num_levels,
+        pyrScale=config.pyr_scale,
+        fastPyramids=config.fast_pyramids,
+        winSize=config.win_size,
+        numIters=config.num_iters,
+        polyN=config.poly_n,
+        polySigma=config.poly_sigma,
+        flags=config.flags,
+    )
+
+    written = OpticalFlowFolder(output / NAMES[0] / FLOW_FLOAT_NPY)
+
+    assert len(written) == len(frames) - 1
+    for index in range(len(written)):
+        direct = algorithm.calc(frames[index], frames[index + 1], None)
+        assert np.array_equal(written[index], direct.transpose(2, 0, 1))

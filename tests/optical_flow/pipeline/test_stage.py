@@ -50,7 +50,9 @@ class _Sequence:
         return len(self._frames)
 
     def get_item(self, index: int) -> torch.Tensor:
-        return self._frames[index]
+        frame = self._frames[index]
+
+        return frame if self.device is None else frame.to(self.device.as_torch)
 
     def get_meta(self, index: int) -> Path:
         return Path(f"{index:05d}_phase.bin")
@@ -354,3 +356,26 @@ def test_the_job_says_what_it_is_about_to_do():
     (sequence,) = _sequences(6)
 
     assert _job(sequence)._work_label(0) == "computing 5 flows"  # noqa: SLF001
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="no CUDA-capable GPU")
+def test_a_job_carries_the_whole_graph_onto_the_device_it_was_given():
+    # The one place the graph is exercised on a GPU: the frames are scaled
+    # there, the estimator is built there, and the flow that comes back still
+    # carries the drift the frames were built with.
+    watching = _Watching()
+    (sequence,) = _sequences(4)
+
+    stage = _job(sequence, branches=(watching,)).get_stage(0, Device("cuda"))
+    assert stage is not None
+    stage.run()
+
+    assert sequence.device == Device("cuda")
+
+    flow = stage[0].require()
+    assert flow.device.type == "cuda"
+
+    # `_phase` moves each frame 0.8 across and 0.6 of that down.
+    interior = flow[:, 24:-24, 24:-24].cpu()
+    assert interior[0].median().item() == pytest.approx(0.8, abs=0.3)
+    assert interior[1].median().item() == pytest.approx(0.48, abs=0.3)
