@@ -788,6 +788,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Asking a branch for a hook no longer makes directories. `get_stage` asks
   every branch before the first of them is opened, so one that raised left the
   writers already built holding staging nothing would close.
+- A run says what it got through however it ended. `run_all` swallowed a failure
+  on the way out whenever any item had failed, which is not the same question as
+  whether every item had been seen: a pool dying after one failure logged `every
+  item was seen`, and the items that never came back were left out of the
+  `IncompleteRunError` a retry is built from. It is swallowed now only where
+  every item was seen, a failure among them is there to report, and nothing was
+  asked for; the verdict moved into a `finally`, so the numbers are logged
+  before whatever rises. An interrupt reaches that too, where `except Exception`
+  had let it past the summary entirely: `Ctrl-C` still stops the run, but the
+  person who pressed it is told what had finished.
+- An estimator with no implementation for the device a run was sent to is
+  refused while the configuration is still being read. It was refused per
+  sequence instead, once the branches were open, so `estimator=deepflow
+  compute=cuda` failed every sequence and still wrote a document covering
+  nothing -- and that document then refused the corrected run the name it would
+  have written under.
 ### Performance
 
 - `push_chunk` and `calc_batch` fill one batch as the flows come, where they

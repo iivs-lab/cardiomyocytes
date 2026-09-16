@@ -1852,15 +1852,10 @@ GPU 업로드 전이라 호스트에서 검사할 수 있는 마지막 자리 �
 - ~~**`filtering N frames`를 일이 실패할 수 있기 전에 찍는다.**~~ `run_stage`가 `get_stage`를
   먼저 부르고 그다음 작업 줄을 찍는다.
 
-- **`Ctrl-C`가 섞인 닫기 실패는 판정을 통째로 건너뛴다.** `close_together`는 이제 닫기에 실패한
-  것을 전부 `BaseExceptionGroup`으로 올린다. 그런데 생성자가 타입을 좁히므로, 멤버가 전부
-  `Exception`이면 `ExceptionGroup`(= `Exception`)이지만 `KeyboardInterrupt`가 하나라도
-  섞이면 `BaseExceptionGroup`이 되어 **`run_all`의 `except Exception`이 못 잡는다.** `run_all`에
-  `finally`가 없으므로 그 아래의 「N of M ready」, 유실 항목, 실패 사유 목록,
-  `IncompleteRunError`가 전부 건너뛰어진다 — 바로 위 「곁가지가 닫히지 못해도 판정은 남는다」가
-  세운 계약이 그 경우에만 깨진다. 전에는 `KeyboardInterrupt`가 조용히 버려져 run이 정상 보고를
-  하고 끝났으니 지금이 더 낫지만, 중단을 요청한 사람도 무엇이 실패했는지는 알아야 한다.
-  `compute.py`의 몫이고, 그 층을 리뷰할 때 `finally` 구조와 함께 본다.
+- ~~**`Ctrl-C`가 섞인 닫기 실패는 판정을 통째로 건너뛴다.**~~ `run_all`이 `BaseException`을
+  받아 판정을 `finally`에서 찍는다. 중단은 요청받은 것이므로 삼키지 않고 그대로 올리되, 그 전에
+  「N of M ready」와 유실 항목과 실패 사유는 남는다 — 중단을 누른 사람도 무엇이 끝났는지는 알아야
+  하기 때문이다. `close_together`가 올리는 `BaseExceptionGroup`도 같은 길을 지난다.
 
 ---
 
@@ -1871,17 +1866,14 @@ GPU 업로드 전이라 호스트에서 검사할 수 있는 마지막 자리 �
 
 ## 판정과 실행
 
-- **풀이 무너지면 판정이 틀린다.** `run_all`의 `except Exception`이 삼킬지 말지를 「모든 항목을
-  봤는가」가 아니라 **「실패가 하나라도 기록됐는가」**로 정한다. 그래서 실패 하나 뒤에 워커가
-  죽으면 로그가 「every item was seen」이라고 말하고, 돌아오지 못한 항목이
-  `IncompleteRunError.failed`에서 빠져 재시도 목록이 불완전해진다. 실패 없이 죽으면
-  `RuntimeError`가 그대로 올라와 두 경우의 동작이 다르다. 재현: 6개 중 하나는 예외, 하나는
-  `os._exit`, 워커 2개.
+- ~~**풀이 무너지면 판정이 틀린다.**~~ 삼키는 조건에 **「모든 항목이 돌아왔는가」**가 들어갔고,
+  판정 줄은 `finally`로 옮겨 어떤 끝이든 남는다. 이제 셋이 갈린다: 전부 보고 실패가 있는데 닫기만
+  실패하면 삼키고 판정이 오르고, 실패 없이 닫기만 실패하면 그 예외가 오르고, 일찍 멈춘 실행은
+  판정을 찍은 뒤 멈춘 이유를 올린다.
 
-- **장치를 지원하지 않는 추정기를 앞에서 거절하지 않는다.** `estimator=deepflow compute=cuda`는
-  시퀀스마다 실패하고 **0/4를 덮는 평가 문서**를 쓴다. 그 문서 때문에 같은 `run_root`로 cpu에서
-  다시 돌리면 `FileExistsError`다. 거절할 자리는 곁가지를 열기 전, `build_flow_stages`다 —
-  `EstimatorConfig.SUPPORTED_DEVICES`와 `compute.device`를 맞춰 보면 된다.
+- ~~**장치를 지원하지 않는 추정기를 앞에서 거절하지 않는다.**~~ `build_flow_stages`가
+  `SUPPORTED_DEVICES`와 실행할 장치를 맞춰 보고, 곁가지가 열리기 전에 두 설정을 대며 거절한다.
+  진입점이 `compute.device`를 넘긴다.
 
 - **Windows에서 문서 커밋이 간헐적으로 거부된다.** `StagedFile.commit`의 `os.replace`가
   `PermissionError [WinError 5]`를 내고, 계산을 다 끝낸 실행이 문서 없이 실패로 끝난다. CLI
