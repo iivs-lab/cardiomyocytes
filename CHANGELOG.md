@@ -171,6 +171,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   holds the metrics. Asking for force is asking for five computations rather
   than one. A scaffold rather than a design: nothing re-exports it and nothing
   tests it.
+
+- `report` counts what an `overwrite` tree took to write again. It was the one
+  policy of the three that left nothing behind for the line: `error` names how
+  many it refuses and `reuse` how many it kept, while the destructive one said
+  nothing at all, so a run that replaced a hundred sequences read exactly like
+  one that found none. `reuse` counts the two halves of what it found apart,
+  what it kept and what it writes again. Both are the decision rather than the
+  outcome, a sequence that then gives up leaving the folder that was here
+  standing.
 ### Changed
 
 - The OpenCV estimators are three layers where they were an inheritance chain: a
@@ -561,6 +570,61 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `ruff` reads a `dataclass`'s annotations at runtime. `OmegaConf.structured`
   builds a node from a config class's annotations, so a policy alias left behind
   `TYPE_CHECKING` is a `NameError` rather than a check.
+
+- A document's parts are its results, and both documents are written in three
+  tiers. `StepResult`, `SequenceResult` and `DatasetResult` carry the shape,
+  the empty and duplicate checks, and `to_dict`, so a branch says only what it
+  measures and how a tier summarises it. `PartMeter` is `ResultWriter` and is
+  the hook itself, `__call__` on the base having replaced the type parameter
+  that carried the concrete writer through; `_fold` is `_result` / `_combine`,
+  `_make_meter` is `_make_writer`, and what sits beside a document is
+  `<name>.results` where it was `<name>.parts`, so a folder an earlier run left
+  is not found by this one. `Part` named nothing a type bound could use, and a
+  fold reduces away what `_fold` keeps. Three things fall out of the tiers:
+  `min_index` no longer reaches the dataset level, where `min_source` names the
+  sequence; `Spread` no longer repeats the mean the sequence it names carries;
+  and a pair's scores stay the mapping the evaluator handed over.
+- `iivs_cardio/data/pipeline/ranges.py` is `document.py`. Every other module of
+  a concrete pipeline package repeats the name of the one in `common.pipeline`
+  it implements, and the flow side already kept its document branch there.
+- `FrameWriter` is told how to write a frame and how to name where one came
+  from: `save_fn` takes the folder and the frame's number and writes what it
+  likes, `source_fn` reads the source name off a step's `extra`. Koala's naming
+  convention leaves `common/` with `KoalaFrameWriter`, and
+  `phase_frame_writer` / `flow_frame_writer` move beside the branches that hand
+  them out. A step is `Step[T, E = Path]` rather than `Step[T, Any]`, so a
+  record can no longer be filed with `<... object at 0x...>` in it. The staging
+  is made when the walk opens the writer rather than in `__init__`, the
+  record's list is `sources` rather than `frames`, since what one entry holds
+  is `source_fn`'s to decide, and `_written` is the count of frames rather than
+  the number of the last one.
+- `FrameBranch` and `DocumentBranch` read a dataset through one base,
+  `DatasetBranch`: the same five inputs, normalised once, with `ensure_policy`
+  reading both policies for both. The pair had already drifted over which
+  policies were checked at all. `FrameBranch` is a plain class again, nothing
+  having consumed the frozen dataclass it was while it wrote to itself
+  throughout a run.
+- `close_together` raises every closing failure rather than the first, as a
+  `BaseExceptionGroup` even where only one failed, and `describe_failure`
+  spreads a group into the causes it holds: an item's outcome carries one line,
+  and `ExceptionGroup: ... (2 sub-exceptions)` is the one thing that line
+  cannot say. Closing is still told the walk's own outcome and never what a
+  sibling raised.
+- Every `@abstractmethod` takes a docstring and then a bare `raise
+  NotImplementedError`. Three spellings were in use for one thing, which read
+  as a distinction where there is none. That rule is written into `AGENTS.md`,
+  with two others recorded there in the same period: nothing enforces the
+  docstring line fill, and a hook or branch that is a context manager opens
+  once.
+- `kaparoo-python` moves to `>=0.14.0`, which is what exports the staging
+  filter the branches now collect by.
+- The shape aliases in `warp.py`, `metrics.py`, the OpenCV estimator and the
+  gaussian kernel's `sigma` take `type`, as the rest of the package already
+  did. Checked rather than assumed, `jaxtyped` / `beartype` resolving these at
+  runtime.
+- Every docstring in the repository is filled to the line limit rather than
+  kept at the width it was first written at, and a class that stood on
+  `As <base>.` describes its own attributes where a caller reads them.
 ### Removed
 
 - `counted` and `prune_above` from `iivs_cardio.common.pipeline`, and
@@ -674,6 +738,49 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The short-sequence warning stops at five names, the bound its sibling already
   had. It joined every name into one line, so a dataset most of whose sequences
   fall short of the count would have put all of them in a single warning.
+
+- `FrameTree` makes its own root. Nothing did, so the first writer through made
+  it, counted it among the folders it had made, and took it away when it gave
+  up: one failed sequence removed the output tree, the sequences that had
+  already finished included.
+- A writer, a branch and a document are each opened once, and a run keeps a
+  branch it was given twice as one. Committing takes the staged folder away, so
+  a writer opened a second time wrote where nothing was and would have filed a
+  record naming the frames of both walks; a branch settles what `report` counts
+  when it opens, so a second opening counted two runs as one. A branch given
+  twice was opened, asked for a hook, closed and reported twice over.
+- Every hook the walk opened reports. `Stage.run` opens the hooks of every
+  stage it is built over, while `run_stage` asked only the top stage's own, so
+  a writer registered further down committed and said nothing. `all_hooks` is
+  the one source for both now, and only the order differs: opening runs top
+  down, while calls, closing and reporting run bottom up, the way values are
+  computed.
+- A run says what it committed even where it gave up. Reporting sat under the
+  clean close alone, so the run where that line matters most, one a worker went
+  down in, said nothing about the document it had just written.
+- The outputs a run says have no source are sorted. A set is what keeps two
+  branches that lost the same one to a single line, and iterating it handed the
+  block back in hash order, which differs between processes: two runs over one
+  dataset read differently and neither could be diffed against the other.
+- `if_unsourced` outlives a result that cannot be read. Closing writes the
+  document from what does read and raises the refusal afterwards; the policy
+  sat past that `raise`, so a run given `delete` left every unsourced result
+  where it was, and went on doing so every run.
+- Staging is collected by the filter `kaparoo` derives from the names it stages
+  under, rather than by a copy of that shape kept here. The copy missed
+  `.tmp.old`, the displaced original a directory replace strands when a crash
+  lands between its two renames, so every interrupted overwrite left one behind
+  for good; it also matched any hidden name ending `.tmp` that another tool had
+  left beside the output.
+- A policy nobody offers is refused wherever it is read. `if_unsourced` fell
+  through to `keep` and a document's `if_present` to the branch that replaces,
+  so a misspelling there overwrote every result it was meant to guard.
+- `drop_unsourced` counts the folders it removed as it goes, so a removal that
+  fails part way still says which ones happened, where the run learned only
+  that the removal failed.
+- Asking a branch for a hook no longer makes directories. `get_stage` asks
+  every branch before the first of them is opened, so one that raised left the
+  writers already built holding staging nothing would close.
 ### Performance
 
 - `push_chunk` and `calc_batch` fill one batch as the flows come, where they
