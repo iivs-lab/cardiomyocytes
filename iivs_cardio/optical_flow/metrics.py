@@ -107,10 +107,15 @@ def warp_consistency(
     this choice with a non-uniform flow instead. (A flipped *sign* is a different error,
     and a uniform translation does catch that one.)
 
-    Gradients reach `flow` for float frames, so this doubles as a photometric training
-    loss, which is also the form the unsupervised-flow literature uses. Integer frames
-    break the graph (the warp rounds and clamps them back to their dtype), so training
-    must use float frames.
+    The reconstruction keeps its fractional values whatever the frames' dtype: `frame2`
+    is warped as a float copy, since a warp handed an integer frame rounds its samples
+    back to that dtype. The reference this is read against, `identity_ssim`, warps
+    nothing and so rounds nothing, and a reconstruction rounded on one side only would
+    charge that rounding to the flow. The value range is taken from the frames as they
+    were given, before that copy.
+
+    Gradients reach `flow` for either dtype, so this doubles as a photometric training
+    loss, which is also the form the unsupervised-flow literature uses.
 
     Args:
         frame1: `(*dim, H, W)` frame(s) to score against, any real dtype.
@@ -124,8 +129,10 @@ def warp_consistency(
         reduce: Average over the batch to a 0-d scalar per metric. `False` keeps one
             score per pair, shaped `(*dim)`.
     """
-    warped = backward_warp(frame2, flow, padding_mode=padding_mode)
-    return _metrics(warped, frame1, data_range, reduce=reduce)
+    resolved = _resolve_data_range(frame2, data_range)
+    warped = backward_warp(frame2.float(), flow, padding_mode=padding_mode)
+
+    return _metrics(warped, frame1, resolved, reduce=reduce)
 
 
 @jaxtyped(typechecker=beartype)
@@ -266,6 +273,11 @@ class WarpConsistency(nn.Module):
     def forward(
         self, frame1: Tensor, frame2: Tensor, flow: Tensor
     ) -> dict[str, Tensor]:
-        """Return the warp-consistency metrics of `flow`, reusing the cached grid."""
-        warped = self._warp(frame2, flow)
-        return _metrics(warped, frame1, self.data_range, reduce=self.reduce)
+        """Return the warp-consistency metrics of `flow`, reusing the cached grid.
+
+        `frame2` is warped as a float copy, for the reason `warp_consistency` gives.
+        """
+        resolved = _resolve_data_range(frame2, self.data_range)
+        warped = self._warp(frame2.float(), flow)
+
+        return _metrics(warped, frame1, resolved, reduce=self.reduce)

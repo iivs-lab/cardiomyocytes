@@ -104,11 +104,11 @@ def test_warp_consistency_samples_frame2_along_the_flow():
 
     mse = warp_consistency(frame1, frame2, flow)["mse"].item()
 
-    along = backward_warp(frame2, flow).float() - frame1.float()
+    along = backward_warp(frame2.float(), flow) - frame1.float()
     assert mse == pytest.approx(float((along * along).mean()))
 
     # The reverse direction scores differently here -- that is the whole point.
-    reversed_ = backward_warp(frame1, -flow).float() - frame2.float()
+    reversed_ = backward_warp(frame1.float(), -flow) - frame2.float()
     assert float((reversed_ * reversed_).mean()) != pytest.approx(mse)
 
 
@@ -335,3 +335,22 @@ def test_ssim_is_the_gaussian_pass_this_project_scores_by():
         frame1.numpy().astype(np.float64), frame2.numpy().astype(np.float64)
     )
     assert scored == pytest.approx(expected, abs=2e-5)
+
+
+def test_an_integer_pair_is_scored_as_the_same_pair_given_as_float():
+    # A warp handed an integer frame rounds its samples back to that dtype, and
+    # the floor a score is read against warps nothing. Rounding on one side only
+    # charged the rounding to the flow, most heavily where motion is sub-pixel,
+    # which is where this project's is. The flow here lands between pixels.
+    frame1 = _textured()
+    frame2 = _shifted(frame1)
+    flow = _uniform_flow(3.0, 2.0)
+    flow[0] += torch.linspace(0.0, 0.7, 64)
+
+    as_integers = warp_consistency(frame1, frame2, flow)
+    as_floats = warp_consistency(frame1.float(), frame2.float(), flow, data_range=255.0)
+
+    for metric in ("mse", "mae", "psnr", "ssim"):
+        assert as_integers[metric].item() == pytest.approx(
+            as_floats[metric].item(), rel=1e-6
+        ), metric
