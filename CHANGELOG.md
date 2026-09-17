@@ -182,6 +182,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   standing.
 ### Changed
 
+- `EstimatorConfig.build` allocates nothing on the device. `OpenCVEstimator`
+  holds its settings and its device, and makes the backend and the cv2 algorithm
+  on the first call that needs one, `algorithm` included; an unsupported device
+  is still refused by `build`. An item every branch already holds no longer makes
+  an algorithm on the device.
 - The OpenCV estimators are three layers where they were an inheritance chain: a
   config holding the parameters as a value, a `Backend` holding the cv2 algorithm
   and the `Device` it was made on and making the calls, and `OpenCVEstimator`, the

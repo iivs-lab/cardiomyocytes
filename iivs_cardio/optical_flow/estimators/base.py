@@ -110,6 +110,11 @@ class EstimatorConfig(ABC):
     def build(self, device: DeviceLike = "cpu") -> OpticalFlowEstimator:
         """Construct the estimator these describe, on `device`.
 
+        Allocates nothing on `device`: whatever an implementation needs there is made on
+        the first flow asked of the estimator. A run hands estimators out before it
+        knows whether any flow will be computed, and one built for an item that
+        computes none would otherwise hold device memory for nothing.
+
         Raises:
             ValueError: If `device` is not one of `SUPPORTED_DEVICES`.
         """

@@ -221,8 +221,34 @@ def test_a_config_creating_for_the_wrong_device_is_refused(factory, device, made
     # take the concrete cv2 types: an `_algorithm` that read its device wrongly. A
     # CPU algorithm run as CUDA would be handed device tensors and read as host
     # memory.
+    estimator = _MisreadingConfig(factory).build(device)
+
     with pytest.raises(ValueError, match=f"made for {made}"):
-        _MisreadingConfig(factory).build(device)
+        estimator.algorithm  # noqa: B018
+
+
+def test_building_an_estimator_makes_no_algorithm_until_a_flow_is_asked_for(
+    algorithms_made,
+):
+    # A run hands estimators out before it knows whether a flow will be computed,
+    # and a cv2 algorithm allocates on its device the moment it is made.
+    of = FarnebackConfig().build("cpu")
+    of.reset()  # nothing retained, so nothing to make
+
+    assert algorithms_made == []
+
+    prev, curr = _frames()
+    of.calc(prev, curr)
+    of.calc(prev, curr)
+
+    assert algorithms_made == [Device("cpu")]
+
+
+@pytest.mark.parametrize("device", ("cuda", "cuda:0"))
+def test_an_unsupported_device_is_still_refused_when_building(device):
+    # Only the algorithm waits; the device it will need is checked at once.
+    with pytest.raises(ValueError, match="cuda"):
+        DeepFlowConfig().build(device)
 
 
 @pytest.mark.parametrize("flow_cls", CPU_METHODS)
@@ -366,7 +392,7 @@ def test_calc_batch_calls_algorithm_once_per_pair(monkeypatch):
     # spy, not just by values — a redundant re-compute would still match results.
     of = FarnebackConfig().build("cpu")
     spy = _CountingAlgorithm()
-    monkeypatch.setattr(of._backend, "algorithm", spy)  # noqa: SLF001
+    monkeypatch.setattr(of._get_backend(), "algorithm", spy)  # noqa: SLF001
     prevs = torch.zeros((3, 64, 64), dtype=torch.uint8)
     of.calc_batch(prevs, prevs)
     assert spy.calls == 3
@@ -376,7 +402,7 @@ def test_push_chunk_calls_algorithm_once_per_consecutive_pair(monkeypatch):
     # 5 frames -> 4 flows -> exactly 4 core calls (the first frame is only retained).
     of = FarnebackConfig().build("cpu")
     spy = _CountingAlgorithm()
-    monkeypatch.setattr(of._backend, "algorithm", spy)  # noqa: SLF001
+    monkeypatch.setattr(of._get_backend(), "algorithm", spy)  # noqa: SLF001
     of.push_chunk(_sequence(5))
     assert spy.calls == 4
 
@@ -462,7 +488,7 @@ def test_a_chunk_of_flows_holds_no_more_than_it_returns(flow_cls, chunks):
 
 def test_a_backend_says_whether_a_frame_is_retained():
     of = FarnebackConfig().build("cpu")
-    backend = of._backend  # noqa: SLF001
+    backend = of._get_backend()  # noqa: SLF001
     frames = _sequence(2)
 
     assert not backend.retained
@@ -474,7 +500,7 @@ def test_a_backend_says_whether_a_frame_is_retained():
 
 def test_push_writes_the_flow_into_a_given_destination():
     of = FarnebackConfig().build("cpu")
-    backend = of._backend  # noqa: SLF001
+    backend = of._get_backend()  # noqa: SLF001
     frames = _sequence(2)
     untouched = torch.full((2, 64, 64), -99.0)
     destination = untouched.clone()

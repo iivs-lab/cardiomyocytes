@@ -62,21 +62,24 @@ class OpenCVConfig(EstimatorConfig, ABC):
         """
         raise NotImplementedError
 
-    def _backend(self, device: DeviceLike = "cpu") -> Backend:
+    def _backend(self, device: Device) -> Backend:
         """Return the backend that runs the algorithm these settings describe.
 
+        This is where the device is first touched: it is made current, and the
+        algorithm is allocated on it.
+
         Args:
-            device: The device to make it for, in any form a caller may write.
+            device: The device to make it for, already resolved against
+                `SUPPORTED_DEVICES`.
 
         Returns:
             A backend of its own, so two estimators built from one config share no
             state.
 
         Raises:
-            ValueError: If `device` is not one of `SUPPORTED_DEVICES`, or if
-                `_algorithm` answered with one belonging to the other backend.
+            ValueError: If `_algorithm` answered with one belonging to the other
+                backend.
         """
-        device = Device.resolve(device, self.SUPPORTED_DEVICES)
         device.activate()
 
         algorithm = self._algorithm(device)
@@ -96,15 +99,16 @@ class OpenCVConfig(EstimatorConfig, ABC):
     def build(self, device: DeviceLike = "cpu") -> OpenCVEstimator:
         """Build the estimator these settings describe, on `device`.
 
+        The cv2 algorithm is not made here but on the first call that needs it, so a
+        built estimator allocates nothing on the device until a flow is asked of it.
+
         Args:
             device: The device to build for, in any form a caller may write.
 
         Raises:
-            ValueError: If `device` is not one of `SUPPORTED_DEVICES`, or if the
-                algorithm made for it came out belonging to the other backend.
+            ValueError: If `device` is not one of `SUPPORTED_DEVICES`.
         """
-        backend = self._backend(device)  # raises if device is unsupported
-        return OpenCVEstimator(backend)
+        return OpenCVEstimator(self, Device.resolve(device, self.SUPPORTED_DEVICES))
 
 
 # ========================== #
@@ -321,33 +325,47 @@ class OpenCVEstimator(OpticalFlowEstimator):
     the backend's business rather than the streaming this holds. Build one through
     `OpenCVConfig.build`.
 
+    The backend, and the cv2 algorithm in it, is made on the first call that needs one,
+    `algorithm` included. Until then the estimator holds its settings and its device and
+    nothing on that device, which is what lets it be handed out before anyone knows
+    whether a flow will be computed.
+
     Separate from `OpticalFlowEstimator` so a future PyTorch (`nn.Module`) backend can
     extend the neutral base directly.
 
     Args:
-        backend: What runs the flow calls, holding the cv2 algorithm and the device it
-            was made on. `OpenCVConfig.build` is what makes one.
+        config: The settings the algorithm is made from.
+        device: The device it runs on, already resolved against what `config` supports.
 
     Attributes:
         algorithm: The cv2 algorithm itself, which is where the settings it was made
-            with can be read back from.
-        device: The device this estimator runs on, which the algorithm was made on.
+            with can be read back from. Reading it makes the algorithm.
+        device: The device this estimator runs on, which the algorithm is made on.
         is_cuda: Whether that device is a CUDA one.
     """
 
-    def __init__(self, backend: Backend) -> None:
-        super().__init__(backend.device)
-        self._backend = backend
+    def __init__(self, config: OpenCVConfig, device: Device) -> None:
+        super().__init__(device)
+        self._config = config
+        self._backend: Backend | None = None
+
+    def _get_backend(self) -> Backend:
+        """Return the backend, making it on first use."""
+        if self._backend is None:
+            self._backend = self._config._backend(self.device)  # noqa: SLF001
+
+        return self._backend
 
     @property
     def algorithm(self) -> OpenCVAlgorithm:
-        """The cv2 algorithm this estimator streams through."""
-        return self._backend.algorithm
+        """The cv2 algorithm this estimator streams through, made on first use."""
+        return self._get_backend().algorithm
 
     @override
     def reset(self) -> None:
         """Forget the retained frame, restarting the sequence."""
-        self._backend.reset()
+        if self._backend is not None:  # one never made retains nothing
+            self._backend.reset()
 
     @jaxtyped(typechecker=beartype)
     @override
@@ -355,7 +373,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
         """Return the flow from the retained frame, or `None` on the first frame."""
         self._validate_device(frame)
 
-        return self._backend.push(frame)
+        return self._get_backend().push(frame)
 
     @jaxtyped(typechecker=beartype)
     @override
@@ -366,8 +384,9 @@ class OpenCVEstimator(OpticalFlowEstimator):
         stacked afterwards, which would hold the whole chunk twice over.
         """
         self._validate_device(frames)
+        backend = self._get_backend()
 
-        count = len(frames) if self._backend.retained else max(len(frames) - 1, 0)
+        count = len(frames) if backend.retained else max(len(frames) - 1, 0)
         flows = self._flow_batch(count, frames)
 
         index = 0
@@ -376,7 +395,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
             # only: the lone frame a fresh sequence spends retaining, which has
             # no row because there is no flow to come.
             out = flows[index] if index < count else None
-            if self._backend.push(frame, out=out) is not None:
+            if backend.push(frame, out=out) is not None:
                 index += 1
 
         return flows
@@ -388,7 +407,7 @@ class OpenCVEstimator(OpticalFlowEstimator):
         self._validate_device(prev)
         self._validate_device(curr)
 
-        return self._backend.calc(prev, curr)
+        return self._get_backend().calc(prev, curr)
 
     @jaxtyped(typechecker=beartype)
     @override
@@ -397,9 +416,10 @@ class OpenCVEstimator(OpticalFlowEstimator):
         self._validate_device(prev)
         self._validate_device(curr)
 
+        backend = self._get_backend()
         flows = self._flow_batch(len(prev), prev)
         for index, (p, c) in enumerate(zip(prev, curr, strict=True)):
-            self._backend.calc(p, c, out=flows[index])
+            backend.calc(p, c, out=flows[index])
 
         return flows
 

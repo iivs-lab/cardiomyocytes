@@ -314,6 +314,29 @@ def test_one_estimator_is_built_for_a_device_however_many_sequences_run():
     assert config.builds == 1
 
 
+def test_a_stage_makes_no_algorithm_until_a_flow_is_asked_for(algorithms_made):
+    # The branches are asked for hooks with the estimator before anything says a
+    # flow will be computed. Making the algorithm there allocated on the device
+    # for an item every branch already held, or one too short to make a pair.
+    (sequence,) = _sequences(4)
+    job = _job(sequence, branches=(_Watching(),))
+
+    stage = job.get_stage(0, Device("cpu"))
+    assert stage is not None
+    assert algorithms_made == []
+
+    stage[0].require()
+    assert algorithms_made == [Device("cpu")]
+
+
+def test_a_sequence_every_branch_holds_makes_no_algorithm(algorithms_made):
+    (sequence,) = _sequences(4)
+    job = _job(sequence, branches=(_Watching(wanted=False),))
+
+    assert not job.run_stage(0, Device("cpu"))
+    assert algorithms_made == []
+
+
 def test_the_sequence_lets_go_of_its_window_once_it_has_run():
     (sequence,) = _sequences(4)
     job = _job(sequence, branches=(_Watching(),))

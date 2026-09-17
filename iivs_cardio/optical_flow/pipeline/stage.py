@@ -199,7 +199,7 @@ class FlowStageRun(StageRun["PhaseFilteredSequence"]):
         self._estimators: dict[Device, OpticalFlowEstimator] = {}
 
     def _get_estimator(self, device: Device) -> OpticalFlowEstimator:
-        """Return this job's estimator for `device`, building one on first use.
+        """Return this job's estimator for `device`, which is built on its first flow.
 
         One per device rather than one per sequence: a cv2 algorithm is allocated on
         whichever device was current when it was made, so an estimator is bound to one,
