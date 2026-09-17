@@ -3,12 +3,14 @@ from __future__ import annotations
 __all__ = (
     "Hook",
     "Named",
+    "RequiredSpace",
     "SequenceStage",
     "SideBranch",
     "SingleUse",
     "Stage",
     "Step",
     "SupportsReport",
+    "SupportsRequiredSpace",
     "SupportsRevert",
     "SupportsUnsourced",
     "close_together",
@@ -18,6 +20,7 @@ import logging
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -160,6 +163,46 @@ class SupportsReport(Protocol):
         Returns:
             The line, or `None` where nothing was committed. Read after the close, so a
             line only ever describes an output that is there.
+        """
+        ...
+
+
+@dataclass(frozen=True, slots=True)
+class RequiredSpace:
+    """The disk space writing one item takes, and where it is taken from.
+
+    Attributes:
+        root: The directory the bytes land under, which settles the filesystem they are
+            taken from.
+        adds: The bytes the finished output holds.
+        replaces: The bytes of an output already there that the new one takes the place
+            of. They stay on disk until the new one is in place, and are given back
+            after. Defaults to 0, for an output nothing stands in the way of.
+    """
+
+    root: Path
+    adds: int
+    replaces: int = 0
+
+
+@runtime_checkable
+class SupportsRequiredSpace[S](Protocol):
+    """Something that can say what writing an item would take, before it opens.
+
+    Asked with what a hook would be made for, so the answer counts what that hook would
+    write, and asked before anything is opened, so answering reads the disk and changes
+    nothing on it.
+    """
+
+    def required_space(self, source: S, /) -> RequiredSpace | None:
+        """Return what writing for `source` would take.
+
+        Args:
+            source: The thing a hook would be made for.
+
+        Returns:
+            The space, or `None` where nothing would be written for `source`: one whose
+            output is kept as it is, or one this was not given.
         """
         ...
 

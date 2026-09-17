@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import logging
 import shutil
@@ -736,17 +737,163 @@ def test_a_written_sequence_says_which_frames_it_was_made_from(phase_tree, tmp_p
     assert len(PhaseBinFolder(folder)) == len(record["sources"])
 
 
-def _cache(phase_tree: Path, dest: Path, **target: object) -> None:
-    """Run a frames-only pass, so a second one has something to reuse."""
+def _cache_stages(phase_tree: Path, dest: Path, **target: object) -> SequenceStageRun:
+    """Build a frames-only pass, without running it."""
     source = source_configs(root=str(phase_tree))
     config = _target(subpath=FILTERED, save_frames=True, save_ranges=False, **target)
-    compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
 
-    stages = build_preprocess_stages(
+    return build_preprocess_stages(
         *source, target_config=config, name=STAGE, output_root=dest
     )
 
-    run_all(stages, compute)
+
+def _cache(phase_tree: Path, dest: Path, **target: object) -> None:
+    """Run a frames-only pass, so a second one has something to reuse."""
+    compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
+
+    run_all(_cache_stages(phase_tree, dest, **target), compute)
+
+
+def _tree_of(stages: SequenceStageRun) -> FrameTree:
+    (tree,) = (b for b in stages._branches if isinstance(b, FrameTree))  # noqa: SLF001
+    return tree
+
+
+def _folder_bytes(folder: Path) -> int:
+    return sum(path.stat().st_size for path in folder.rglob("*") if path.is_file())
+
+
+def _listing(root: Path) -> list[str]:
+    return sorted(path.relative_to(root).as_posix() for path in root.rglob("*"))
+
+
+def test_the_space_a_cache_asks_for_is_what_it_writes(phase_tree, tmp_path):
+    # Counted from the header and the record the writer will file, not guessed
+    # from the source, so a run is refused over bytes it would really take.
+    dest = tmp_path / "out"
+    stages = _cache_stages(phase_tree, dest)
+
+    needs = stages.required_space(Device("cpu"))
+    run_all(stages, ComputeConfig(device="cpu", workers=0, show_progress=False))
+
+    written = sorted(
+        _folder_bytes(dest / f"TL_{index:02d}" / FILTERED) for index in range(SEQUENCES)
+    )
+    assert sorted(need.adds for need in needs) == written
+    assert all(need.replaces == 0 and need.root == dest for need in needs)
+
+
+def test_asking_what_a_cache_takes_leaves_the_disk_as_it_was(phase_tree, tmp_path):
+    # Asked before the tree opens: no root made, no staging cleared, nothing
+    # judged into the folders.
+    dest = tmp_path / "out"
+    _cache(phase_tree, dest)
+    before = _listing(dest)
+
+    for policy in ("reuse", "overwrite"):
+        _cache_stages(phase_tree, dest, if_present=policy).required_space(Device("cpu"))
+
+    assert _listing(dest) == before
+    assert not (tmp_path / "fresh").exists()
+    _cache_stages(phase_tree, tmp_path / "fresh").required_space(Device("cpu"))
+    assert not (tmp_path / "fresh").exists()
+
+
+def test_a_cache_kept_whole_asks_for_nothing(phase_tree, tmp_path):
+    dest = tmp_path / "out"
+    _cache(phase_tree, dest)
+    stages = _cache_stages(phase_tree, dest, if_present="reuse")
+
+    assert _tree_of(stages).list_to_write() == []
+    assert stages.required_space(Device("cpu")) == []
+
+
+def test_a_cache_written_again_counts_the_folder_it_replaces(phase_tree, tmp_path):
+    dest = tmp_path / "out"
+    _cache(phase_tree, dest)
+    stages = _cache_stages(phase_tree, dest, if_present="overwrite")
+
+    needs = stages.required_space(Device("cpu"))
+
+    existing = sorted(
+        _folder_bytes(dest / f"TL_{index:02d}" / FILTERED) for index in range(SEQUENCES)
+    )
+    assert sorted(need.replaces for need in needs) == existing
+    assert sorted(need.adds for need in needs) == existing  # same frames again
+
+
+def test_what_is_judged_before_opening_is_what_opening_judges(phase_tree, tmp_path):
+    dest = tmp_path / "out"
+    _cache(phase_tree, dest)
+    (dest / "TL_01" / FILTERED / f"{FRAMES - 1:05d}_phase.bin").unlink()
+    tree = _tree_of(_cache_stages(phase_tree, dest, if_present="reuse"))
+
+    to_write = tree.list_to_write()
+
+    with tree:
+        kept = tree._reused  # noqa: SLF001
+
+    assert to_write == ["TL_01"]
+    assert kept == {name for name in tree.selected if name not in to_write}
+
+
+def test_opening_judges_again_whatever_changed_since_it_was_asked(phase_tree, tmp_path):
+    # Asked in the parent, opened moments later: a folder damaged in between has
+    # to be written again, not kept on the strength of the earlier answer.
+    dest = tmp_path / "out"
+    _cache(phase_tree, dest)
+    tree = _tree_of(_cache_stages(phase_tree, dest, if_present="reuse"))
+
+    assert tree.list_to_write() == []
+    (dest / "TL_01" / FILTERED / f"{FRAMES - 1:05d}_phase.bin").unlink()
+
+    with tree:
+        assert "TL_01" not in tree._reused  # noqa: SLF001
+
+
+def test_a_cache_already_there_is_refused_before_anything_is_asked(
+    phase_tree, tmp_path
+):
+    dest = tmp_path / "out"
+    _cache(phase_tree, dest)
+
+    with pytest.raises(FileExistsError, match="already written"):
+        _cache_stages(phase_tree, dest).required_space(Device("cpu"))
+
+
+def test_a_cache_that_would_not_fit_is_refused_leaving_nothing(
+    phase_tree, tmp_path, monkeypatch
+):
+    # The range document included: a branch opened and closed on the refusal
+    # would commit one covering nothing.
+    def usage(path):
+        return shutil._ntuple_diskusage(10**9, 10**9, 1)  # noqa: SLF001
+
+    monkeypatch.setattr("scripts._common.compute.shutil.disk_usage", usage)
+    dest = tmp_path / "out"
+    dest.mkdir()
+    source = source_configs(root=str(phase_tree))
+    config = _target(subpath=FILTERED, save_frames=True, save_ranges=True)
+    stages = build_preprocess_stages(
+        *source, target_config=config, name=STAGE, output_root=dest
+    )
+    compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
+
+    with pytest.raises(OSError, match=r"the outputs need .* which has 1 B free") as e:
+        run_all(stages, compute)
+
+    assert e.value.errno == errno.ENOSPC
+    assert _listing(dest) == []
+
+
+def test_a_run_writing_no_frames_asks_for_no_space(phase_tree, tmp_path):
+    source = source_configs(root=str(phase_tree))
+    config = _target(save_frames=False, save_ranges=True)
+    stages = build_preprocess_stages(
+        *source, target_config=config, name=STAGE, output_root=tmp_path / "out"
+    )
+
+    assert stages.required_space(Device("cpu")) == []
 
 
 def _mtimes(dest: Path) -> dict[str, float]:

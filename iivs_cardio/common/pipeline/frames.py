@@ -19,7 +19,7 @@ from kaparoo.filesystem import (
 )
 from kaparoo.utils import quantify
 
-from iivs_cardio.common.pipeline.base import Named, SingleUse, Step
+from iivs_cardio.common.pipeline.base import Named, RequiredSpace, SingleUse, Step
 from iivs_cardio.common.pipeline.branch import (
     DatasetBranch,
     PresentPolicy,
@@ -313,6 +313,9 @@ class FrameBranch[N: Named, T](SingleUse, DatasetBranch):
         # settled here, read from every sequence
         self._wanted = frozenset(self.selected)
 
+        # the last judgement of the folders already here, kept until the tree opens
+        self._judged: tuple[frozenset[str], list[str]] | None = None
+
         # what this run does to folders already here, which `report` counts
         self._reused: set[str] = set()
         self._replaced: list[str] = []
@@ -351,13 +354,61 @@ class FrameBranch[N: Named, T](SingleUse, DatasetBranch):
         if source.name in self._reused:
             return None
 
-        record = None
-        if self.settings is not None:
-            record = {"settings": dict(self.settings), "source": source.name}
-
         dest = Path(self.root, source.name, self.subpath)
+        record = self._record_for(source.name)
 
         return self._make_writer(dest, source, overwrite=self._replacing, record=record)
+
+    def list_to_write(self) -> list[str]:
+        """Return the sequences this run would write, in the order they were selected.
+
+        Judged without opening the tree, and remembered until it opens, which judges
+        again with whatever changed in between.
+
+        Raises:
+            FileExistsError: If `if_present` is `"error"` and one of them already has a
+                folder here.
+        """
+        kept, _ = self._judgement()
+
+        return [name for name in self.selected if name not in kept]
+
+    def _space_for(self, name: str, frame_bytes: int) -> RequiredSpace | None:
+        """Return what writing `name`'s folder would take, each frame taking `frame_bytes`.
+
+        What a subclass that knows its format answers `required_space` with. It counts
+        the frames the sequence is owed, the record filed beside them, and the folder
+        already here that the new one would replace.
+
+        Raises:
+            FileExistsError: If `if_present` is `"error"` and a sequence this run would
+                write already has a folder here.
+        """
+        kept, replaced = self._judgement()
+        if name not in self._wanted or name in kept:
+            return None
+
+        owed = self._expected(self.contents[name])
+        adds = len(owed) * frame_bytes
+
+        if (record := self._record_for(name)) is not None:
+            document = {**record, "sources": list(owed)}
+            adds += len(json.dumps(document, allow_nan=False).encode("utf-8"))
+
+        folder = Path(self.root, name, self.subpath)
+
+        replaces = 0
+        if name in replaced:
+            replaces = sum(path.stat().st_size for path in search_files(folder))
+
+        return RequiredSpace(self.root, adds, replaces)
+
+    def _record_for(self, name: str) -> dict[str, object] | None:
+        """The block the writer for `name` files about its folder, or `None` for none."""
+        if self.settings is None:
+            return None
+
+        return {"settings": dict(self.settings), "source": name}
 
     def list_sequences(self) -> list[str]:
         """Return every sequence this tree already holds frames for, sorted.
@@ -413,6 +464,44 @@ class FrameBranch[N: Named, T](SingleUse, DatasetBranch):
             return False
 
         return self._count_frames(folder) == len(sources)
+
+    def _judge_present(self) -> tuple[frozenset[str], list[str]]:
+        """Settle which folders already here are kept and which are written again.
+
+        Reads the tree and changes nothing in it, so it can be asked before the tree
+        opens as well as when it does.
+
+        Returns:
+            The sequences whose folders are kept, and those written again in the order
+            they were found.
+
+        Raises:
+            FileExistsError: If `if_present` is `"error"` and a sequence this run would
+                write already has a folder here.
+        """
+        written = self._already_written()
+
+        if self.if_present == "reuse":
+            kept = frozenset(name for name in written if self._still_describes(name))
+            return kept, [name for name in written if name not in kept]
+
+        if self.if_present == "overwrite":
+            return frozenset(), written
+
+        if written:
+            sequences = quantify(len(written), "sequence")
+            fix = "set `if_present` to 'overwrite' or 'reuse'"
+            msg = f"{sequences} already written, from {written[0]!r}: {fix}"
+            raise FileExistsError(msg)
+
+        return frozenset(), []
+
+    def _judgement(self) -> tuple[frozenset[str], list[str]]:
+        """The last judgement of the folders already here, made now if none was."""
+        if self._judged is None:
+            self._judged = self._judge_present()
+
+        return self._judged
 
     def _already_written(self) -> list[str]:
         """Return the sequences this run would write that already have a folder."""
@@ -523,18 +612,12 @@ class FrameBranch[N: Named, T](SingleUse, DatasetBranch):
 
         self.clear_staging()
 
-        written = self._already_written()
+        # Judged again rather than read back, in case the tree changed since asked.
+        self._judged = self._judge_present()
+        kept, replaced = self._judged
 
-        if self.if_present == "reuse":
-            self._reused.update(name for name in written if self._still_describes(name))
-            self._replaced = [name for name in written if name not in self._reused]
-        elif self.if_present == "overwrite":
-            self._replaced = written
-        elif written:
-            sequences = quantify(len(written), "sequence")
-            fix = "set `if_present` to 'overwrite' or 'reuse'"
-            msg = f"{sequences} already written, from {written[0]!r}: {fix}"
-            raise FileExistsError(msg)
+        self._reused.update(kept)
+        self._replaced = replaced
 
         return self
 

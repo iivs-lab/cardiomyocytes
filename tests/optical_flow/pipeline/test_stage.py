@@ -353,9 +353,12 @@ def test_measuring_a_sequence_leaves_the_run_as_it_was(algorithms_made):
     job = _job(sequence, branches=(watching,))
 
     stage = job.build_stage(0, Device("cpu"))
+    source = job.build_source(0, Device("cpu"))
 
     assert len(stage) == 3
     assert list(stage.all_hooks()) == []
+    assert source.name == sequence.name
+    assert source.estimator is not None
     assert job._estimators == {}  # noqa: SLF001
     assert watching.sources == []
     assert sequence.device is None

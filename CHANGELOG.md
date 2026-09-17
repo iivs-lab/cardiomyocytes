@@ -10,6 +10,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- A run whose outputs would not fit is refused before a worker starts or a
+  branch opens, with `OSError(ENOSPC)` naming what they need and what is free.
+  A branch says what writing an item would take through `SupportsRequiredSpace`,
+  answering with a `RequiredSpace` of the bytes it adds and the bytes of an
+  output it replaces; `StageRun` gains `build_source` and `required_space` to
+  ask every such branch about every item with an index to compute; and
+  `run_all` sums the answers per filesystem, counting a replaced output's growth
+  and the largest old one once per worker, since it stays until the new one is
+  in place. `FrameTree` answers from the phase header and the record it files,
+  and `FrameBranch.list_to_write` judges what a tree would write without
+  opening it.
 - `configs/experiment/`, where a sweep is named once rather than typed out per
   invocation. `filters.yaml` holds every option of the filter group, so
   `--multirun +experiment=filters` runs the search that was 470 characters of

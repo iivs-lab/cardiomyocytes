@@ -4,8 +4,14 @@ __all__ = ("FrameTree", "phase_frame_writer")
 
 from typing import TYPE_CHECKING, override
 
+import numpy as np
 from iivs.dhm.data.koala import koala_frame_name
-from iivs.dhm.data.phase import PhaseBinFolder, PhaseUnit, save_phase_bin
+from iivs.dhm.data.phase import (
+    PhaseBinFolder,
+    PhaseBinHeader,
+    PhaseUnit,
+    save_phase_bin,
+)
 from kaparoo.utils.optional import unwrap_or_default
 
 from iivs_cardio.common.pipeline.frames import (
@@ -21,6 +27,7 @@ if TYPE_CHECKING:
     from kaparoo.filesystem.types import StrPath
     from torch import Tensor
 
+    from iivs_cardio.common.pipeline import RequiredSpace
     from iivs_cardio.data.phase import PhaseFilteredSequence
 
 
@@ -79,6 +86,25 @@ class FrameTree(FrameBranch["PhaseFilteredSequence", "Tensor"]):
     def _expected(self, names: Sequence[str]) -> Sequence[str]:
         """Every source frame, filtering being one frame in and one frame out."""
         return names
+
+    def required_space(self, source: PhaseFilteredSequence, /) -> RequiredSpace | None:
+        """Return what writing `source`'s filtered frames would take, before the tree opens.
+
+        Each frame is a phase `.bin` of the source's own size: its fixed header and one
+        float32 per pixel, which filtering keeps as it found them.
+
+        Returns:
+            The space, or `None` where `source` is not written: one this run was not
+            given, or one whose folder here is kept.
+
+        Raises:
+            FileExistsError: If `if_present` is `"error"` and a sequence this run would
+                write already has a folder here.
+        """
+        header = source.origin.header
+        pixel_bytes = header.pixel_count * np.dtype(np.float32).itemsize
+
+        return self._space_for(source.name, PhaseBinHeader.HEADER_SIZE + pixel_bytes)
 
 
 def phase_frame_writer(

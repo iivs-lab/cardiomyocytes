@@ -207,14 +207,16 @@ class FlowStageRun(StageRun["PhaseFilteredSequence"]):
 
     def _graph(
         self, index: int, estimator: OpticalFlowEstimator
-    ) -> tuple[NormalizedFrameStage, FlowStage]:
-        """Build the frames and the flows above them for the item at `index`."""
+    ) -> tuple[FlowSource, FlowStage]:
+        """Build what the branches meet and the flows above it, for the item at `index`."""
         sequence = self._items[index]
         frames = NormalizedFrameStage(
             SequenceStage(sequence), self._normalizers[sequence.name]
         )
 
-        return frames, FlowStage(frames, estimator)
+        return FlowSource(sequence.name, frames, estimator), FlowStage(
+            frames, estimator
+        )
 
     @override
     def build_stage(self, index: int, device: Device) -> FlowStage:
@@ -226,12 +228,15 @@ class FlowStageRun(StageRun["PhaseFilteredSequence"]):
         return flows
 
     @override
+    def build_source(self, index: int, device: Device) -> FlowSource:
+        source, _ = self._graph(index, self._config.build(device))
+
+        return source
+
+    @override
     def get_stage(self, index: int, device: Device) -> FlowStage | None:
         sequence = self._items[index]
-        estimator = self._get_estimator(device)
-        frames, flows = self._graph(index, estimator)
-
-        source = FlowSource(sequence.name, frames, estimator)
+        source, flows = self._graph(index, self._get_estimator(device))
         made = (branch.get_hook(source) for branch in self._branches)
         hooks = [hook for hook in made if hook is not None]
         if not hooks:

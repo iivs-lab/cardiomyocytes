@@ -15,8 +15,10 @@ __all__ = (
     "run_all",
 )
 
+import errno
 import logging
 import os
+import shutil
 import sys
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -34,14 +36,14 @@ from iivs_cardio.common.logging import log_indented
 from iivs_cardio.common.pipeline import StageRun
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
+    from collections.abc import Iterable, Mapping, Sequence
     from contextlib import AbstractContextManager
     from logging import Logger
     from pathlib import Path
 
     from kaparoo.filesystem.types import StrPath
 
-    from iivs_cardio.common.pipeline import ItemVerdict
+    from iivs_cardio.common.pipeline import ItemVerdict, RequiredSpace
 
 
 # ========================== #
@@ -567,6 +569,65 @@ def _describe_stop(error: BaseException) -> str:
     return f"stopped by {type(error).__name__}"
 
 
+def _in_bytes(count: int) -> str:
+    """Write a byte count in the largest binary unit it reaches."""
+    if count < 1024:
+        return f"{count} B"
+
+    size = float(count)
+    for unit in ("KiB", "MiB", "GiB", "TiB"):
+        size /= 1024
+        if size < 1024 or unit == "TiB":
+            break
+
+    return f"{size:.1f} {unit}"
+
+
+def _nearest_existing(path: Path) -> Path:
+    """Return `path`, or the closest folder above it that is there."""
+    while not path.exists() and path.parent != path:
+        path = path.parent
+
+    return path
+
+
+def _ensure_space(needs: Sequence[RequiredSpace], workers: int, logger: Logger) -> None:
+    """Refuse a run whose outputs would not fit on the filesystems they are written to.
+
+    What lands on one filesystem is summed, wherever under it each branch writes. An
+    output replacing another grows the disk by the difference once it is in place, but
+    holds both while it is written, and as many are written at once as there are
+    workers: the largest output replaced is counted once for each.
+
+    Args:
+        needs: What each branch said writing each item would take.
+        workers: How many items are written at once.
+        logger: The logger the room left is said to, once a filesystem is found to fit.
+
+    Raises:
+        OSError: With `errno.ENOSPC`, if the outputs on a filesystem need more than it
+            has free.
+    """
+    groups: dict[int, tuple[Path, list[RequiredSpace]]] = {}
+    for need in needs:
+        where = _nearest_existing(need.root)
+        groups.setdefault(where.stat().st_dev, (where, []))[1].append(need)
+
+    for where, group in groups.values():
+        grows = sum(max(need.adds - need.replaces, 0) for need in group)
+        held = workers * max(need.replaces for need in group)
+        needed = grows + held
+
+        free = shutil.disk_usage(where).free
+        size, left = _in_bytes(needed), _in_bytes(free)
+
+        if needed > free:
+            msg = f"the outputs need {size} under {where}, which has {left} free"
+            raise OSError(errno.ENOSPC, msg)
+
+        logger.info("the outputs need %s of the %s free under %s", size, left, where)
+
+
 def _log_verdict(
     record: RunRecord,
     total: int,
@@ -650,6 +711,10 @@ def run_all(
         ValueError: If no item's stage has an index to compute, refused before a worker
             starts or a branch opens: a branch that opened would write an output
             covering nothing, which then stands in the way of the run that was meant.
+        FileExistsError: If a branch would write an output already there that its
+            policy does not let it replace, refused before a worker starts.
+        OSError: With `errno.ENOSPC`, if the outputs would not fit on the filesystem
+            they are written to, refused before a worker starts or a branch opens.
         IncompleteRunError: If any item failed, raised once the rest have finished.
         BaseException: What stopped a run that did not see every item, or the interrupt
             that asked it to stop. The verdict is logged before either rises.
@@ -668,10 +733,16 @@ def run_all(
     num_workers = len(devices)
     in_process = num_workers <= 1
 
-    runnable = (stages.is_runnable(index, devices[0]) for index in range(num_stages))
-    if num_stages and not any(runnable):
-        msg = f"none of the {num_stages} {unit} has an index to compute"
-        raise ValueError(msg)
+    if num_stages:
+        runnable = (
+            stages.is_runnable(index, devices[0]) for index in range(num_stages)
+        )
+        if not any(runnable):
+            msg = f"none of the {num_stages} {unit} has an index to compute"
+            raise ValueError(msg)
+
+        if needs := stages.required_space(devices[0]):
+            _ensure_space(needs, num_workers, logger)
 
     workers = f"{num_workers} worker{'' if in_process else 's'}"
     where = ", ".join(str(device) for device in dict.fromkeys(devices))

@@ -44,10 +44,14 @@ class SequenceStageRun(StageRun["PhaseFilteredSequence"]):
         return SequenceStage(self._items[index])
 
     @override
+    def build_source(self, index: int, device: Device) -> PhaseFilteredSequence:
+        return self._items[index]
+
+    @override
     def get_stage(
         self, index: int, device: Device
     ) -> SequenceStage[Tensor, Path] | None:
-        sequence = self._items[index]
+        sequence = self.build_source(index, device)
         made = (branch.get_hook(sequence) for branch in self._branches)
         hooks = [hook for hook in made if hook is not None]
         if not hooks:

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Self, override
 
 from iivs_cardio.common.device import Device
-from iivs_cardio.common.pipeline import Stage, StageRun
+from iivs_cardio.common.pipeline import RequiredSpace, Stage, StageRun
 
 if TYPE_CHECKING:
     from iivs_cardio.common.pipeline import Step
@@ -85,6 +86,10 @@ class _Run(StageRun[_Item]):
     @override
     def build_stage(self, index: int, device: Device) -> Stage[int]:
         return self._stage
+
+    @override
+    def build_source(self, index: int, device: Device) -> _Item:
+        return self._items[index]
 
     @override
     def get_stage(self, index: int, device: Device) -> Stage[int]:
@@ -244,3 +249,37 @@ def test_an_item_long_enough_for_its_stage_is_walked():
 
     assert _Run(stage).run_stage(0, Device("cpu")) == "computed"
     assert events == ["open above", "call above 0", "close above", "report above"]
+
+
+class _Sized:
+    """A branch that says what it would write for every item it is asked about."""
+
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    def get_hook(self, source: _Item) -> None:
+        return None
+
+    def required_space(self, source: _Item, /) -> RequiredSpace:
+        self.asked.append(source.name)
+        return RequiredSpace(Path("out"), adds=10, replaces=4)
+
+
+def test_every_branch_that_can_say_is_asked_what_an_item_takes():
+    # A branch with no answer is passed over rather than counted as nothing, and
+    # the answer is taken as given.
+    sized = _Sized()
+
+    needs = _Run(_Numbers(2), sized, _Counted()).required_space(Device("cpu"))
+
+    assert needs == [RequiredSpace(Path("out"), adds=10, replaces=4)]
+    assert sized.asked == ["TL_00"]
+
+
+def test_an_item_with_no_index_to_compute_is_not_asked_about():
+    # It is skipped unwritten, so counting what it would write would refuse a run
+    # for space it never takes.
+    sized = _Sized()
+
+    assert _Run(_Pairs(_Numbers(1)), sized).required_space(Device("cpu")) == []
+    assert sized.asked == []

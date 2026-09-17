@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import sys
@@ -12,7 +13,7 @@ import torch
 from mpire import WorkerPool
 
 from iivs_cardio.common.device import Device
-from iivs_cardio.common.pipeline import StageRun
+from iivs_cardio.common.pipeline import RequiredSpace, StageRun
 from scripts._common import compute
 from scripts._common.compute import (
     _DEFAULT_WORKERS,
@@ -25,6 +26,7 @@ from scripts._common.compute import (
     _collect_outcomes,
     _describe_stop,
     _drawing,
+    _in_bytes,
     _init_worker,
     log_compute_config,
     log_insights,
@@ -34,7 +36,7 @@ from scripts._common.compute import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Iterator
+    from collections.abc import Iterable, Iterator, Sequence
     from pathlib import Path
 
     from iivs_cardio.common.pipeline import ItemVerdict
@@ -61,8 +63,11 @@ class _Stages(StageRun[_Item]):
         explode_at: Iterable[int] = (),
         reuse_at: Iterable[int] = (),
         short_at: Iterable[int] = (),
+        needs: Sequence[RequiredSpace] = (),
     ) -> None:
         super().__init__([_Item(f"item{i}") for i in range(count)], name="run")
+
+        self._needs = list(needs)
 
         self._dest = dest
         self._explode_at = frozenset(explode_at)
@@ -72,6 +77,14 @@ class _Stages(StageRun[_Item]):
     @override
     def build_stage(self, index: int, device: Device) -> None:
         raise NotImplementedError
+
+    @override
+    def build_source(self, index: int, device: Device) -> None:
+        raise NotImplementedError
+
+    @override
+    def required_space(self, device: Device) -> list[RequiredSpace]:
+        return self._needs
 
     @override
     def is_runnable(self, index: int, device: Device) -> bool:
@@ -558,6 +571,96 @@ def test_an_item_with_no_index_to_compute_is_neither_ready_nor_failed(
     (warned,) = [r for r in caplog.records if "no index" in r.getMessage()]
     assert warned.levelno == logging.WARNING
     assert warned.getMessage() == "2 skipped with no index to compute: item1, item3"
+
+
+@dataclass(frozen=True)
+class _Usage:
+    free: int
+
+
+def _free(monkeypatch, free: int) -> list[Path]:
+    """Report `free` bytes wherever the run asks, and note where it asked."""
+    asked: list[Path] = []
+
+    def usage(path):
+        asked.append(path)
+        return _Usage(free)
+
+    monkeypatch.setattr(compute.shutil, "disk_usage", usage)
+
+    return asked
+
+
+@pytest.mark.parametrize("workers", (0, 2))
+def test_outputs_that_would_not_fit_are_refused_before_anything_opens(
+    tmp_path, monkeypatch, workers
+):
+    # Found out as the disk fills, the run would stop part way through hours of
+    # work. Refused before the pool and the branches, which leave nothing behind.
+    def refuse(*args, **kwargs):
+        pytest.fail("a run that would not fit reached the pool")
+
+    monkeypatch.setattr("scripts._common.compute.WorkerPool", refuse)
+    _free(monkeypatch, 99)
+    dest = tmp_path / "done"
+    needs = [RequiredSpace(tmp_path / "out", adds=100)]
+
+    with pytest.raises(OSError, match=r"need 100 B under .*, which has 99 B free") as e:
+        run_all(_Stages(2, dest, needs=needs), _compute(workers))
+
+    assert e.value.errno == errno.ENOSPC
+    assert not dest.exists()
+
+
+@pytest.mark.parametrize(("free", "fits"), ((899, False), (900, True)))
+def test_a_replaced_output_counts_its_growth_and_the_old_one_while_it_is_written(
+    tmp_path, monkeypatch, caplog, free, fits
+):
+    # Two workers each hold an old folder beside the new one they are writing, so
+    # the largest replaced is counted twice; once in place, each only grows the
+    # disk by the difference, and a new output by all of it.
+    #   grows = (500 - 300) + (100 - 0) = 300, held = 2 * 300 = 600
+    _free(monkeypatch, free)
+    needs = [
+        RequiredSpace(tmp_path / "a", adds=500, replaces=300),
+        RequiredSpace(tmp_path / "b", adds=100),
+    ]
+    stages = _Stages(2, tmp_path / "done", needs=needs)
+
+    if not fits:
+        with pytest.raises(OSError, match=r"need 900 B .* 899 B free"):
+            run_all(stages, _compute(2))
+        return
+
+    with caplog.at_level(logging.INFO):
+        run_all(stages, _compute(2))
+
+    assert (
+        f"the outputs need 900 B of the 900 B free under {tmp_path}" in caplog.messages
+    )
+
+
+def test_a_run_writing_nothing_asks_no_filesystem(tmp_path, monkeypatch):
+    asked = _free(monkeypatch, 0)
+
+    run_all(_Stages(2, tmp_path / "done"), _compute(0))
+
+    assert asked == []
+
+
+@pytest.mark.parametrize(
+    ("count", "said"),
+    (
+        (0, "0 B"),
+        (1023, "1023 B"),
+        (1024, "1.0 KiB"),
+        (5 * 2**30, "5.0 GiB"),
+        (3 * 2**40, "3.0 TiB"),
+        (2**50, "1024.0 TiB"),
+    ),
+)
+def test_a_byte_count_is_written_in_the_largest_unit_it_reaches(count, said):
+    assert _in_bytes(count) == said
 
 
 @pytest.mark.parametrize("workers", (0, 2))

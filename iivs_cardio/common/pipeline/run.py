@@ -14,6 +14,7 @@ from iivs_cardio.common.logging import log_indented
 from iivs_cardio.common.pipeline.base import (
     Named,
     SupportsReport,
+    SupportsRequiredSpace,
     SupportsUnsourced,
     close_together,
 )
@@ -22,7 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
 
     from iivs_cardio.common.device import Device
-    from iivs_cardio.common.pipeline.base import SideBranch, Stage
+    from iivs_cardio.common.pipeline.base import RequiredSpace, SideBranch, Stage
 
 
 # What carrying out one item came to, short of failing: read and computed, passed over
@@ -113,6 +114,49 @@ class StageRun[S: Releasable](ABC):
             The stage the item's hooks would be registered on.
         """
         raise NotImplementedError
+
+    @abstractmethod
+    def build_source(self, index: int, device: Device) -> object:
+        """Build what the branches are asked about for the item at `index`.
+
+        What `get_stage` asks them for hooks with, built without asking them and with
+        nothing kept, so a run can ask its branches about an item before it opens them.
+
+        Args:
+            index: The item to build it for.
+            device: The device the item would be computed on.
+        """
+        raise NotImplementedError
+
+    def required_space(self, device: Device) -> list[RequiredSpace]:
+        """Ask every branch that can say what writing each item would take.
+
+        Only an item whose stage has an index to compute is asked about, the rest being
+        skipped unwritten. A branch that cannot say is passed over.
+
+        Args:
+            device: The device the items would be computed on.
+
+        Returns:
+            What each branch said for each item, leaving out an item a branch would
+            write nothing for.
+        """
+        asked: list[SupportsRequiredSpace[Any]] = [
+            b for b in self._branches if isinstance(b, SupportsRequiredSpace)
+        ]
+        if not asked:
+            return []
+
+        needs = []
+        for index in range(len(self)):
+            if not self.is_runnable(index, device):
+                continue
+
+            source = self.build_source(index, device)
+            said = (branch.required_space(source) for branch in asked)
+            needs.extend(need for need in said if need is not None)
+
+        return needs
 
     def is_runnable(self, index: int, device: Device) -> bool:
         """Whether the stage built for the item at `index` has an index to compute.
