@@ -83,6 +83,10 @@ class _Run(StageRun[_Item]):
         self._stage = stage
 
     @override
+    def build_stage(self, index: int, device: Device) -> Stage[int]:
+        return self._stage
+
+    @override
     def get_stage(self, index: int, device: Device) -> Stage[int]:
         for branch in self._branches:
             branch.get_hook(self._items[index])

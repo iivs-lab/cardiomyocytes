@@ -12,6 +12,7 @@ from iivs.dhm.data.phase import PhaseBinFolder
 from iivs_cardio.common.device import Device
 from iivs_cardio.optical_flow.data import FLOW_FLOAT_NPY, OpticalFlowFolder
 from iivs_cardio.optical_flow.estimators import DeepFlowConfig, FarnebackConfig
+from scripts._common.compute import ComputeConfig, run_all
 from scripts._common.dataset import FrameSelectConfig, SequenceSelectConfig
 from scripts._common.phase import LAST_SEARCH
 from scripts.optical_flow._normalizing import NormalizeConfig
@@ -246,6 +247,34 @@ def test_a_sequence_too_short_to_make_a_pair_is_skipped_and_named(
     assert written["dataset"]["pairs"] == FRAMES - 1
     assert not (output / NAMES[1]).exists()
     assert "skipped: no index to compute" in caplog.text
+
+
+def test_a_run_where_every_sequence_is_too_short_is_refused_writing_nothing(
+    tree, tmp_path
+):
+    # Each would be skipped, and the branches opened around the run would still
+    # commit a document covering none of them, which would then refuse the name
+    # to the run that was meant.
+    source, select, normalize = _configs(tree, tmp_path, count=1)
+    output = tmp_path / "out"
+    output.mkdir()
+
+    stages = build_flow_stages(
+        source,
+        select,
+        FarnebackConfig(),
+        normalize,
+        None,
+        _target(save=True),
+        output_root=output,
+        name="optical_flow",
+    )
+    compute = ComputeConfig(device="cpu", workers=0, show_progress=False)
+
+    with pytest.raises(ValueError, match=r"none of the 2 seq has an index to compute"):
+        run_all(stages, compute, unit="seq")
+
+    assert list(output.iterdir()) == []
 
 
 def test_skipping_a_short_sequence_leaves_the_others_as_they_would_be(tree, tmp_path):

@@ -337,6 +337,31 @@ def test_a_sequence_every_branch_holds_makes_no_algorithm(algorithms_made):
     assert algorithms_made == []
 
 
+@pytest.mark.parametrize(("frames", "runnable"), ((0, False), (1, False), (2, True)))
+def test_a_sequence_is_runnable_once_it_holds_a_pair(frames, runnable):
+    (sequence,) = _sequences(frames)
+
+    assert _job(sequence).is_runnable(0, Device("cpu")) is runnable
+
+
+def test_measuring_a_sequence_leaves_the_run_as_it_was(algorithms_made):
+    # Measured in the parent, before the workers are handed the run: an
+    # estimator cached there would travel with it, and a hook or a device set
+    # there would be one the worker never asked for.
+    watching = _Watching()
+    (sequence,) = _sequences(4)
+    job = _job(sequence, branches=(watching,))
+
+    stage = job.build_stage(0, Device("cpu"))
+
+    assert len(stage) == 3
+    assert list(stage.all_hooks()) == []
+    assert job._estimators == {}  # noqa: SLF001
+    assert watching.sources == []
+    assert sequence.device is None
+    assert algorithms_made == []
+
+
 def test_the_sequence_lets_go_of_its_window_once_it_has_run():
     (sequence,) = _sequences(4)
     job = _job(sequence, branches=(_Watching(),))

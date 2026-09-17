@@ -97,6 +97,33 @@ class StageRun[S: Releasable](ABC):
         return self._items[index].name
 
     @abstractmethod
+    def build_stage(self, index: int, device: Device) -> Stage[Any, Any]:
+        """Build the stage graph for the item at `index`, with no hook on it.
+
+        The graph `get_stage` hooks, built afresh: the run keeps nothing of it, and
+        nothing touches `device` or reads a frame. That is what lets a run measure its
+        items before it starts a worker or opens a branch.
+
+        Args:
+            index: The item to build the graph for.
+            device: The device the item would be computed on, which a stage may have
+                to be built for without being put on it.
+
+        Returns:
+            The stage the item's hooks would be registered on.
+        """
+        raise NotImplementedError
+
+    def is_runnable(self, index: int, device: Device) -> bool:
+        """Whether the stage built for the item at `index` has an index to compute.
+
+        Args:
+            index: The item to measure.
+            device: The device the item would be computed on.
+        """
+        return len(self.build_stage(index, device)) > 0
+
+    @abstractmethod
     def get_stage(self, index: int, device: Device) -> Stage[Any, Any] | None:
         """Build the stage for the item at `index`, running on `device`.
 

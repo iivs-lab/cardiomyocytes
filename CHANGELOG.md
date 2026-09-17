@@ -192,6 +192,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no empty output is left, and a document counts the name among `skipped`.
   `run_all` does not count it failed or ready, and names it in a warning after
   the verdict.
+- A run where no item's stage has an index to compute is refused by `run_all`
+  before a worker starts or a branch opens, which would otherwise commit a
+  document covering nothing and refuse its name to the corrected run.
+  `StageRun` gains `build_stage`, the graph `get_stage` hooks with no hook on it
+  and nothing kept, and `is_runnable`, which measures it.
 - `EstimatorConfig.build` allocates nothing on the device. `OpenCVEstimator`
   holds its settings and its device, and makes the backend and the cv2 algorithm
   on the first call that needs one, `algorithm` included; an unsupported device

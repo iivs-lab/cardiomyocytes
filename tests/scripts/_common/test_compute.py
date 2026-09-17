@@ -70,6 +70,14 @@ class _Stages(StageRun[_Item]):
         self._short_at = frozenset(short_at)
 
     @override
+    def build_stage(self, index: int, device: Device) -> None:
+        raise NotImplementedError
+
+    @override
+    def is_runnable(self, index: int, device: Device) -> bool:
+        return index not in self._short_at
+
+    @override
     def get_stage(self, index: int, device: Device) -> None:
         raise NotImplementedError
 
@@ -550,6 +558,33 @@ def test_an_item_with_no_index_to_compute_is_neither_ready_nor_failed(
     (warned,) = [r for r in caplog.records if "no index" in r.getMessage()]
     assert warned.levelno == logging.WARNING
     assert warned.getMessage() == "2 skipped with no index to compute: item1, item3"
+
+
+@pytest.mark.parametrize("workers", (0, 2))
+def test_a_run_with_no_index_to_compute_is_refused_before_anything_opens(
+    tmp_path, monkeypatch, workers
+):
+    # Every item would come back skipped, and the branches, opened around the
+    # run, would still commit: a document covering nothing, standing where the
+    # run that was meant would write. Refused before the pool and the branches.
+    def refuse(*args, **kwargs):
+        pytest.fail("a run with nothing to compute reached the pool")
+
+    monkeypatch.setattr("scripts._common.compute.WorkerPool", refuse)
+    dest = tmp_path / "done"
+
+    with pytest.raises(ValueError, match=r"none of the 3 it has an index to compute"):
+        run_all(_Stages(3, dest, short_at=[0, 1, 2]), _compute(workers))
+
+    assert not dest.exists()  # `running` was never entered
+
+
+def test_one_item_long_enough_is_enough_to_run(tmp_path):
+    dest = tmp_path / "done"
+
+    run_all(_Stages(3, dest, short_at=[0, 2]), _compute(0))
+
+    assert _done(dest) == [1]
 
 
 def test_a_skipped_item_is_recorded_apart_from_one_left_unchanged(tmp_path, caplog):

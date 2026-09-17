@@ -40,6 +40,10 @@ class SequenceStageRun(StageRun["PhaseFilteredSequence"]):
         super().__init__(sequences, *branches, name=name)
 
     @override
+    def build_stage(self, index: int, device: Device) -> SequenceStage[Tensor, Path]:
+        return SequenceStage(self._items[index])
+
+    @override
     def get_stage(
         self, index: int, device: Device
     ) -> SequenceStage[Tensor, Path] | None:
@@ -51,7 +55,7 @@ class SequenceStageRun(StageRun["PhaseFilteredSequence"]):
 
         sequence.device = device
 
-        return SequenceStage(sequence).register_hooks(*hooks)
+        return self.build_stage(index, device).register_hooks(*hooks)
 
     @override
     def _work_label(self, index: int) -> str:

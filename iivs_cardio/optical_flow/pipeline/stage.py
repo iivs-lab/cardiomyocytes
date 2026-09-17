@@ -205,15 +205,31 @@ class FlowStageRun(StageRun["PhaseFilteredSequence"]):
 
         return estimator
 
+    def _graph(
+        self, index: int, estimator: OpticalFlowEstimator
+    ) -> tuple[NormalizedFrameStage, FlowStage]:
+        """Build the frames and the flows above them for the item at `index`."""
+        sequence = self._items[index]
+        frames = NormalizedFrameStage(
+            SequenceStage(sequence), self._normalizers[sequence.name]
+        )
+
+        return frames, FlowStage(frames, estimator)
+
+    @override
+    def build_stage(self, index: int, device: Device) -> FlowStage:
+        # An estimator of its own rather than the cached one: a graph measured
+        # in the parent would otherwise leave that estimator in what the
+        # workers are handed.
+        _, flows = self._graph(index, self._config.build(device))
+
+        return flows
+
     @override
     def get_stage(self, index: int, device: Device) -> FlowStage | None:
         sequence = self._items[index]
         estimator = self._get_estimator(device)
-
-        frames = NormalizedFrameStage(
-            SequenceStage(sequence), self._normalizers[sequence.name]
-        )
-        flows = FlowStage(frames, estimator)
+        frames, flows = self._graph(index, estimator)
 
         source = FlowSource(sequence.name, frames, estimator)
         made = (branch.get_hook(source) for branch in self._branches)

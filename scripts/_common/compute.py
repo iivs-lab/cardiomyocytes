@@ -647,6 +647,9 @@ def run_all(
         ValueError: If the log folder is named for another run. Its files would then be
             filed under one name and the parent's own under another, which no reader
             could pair up again.
+        ValueError: If no item's stage has an index to compute, refused before a worker
+            starts or a branch opens: a branch that opened would write an output
+            covering nothing, which then stands in the way of the run that was meant.
         IncompleteRunError: If any item failed, raised once the rest have finished.
         BaseException: What stopped a run that did not see every item, or the interrupt
             that asked it to stop. The verdict is logged before either rises.
@@ -664,6 +667,11 @@ def run_all(
     devices = plan_devices(config)[:num_stages]
     num_workers = len(devices)
     in_process = num_workers <= 1
+
+    runnable = (stages.is_runnable(index, devices[0]) for index in range(num_stages))
+    if num_stages and not any(runnable):
+        msg = f"none of the {num_stages} {unit} has an index to compute"
+        raise ValueError(msg)
 
     workers = f"{num_workers} worker{'' if in_process else 's'}"
     where = ", ".join(str(device) for device in dict.fromkeys(devices))
