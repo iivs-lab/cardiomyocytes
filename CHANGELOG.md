@@ -10,6 +10,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- A run told to end from outside, by `SIGTERM` or `SIGHUP`, stops as `Ctrl-C`
+  stops it: the workers are shut down, the branches close and commit what
+  finished, and the verdict opens with `terminated by SIGTERM:`. Left to itself
+  the signal ended the process where it stood, with no document and no verdict.
+  An item cut off in a worker the same signal reached, which the pool returns
+  as `RuntimeError: Worker-N was killed`, is counted with the items that never
+  came back rather than as a failure.
 - A run whose outputs would not fit is refused before a worker starts or a
   branch opens, with `OSError(ENOSPC)` naming what they need and what is free.
   A branch says what writing an item would take through `SupportsRequiredSpace`,

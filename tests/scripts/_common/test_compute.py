@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import errno
+import inspect
 import logging
 import os
+import signal
 import sys
+import threading
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, override
 
+import mpire.worker
 import pytest
 import torch
 from mpire import WorkerPool
@@ -16,6 +20,7 @@ from iivs_cardio.common.device import Device
 from iivs_cardio.common.pipeline import RequiredSpace, StageRun
 from scripts._common import compute
 from scripts._common.compute import (
+    _CUT_OFF,
     _DEFAULT_WORKERS,
     ComputeConfig,
     IncompleteRunError,
@@ -28,6 +33,7 @@ from scripts._common.compute import (
     _drawing,
     _in_bytes,
     _init_worker,
+    describe_failure,
     log_compute_config,
     log_insights,
     pin_threads,
@@ -815,6 +821,152 @@ def test_an_interrupt_while_closing_is_not_swallowed_with_the_closing_failures(
     assert "item1: ValueError: item 1 gave up" in " ".join(caplog.messages)
 
 
+_SIGNALS = (
+    pytest.param("SIGTERM", id="sigterm"),
+    pytest.param(
+        "SIGHUP",
+        id="sighup",
+        marks=pytest.mark.skipif(not hasattr(signal, "SIGHUP"), reason="no SIGHUP"),
+    ),
+)
+
+
+class _Signalled(_Stages):
+    """A run sent a signal to end part way, as a scheduler ending the job sends one."""
+
+    def __init__(self, *args, sent: str, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._sent = sent
+
+    @override
+    def run_stage(self, index: int, device: Device) -> ItemVerdict:
+        if index == 1:
+            signal.raise_signal(getattr(signal, self._sent))
+
+        return super().run_stage(index, device)
+
+
+@pytest.mark.parametrize("sent", _SIGNALS)
+def test_a_signal_to_end_stops_the_run_and_leaves_the_verdict(tmp_path, caplog, sent):
+    # Left to itself the signal ended the process where it stood: no branch
+    # closed, no document was written, and no line said what had finished.
+    before = signal.getsignal(getattr(signal, sent))
+
+    with caplog.at_level(logging.INFO), pytest.raises(KeyboardInterrupt):
+        run_all(_Signalled(4, tmp_path / "done", sent=sent), _compute(0))
+
+    level, line = _verdict(caplog)
+    assert level == logging.ERROR
+    assert line.startswith(f"terminated by {sent}: 1 of 4 ready in ")
+    assert "3 never came back" in " ".join(caplog.messages)
+    assert signal.getsignal(getattr(signal, sent)) == before
+
+
+class _SignalledTwice(_Stages):
+    """A run sent a second signal while its branches close after the first."""
+
+    closed = False
+
+    @override
+    def run_stage(self, index: int, device: Device) -> ItemVerdict:
+        if index == 0:
+            signal.raise_signal(signal.SIGTERM)
+
+        return super().run_stage(index, device)
+
+    @override
+    @contextmanager
+    def running(self) -> Iterator[_Stages]:
+        self._dest.mkdir(parents=True, exist_ok=True)
+
+        try:
+            yield self
+        finally:
+            signal.raise_signal(signal.SIGTERM)
+            (self._dest / "closed").write_text("", encoding="utf-8")
+
+
+def test_a_second_signal_does_not_cut_the_closing_short(tmp_path, caplog):
+    # Closing is what the first signal asked for; a scheduler or a person
+    # repeating it must not leave the documents unwritten.
+    dest = tmp_path / "done"
+
+    with caplog.at_level(logging.INFO), pytest.raises(KeyboardInterrupt):
+        run_all(_SignalledTwice(2, dest), _compute(0))
+
+    assert (dest / "closed").exists()
+    assert _verdict(caplog)[1].startswith("terminated by SIGTERM: ")
+
+
+def test_a_run_off_the_main_thread_still_runs(tmp_path):
+    # A handler can only be set from the main thread; elsewhere the run goes
+    # ahead and a signal ends it however it would have.
+    dest = tmp_path / "done"
+    errors: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            run_all(_Stages(2, dest), _compute(0))
+        except BaseException as error:  # noqa: BLE001
+            errors.append(error)
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    thread.join()
+
+    assert errors == []
+    assert _done(dest) == [0, 1]
+
+
+class _CutOff(_Stages):
+    """A run whose first item is cut off in its worker before the signal reaches it."""
+
+    @override
+    def run_stage(self, index: int, device: Device) -> ItemVerdict:
+        if index == 0:
+            msg = "Worker-1 was killed"
+            raise RuntimeError(msg)
+
+        if index == 1:
+            signal.raise_signal(signal.SIGTERM)
+
+        return super().run_stage(index, device)
+
+
+def test_a_run_ended_by_a_signal_lists_no_item_it_cut_off_as_failed(tmp_path, caplog):
+    with caplog.at_level(logging.INFO), pytest.raises(KeyboardInterrupt):
+        run_all(_CutOff(4, tmp_path / "done"), _compute(0))
+
+    said = caplog.messages
+    assert _verdict(caplog)[1].startswith("terminated by SIGTERM: 0 of 4 ready in ")
+    assert "4 never came back: the run stopped before they did" in said
+    assert not any(line.startswith("item0:") for line in said)
+
+
+def test_items_a_signal_cut_off_are_taken_back_from_the_failures():
+    # They came back failed only because the worker computing them was told to
+    # end; counted as failures they would read as broken sequences.
+    record = RunRecord()
+    record.add("item0", Outcome(0, "RuntimeError: Worker-1 was killed"))
+    record.add("item1", Outcome(1, "ValueError: item 1 gave up"))
+    record.add("item2", Outcome(2, "RuntimeError: Worker-12 was killed"))
+    record.add("item3", Outcome(3, None, "computed"))
+
+    assert record.drop_cut_off() == ["item0", "item2"]
+    assert record.failed == {"item1": "ValueError: item 1 gave up"}
+    assert record.returned == {"item1", "item3"}
+
+
+def test_what_a_cut_off_item_is_recognised_by_is_what_the_pool_raises():
+    # The one clue is the pool's own wording, so it is pinned here: a release
+    # that words it otherwise fails this rather than turning cut-off items back
+    # into failures without a sound.
+    raised = inspect.getsource(mpire.worker.AbstractWorker._on_kill_exit_gracefully)  # noqa: SLF001
+
+    assert 'RuntimeError(f"Worker-{self.worker_id} was killed")' in raised
+    assert _CUT_OFF.fullmatch(describe_failure(RuntimeError("Worker-3 was killed")))
+
+
 @pytest.mark.parametrize(
     ("error", "said"),
     (
@@ -831,6 +983,13 @@ def test_a_stop_is_named_an_interrupt_wherever_the_interrupt_sits(error, said):
     # Closing gathers what its branches raised into one group, so an interrupt
     # that lands while they close rises inside it rather than as itself.
     assert _describe_stop(error) == said
+
+
+def test_an_interrupt_a_signal_raised_is_named_by_the_signal():
+    assert (
+        _describe_stop(KeyboardInterrupt(), signal.SIGTERM) == "terminated by SIGTERM"
+    )
+    assert _describe_stop(RuntimeError(), signal.SIGTERM) == "stopped by RuntimeError"
 
 
 def test_an_unset_worker_count_falls_back_to_the_machine(monkeypatch):

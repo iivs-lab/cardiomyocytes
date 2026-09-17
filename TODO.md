@@ -249,10 +249,18 @@ force          4     3, 4, 5 → acceleration 4
 
 ## 열린 것 — `scripts/_common/compute.py`
 
-- **SIGTERM으로 끝난 실행은 판정을 남기지 않는다.** 판정은 `run_all`의 `finally`에서 쓰고, 첫 줄이
-  멈춘 원인(`interrupted:`, `stopped by ...:`)을 댄다. 그러나 스케줄러가 작업을 끝낼 때 보내는
-  SIGTERM은 기본 처리기가 파이썬 예외 없이 프로세스를 끝내므로 `finally`에 닿지 않는다. 서버에서
-  돌리기 전에 SIGTERM을 `KeyboardInterrupt`처럼 올릴지(워커 풀에 무엇이 전해지는지 포함) 정해야 한다.
+- ~~**SIGTERM으로 끝난 실행은 판정을 남기지 않는다.**~~ `run_all`이 실행하는 동안(브랜치가 닫히는 동안
+  포함) `SIGTERM`과 `SIGHUP`에 처리기를 둔다. 처리기는 받은 신호를 `RunRecord.signalled`에 적고,
+  같은 신호들을 무시로 돌린 뒤(정리 중 두 번째 신호가 정리를 끊지 않도록) `KeyboardInterrupt`를
+  일으킨다 — `mpire`가 워커를 정리하는 경로가 이것 하나이고, `mpire`는 잡은 것 대신 새 인터럽트를
+  올리므로 신호의 이름은 기록에서 읽는다. 판정 첫 줄은 `terminated by SIGTERM:`. Slurm처럼 워커도
+  신호를 받으면 `mpire` 워커가 작업 안에서 `RuntimeError("Worker-N was killed")`를 일으켜 그 항목이
+  실패로 돌아오는데, 신호로 멈춘 실행에서는 `RunRecord.drop_cut_off`가 그런 항목을 실패에서 빼
+  「돌아오지 않음」으로 센다. 판별 문구는 `mpire` 소스와 대조하는 테스트로 고정했다. 워커가 SIGTERM을
+  무시하게 하는 안은 `mpire`의 마지막 정리(`terminate()` 후 제한 없는 `join()`)가 멈출 수 있어 택하지
+  않았다. **Windows에서는 풀 경로를 재현할 수 없다** — 프로세스 안에서 신호를 일으키는 `in_process`
+  경로만 테스트했고, 워커 풀과 작업 전체에 보내는 신호는 서버에서 확인한다. SIGKILL·OOM은 막을 수
+  없고, 그때는 완료된 출력과 스테이징만 남아 `reuse`로 이어 돌린다.
 
 - **로그 안에 시간 형식이 둘 섞인다.** `log_insights`는 `mpire`가 준 `0:00:03.318`을 그대로
   쓰고, `run_all`과 `run.py`는 `%.1f` + `s`로 `3.6s`를 쓴다. `insights`에는 포맷된 문자열만

@@ -18,9 +18,12 @@ __all__ = (
 import errno
 import logging
 import os
+import re
 import shutil
+import signal
 import sys
-from contextlib import nullcontext
+import threading
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, ClassVar, Final, NamedTuple
 
@@ -36,10 +39,11 @@ from iivs_cardio.common.logging import log_indented
 from iivs_cardio.common.pipeline import StageRun
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
+    from collections.abc import Iterable, Iterator, Mapping, Sequence
     from contextlib import AbstractContextManager
     from logging import Logger
     from pathlib import Path
+    from types import FrameType
 
     from kaparoo.filesystem.types import StrPath
 
@@ -159,12 +163,15 @@ class RunRecord:
         skipped: The items whose stage had no index to compute. Neither failed nor
             ready: a retry would find them as they were.
         failed: The reason each failed item failed, keyed by its name.
+        signalled: The signal the run was told to end by from outside, or `None` for a
+            run nothing outside ended. Defaults to `None`.
     """
 
     returned: set[str] = field(default_factory=set)
     unchanged: set[str] = field(default_factory=set)
     skipped: set[str] = field(default_factory=set)
     failed: dict[str, str] = field(default_factory=dict)
+    signalled: signal.Signals | None = None
 
     @property
     def ready(self) -> int:
@@ -181,6 +188,26 @@ class RunRecord:
             self.unchanged.add(name)
         elif outcome.verdict == "skipped":
             self.skipped.add(name)
+
+    def drop_cut_off(self) -> list[str]:
+        """Take back the items a signal cut off, which came back failed without failing.
+
+        A worker sent a signal to end raises inside the item it is computing, and that
+        arrives as the item's failure. It is an item the run stopped before, so it is
+        counted with the ones that never came back rather than listed as broken.
+
+        Returns:
+            The names of the items taken back, in the order they failed.
+        """
+        cut = [
+            name for name, reason in self.failed.items() if _CUT_OFF.fullmatch(reason)
+        ]
+
+        for name in cut:
+            del self.failed[name]
+            self.returned.discard(name)
+
+        return cut
 
 
 # ========================== #
@@ -553,20 +580,80 @@ def _run_in_pool(
             log_insights(pool.get_insights(), context.name, unit=unit)
 
 
-def _describe_stop(error: BaseException) -> str:
+def _describe_stop(
+    error: BaseException, signalled: signal.Signals | None = None
+) -> str:
     """Name what stopped a run, as the verdict's first line opens with it.
 
     An interrupt raised while the branches close arrives inside the group closing
-    raises, so a group holding one is an interrupt too.
+    raises, so a group holding one is an interrupt too. An interrupt a signal from
+    outside raised is named by that signal, since `Ctrl-C` and a scheduler ending the
+    job are different things to a reader of the log.
+
+    Args:
+        error: What stopped the run.
+        signalled: The signal the run was told to end by, if one was. Defaults to
+            `None`.
     """
     interrupted = isinstance(error, KeyboardInterrupt) or (
         isinstance(error, BaseExceptionGroup)
         and error.subgroup(KeyboardInterrupt) is not None
     )
+    if interrupted and signalled is not None:
+        return f"terminated by {signalled.name}"
+
     if interrupted:
         return "interrupted"
 
     return f"stopped by {type(error).__name__}"
+
+
+# The signals a run is ended by from outside: a scheduler or a service manager
+# ending the job, and the terminal it runs in going away. Windows has no `SIGHUP`.
+_STOP_SIGNALS: Final = tuple(
+    getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name)
+)
+
+# How an item a worker was cut off in reads once `describe_failure` writes it: `mpire`
+# raises this inside the task when the worker is sent a signal to end.
+_CUT_OFF: Final = re.compile(r"RuntimeError: Worker-\d+ was killed")
+
+
+@contextmanager
+def _stopping_on_signals(record: RunRecord) -> Iterator[None]:
+    """Stop the run on a signal from outside as `Ctrl-C` stops it, while the run lasts.
+
+    Left to itself such a signal ends the process where it stands, so nothing closes and
+    no verdict is written. The handler raises the interrupt instead, which is the one
+    thing the pool shuts its workers down on. The pool raises an interrupt of its own in
+    place of the one it caught, so which signal it was is kept on `record`.
+
+    A second signal while the run closes is ignored, closing being what the first one
+    asked for. Outside the main thread no handler can be set, and the run is left to
+    end however the signal ends it.
+
+    Args:
+        record: The record the signal is kept on.
+    """
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def stop(signum: int, _frame: FrameType | None) -> None:
+        record.signalled = signal.Signals(signum)
+
+        for handled in _STOP_SIGNALS:
+            signal.signal(handled, signal.SIG_IGN)
+
+        raise KeyboardInterrupt
+
+    previous = {handled: signal.signal(handled, stop) for handled in _STOP_SIGNALS}
+
+    try:
+        yield
+    finally:
+        for handled, handler in previous.items():
+            signal.signal(handled, handler)
 
 
 def _in_bytes(count: int) -> str:
@@ -661,7 +748,7 @@ def _log_verdict(
     if stopped is None:
         logger.info("%d of %d ready in %.1fs%s", ready, total, elapsed, split)
     else:
-        how = _describe_stop(stopped)
+        how = _describe_stop(stopped, record.signalled)
         logger.error("%s: %d of %d ready in %.1fs%s", how, ready, total, elapsed, split)
 
     if record.skipped:
@@ -717,7 +804,8 @@ def run_all(
             they are written to, refused before a worker starts or a branch opens.
         IncompleteRunError: If any item failed, raised once the rest have finished.
         BaseException: What stopped a run that did not see every item, or the interrupt
-            that asked it to stop. The verdict is logged before either rises.
+            that asked it to stop, which `SIGTERM` and `SIGHUP` raise too. The verdict is
+            logged before either rises.
     """
     name = stages.name
     logger = logging.getLogger(name)
@@ -770,13 +858,22 @@ def run_all(
 
     try:
         # The timer opens first, so the verdict below has an elapsed to read
-        # whatever the two contexts inside it did.
-        with Timer("s") as timer, _drawing(progress=progress), stages.running():
+        # whatever the contexts inside it did; the handlers stay in place while
+        # the branches close.
+        with (
+            Timer("s") as timer,
+            _drawing(progress=progress),
+            _stopping_on_signals(record),
+            stages.running(),
+        ):
             if in_process:
                 _run_in_process(context, record, unit=unit, show_progress=progress)
             else:
                 _run_in_pool(context, config, record, unit=unit, show_progress=progress)
     except BaseException as error:
+        if record.signalled is not None:
+            record.drop_cut_off()
+
         # Swallowed only where there is a verdict to protect: every item seen,
         # a failure among them to report, and nothing that was asked for. A run
         # that stopped early has items nobody can account for, one that lost
