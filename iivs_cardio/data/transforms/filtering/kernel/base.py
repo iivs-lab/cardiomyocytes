@@ -51,8 +51,7 @@ def _normalize_radius(radius: RadiusLike) -> RadiusType:
     """Expand `radius` to the validated `(rx, ry, rz)` every kernel stores.
 
     The two-value form is usually the one to reach for: the in-plane axes are almost
-    always equal, while `rz` is not free to follow them because it counts frames and so
-    tracks the frame rate.
+    always equal, while `rz` counts frames rather than pixels.
 
     Args:
         radius: The half-extent per axis, as `r` for every axis, `(r_spatial,

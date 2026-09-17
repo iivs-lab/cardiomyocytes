@@ -64,7 +64,7 @@ class GaussianKernel(FilterKernel):
         sigma: The standard deviation per axis, in samples, where `0` disables that
             axis. Written as `s`, `(s_spatial, s_temporal)`, or `(sx, sy, sz)`, like a
             radius, and for the same reason the two-value form is usual, since `sz`
-            spans frames and tracks the frame rate.
+            spans frames rather than pixels.
         truncate: The number of standard deviations the window spans, so each radius is
             `int(truncate * sigma + 0.5)`, which is `scipy.ndimage`'s rule and name. It
             is distinct from the border policy, which is always to drop. Defaults to

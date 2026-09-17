@@ -86,11 +86,8 @@ class MedianKernel(FilterKernel):
     `torch.median`, which returns the lower, cannot serve here.
 
     Args:
-        radius: The half-extent per axis, where `0` disables that axis. Left required
-            because there is no safe default: `rz` counts frames but damage tracks the
-            time a window spans, so it has to follow the frame rate rather than a
-            constant. That is also why `(r_spatial, r_temporal)` is usually the form to
-            reach for over a bare `r`.
+        radius: The half-extent per axis, where `0` disables that axis. Left required:
+            `rz` counts frames, and how many is the caller's to choose.
         shape: The neighbours to read inside that extent. `"ellipsoid"` weighs the axes
             against their radii together, taking 33 offsets at radius `(2, 2, 2)`;
             `"cuboid"` takes the whole box, 125. Defaults to `"ellipsoid"`.
