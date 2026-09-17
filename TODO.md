@@ -249,6 +249,11 @@ force          4     3, 4, 5 → acceleration 4
 
 ## 열린 것 — `scripts/_common/compute.py`
 
+- **SIGTERM으로 끝난 실행은 판정을 남기지 않는다.** 판정은 `run_all`의 `finally`에서 쓰고, 첫 줄이
+  멈춘 원인(`interrupted:`, `stopped by ...:`)을 댄다. 그러나 스케줄러가 작업을 끝낼 때 보내는
+  SIGTERM은 기본 처리기가 파이썬 예외 없이 프로세스를 끝내므로 `finally`에 닿지 않는다. 서버에서
+  돌리기 전에 SIGTERM을 `KeyboardInterrupt`처럼 올릴지(워커 풀에 무엇이 전해지는지 포함) 정해야 한다.
+
 - **로그 안에 시간 형식이 둘 섞인다.** `log_insights`는 `mpire`가 준 `0:00:03.318`을 그대로
   쓰고, `run_all`과 `run.py`는 `%.1f` + `s`로 `3.6s`를 쓴다. `insights`에는 포맷된 문자열만
   있고 원시 초 값이 없어 우리 형식으로 다시 그리려면 파싱해야 한다.

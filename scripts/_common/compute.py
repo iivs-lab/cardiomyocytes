@@ -547,7 +547,30 @@ def _run_in_pool(
             log_insights(pool.get_insights(), context.name, unit=unit)
 
 
-def _log_verdict(record: RunRecord, total: int, elapsed: float, logger: Logger) -> None:
+def _describe_stop(error: BaseException) -> str:
+    """Name what stopped a run, as the verdict's first line opens with it.
+
+    An interrupt raised while the branches close arrives inside the group closing
+    raises, so a group holding one is an interrupt too.
+    """
+    interrupted = isinstance(error, KeyboardInterrupt) or (
+        isinstance(error, BaseExceptionGroup)
+        and error.subgroup(KeyboardInterrupt) is not None
+    )
+    if interrupted:
+        return "interrupted"
+
+    return f"stopped by {type(error).__name__}"
+
+
+def _log_verdict(
+    record: RunRecord,
+    total: int,
+    elapsed: float,
+    logger: Logger,
+    *,
+    stopped: BaseException | None = None,
+) -> None:
     """Log what a run got through, and name what it did not.
 
     Written however the run ended, since a run that stopped early is the one whose
@@ -560,13 +583,21 @@ def _log_verdict(record: RunRecord, total: int, elapsed: float, logger: Logger) 
         total: How many items it was given.
         elapsed: How long it ran, in seconds.
         logger: The logger the lines go to.
+        stopped: What stopped the run and is rising past this, or `None` for a run
+            that ended. The first line then opens with what it was, so a run stopped
+            after every item came back does not read as one that finished. Defaults to
+            `None`.
     """
     ready = record.ready
     unchanged = len(record.unchanged)
     counted = f"{ready - unchanged} computed, {unchanged} unchanged"
     split = f" ({counted})" if unchanged else ""
 
-    logger.info("%d of %d ready in %.1fs%s", ready, total, elapsed, split)
+    if stopped is None:
+        logger.info("%d of %d ready in %.1fs%s", ready, total, elapsed, split)
+    else:
+        how = _describe_stop(stopped)
+        logger.error("%s: %d of %d ready in %.1fs%s", how, ready, total, elapsed, split)
 
     if (missing := total - len(record.returned)) > 0:
         logger.error("%d never came back: the run stopped before they did", missing)
@@ -646,6 +677,7 @@ def run_all(
     progress = config.show_progress and watched and num_stages > 1
 
     record = RunRecord()
+    stopped: BaseException | None = None
 
     try:
         # The timer opens first, so the verdict below has an elapsed to read
@@ -662,11 +694,12 @@ def run_all(
         # nothing has only this to say, and an interrupt is a request.
         seen_all = len(record.returned) == num_stages
         if not (seen_all and record.failed and isinstance(error, Exception)):
+            stopped = error
             raise
 
         logger.exception("every item was seen, but the run could not be closed")
     finally:
-        _log_verdict(record, num_stages, timer.elapsed, logger)
+        _log_verdict(record, num_stages, timer.elapsed, logger, stopped=stopped)
 
     if record.failed:
         raise IncompleteRunError(record.failed, num_stages)

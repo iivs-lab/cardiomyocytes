@@ -797,7 +797,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   asked for; the verdict moved into a `finally`, so the numbers are logged
   before whatever rises. An interrupt reaches that too, where `except Exception`
   had let it past the summary entirely: `Ctrl-C` still stops the run, but the
-  person who pressed it is told what had finished.
+  person who pressed it is told what had finished. A stopped run's verdict
+  opens with what stopped it (`interrupted: 3 of 6 ready`, `stopped by
+  RuntimeError: ...`), so one interrupted after every item came back, while its
+  outputs closed, does not read as a run that finished.
 - A reconstruction is scored as warped, not as rounded. `warp_consistency` warped
   a uint8 frame as uint8, and a warp rounds an integer image's samples back to
   its dtype, while the floor a score is read against warps nothing: the rounding

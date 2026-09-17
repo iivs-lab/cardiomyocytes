@@ -23,6 +23,7 @@ from scripts._common.compute import (
     SharedContext,
     WorkerLogFolder,
     _collect_outcomes,
+    _describe_stop,
     _drawing,
     _init_worker,
     log_compute_config,
@@ -158,6 +159,23 @@ def test_the_run_is_bracketed_before_anything_says_it_failed(tmp_path):
     assert closed == [2]
 
 
+def _verdict(caplog) -> tuple[int, str]:
+    """The level and message of the verdict's first line."""
+    (line,) = (r for r in caplog.records if " ready in " in r.getMessage())
+    return line.levelno, line.getMessage()
+
+
+def test_a_run_that_ended_opens_its_verdict_with_the_count(tmp_path, caplog):
+    # Only a run that was stopped says what stopped it, so a plain count is
+    # what a finished run reads as.
+    with caplog.at_level(logging.INFO):
+        run_all(_Stages(3, tmp_path / "done"), _compute(0))
+
+    level, line = _verdict(caplog)
+    assert level == logging.INFO
+    assert line.startswith("3 of 3 ready in ")
+
+
 class _Unclosable(_Stages):
     @override
     @contextmanager
@@ -179,8 +197,12 @@ def test_a_branch_that_cannot_commit_does_not_bury_what_failed(tmp_path, caplog)
     assert failure.value.failed == {"item1": "ValueError: item 1 gave up"}
 
     logged = [record.getMessage() for record in caplog.records]
-    assert "2 of 3 ready" in " ".join(logged)
     assert any("could not be closed" in message for message in logged)
+
+    # Swallowed, so the run ended rather than stopped.
+    level, line = _verdict(caplog)
+    assert level == logging.INFO
+    assert line.startswith("2 of 3 ready in ")
 
 
 def test_a_branch_that_cannot_commit_is_the_verdict_when_nothing_failed(tmp_path):
@@ -551,7 +573,7 @@ def test_items_the_pool_took_down_with_it_are_not_counted_ready(
         run_all(_Stages(4, tmp_path / "done"), _compute(0))
 
     said = " ".join(caplog.messages)
-    assert "1 of 4 ready" in said
+    assert _verdict(caplog)[1].startswith("stopped by RuntimeError: 1 of 4 ready in ")
     assert "2 never came back" in said
     assert "item0: boom" in said  # the verdict is logged before the crash rises
 
@@ -574,9 +596,10 @@ def test_an_interrupt_still_leaves_the_verdict_behind(tmp_path, caplog):
     with caplog.at_level(logging.INFO), pytest.raises(KeyboardInterrupt):
         run_all(_Interrupted(4, tmp_path / "done"), _compute(0))
 
-    said = " ".join(caplog.messages)
-    assert "1 of 4 ready" in said
-    assert "3 never came back" in said
+    level, line = _verdict(caplog)
+    assert level == logging.ERROR
+    assert line.startswith("interrupted: 1 of 4 ready in ")
+    assert "3 never came back" in " ".join(caplog.messages)
 
 
 class _InterruptedClose(_Stages):
@@ -598,9 +621,29 @@ def test_an_interrupt_while_closing_is_not_swallowed_with_the_closing_failures(
     with caplog.at_level(logging.INFO), pytest.raises(KeyboardInterrupt):
         run_all(_InterruptedClose(3, tmp_path / "done", explode_at=[1]), _compute(0))
 
-    said = " ".join(caplog.messages)
-    assert "2 of 3 ready" in said
-    assert "item1: ValueError: item 1 gave up" in said
+    # Every item came back, so only the opening tells this from a finished run.
+    level, line = _verdict(caplog)
+    assert level == logging.ERROR
+    assert line.startswith("interrupted: 2 of 3 ready in ")
+    assert "item1: ValueError: item 1 gave up" in " ".join(caplog.messages)
+
+
+@pytest.mark.parametrize(
+    ("error", "said"),
+    (
+        (KeyboardInterrupt(), "interrupted"),
+        (
+            BaseExceptionGroup("closing", [OSError(), KeyboardInterrupt()]),
+            "interrupted",
+        ),
+        (RuntimeError("Worker-1 died"), "stopped by RuntimeError"),
+        (ExceptionGroup("closing", [OSError()]), "stopped by ExceptionGroup"),
+    ),
+)
+def test_a_stop_is_named_an_interrupt_wherever_the_interrupt_sits(error, said):
+    # Closing gathers what its branches raised into one group, so an interrupt
+    # that lands while they close rises inside it rather than as itself.
+    assert _describe_stop(error) == said
 
 
 def test_an_unset_worker_count_falls_back_to_the_machine(monkeypatch):
