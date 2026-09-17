@@ -13,15 +13,15 @@ from iivs_cardio.optical_flow.estimators.opencv.estimator import (
 )
 
 if TYPE_CHECKING:
-    from iivs_cardio.common.device import Device
+    from iivs_cardio.common.device import Device, DeviceKind
 
 
 @dataclass(frozen=True, slots=True)
 class DualTVL1Config(OpenCVConfig):
     """TV-L1's settings, the last four of which only one device each reads.
 
-    cv2 offers no way to ask an algorithm what it ignored, so a sweep over one of those
-    four on the other device runs to the end and reports no difference.
+    cv2 offers no way to ask an algorithm what it ignored, so `unread_fields` says which
+    of the four the algorithm for a device takes no setting for.
 
     Attributes:
         SUPPORTED_DEVICES: The device kinds this algorithm has an implementation for,
@@ -52,6 +52,21 @@ class DualTVL1Config(OpenCVConfig):
     outer_iterations: int = 5
     median_filtering: int = 5
     iterations: int = 300
+
+    @override
+    def unread_fields(self, device: DeviceKind) -> tuple[str, ...]:
+        """Return the fields cv2's TV-L1 for `device` has no setting for.
+
+        Args:
+            device: The kind of device the algorithm would be built for.
+
+        Returns:
+            On CUDA the three CPU loop and filter settings, on CPU `iterations`.
+        """
+        if device == "cuda":
+            return ("inner_iterations", "outer_iterations", "median_filtering")
+
+        return ("iterations",)
 
     @override
     def _algorithm(self, device: Device) -> OpenCVAlgorithm:

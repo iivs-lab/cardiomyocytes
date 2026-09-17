@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import weakref
 from typing import TYPE_CHECKING, override
 
@@ -704,3 +705,31 @@ def test_a_cuda_push_pairs_each_frame_with_the_one_before_it():
     for index, flow in enumerate(pushed[1:]):
         fresh = FarnebackConfig().build("cuda").calc(frames[index], frames[index + 1])
         assert torch.equal(flow, fresh)
+
+
+@pytest.mark.parametrize(
+    ("config", "read"),
+    (
+        pytest.param(
+            FarnebackConfig,
+            {"cpu": _FARNEBACK_FIELDS, "cuda": _FARNEBACK_FIELDS},
+            id="farneback",
+        ),
+        pytest.param(
+            DualTVL1Config,
+            {
+                "cpu": _TVL1_FIELDS | _TVL1_CPU_FIELDS,
+                "cuda": _TVL1_FIELDS | _TVL1_CUDA_FIELDS,
+            },
+            id="dualtvl1",
+        ),
+        pytest.param(DeepFlowConfig, {"cpu": {}, "cuda": {}}, id="deepflow"),
+    ),
+)
+@pytest.mark.parametrize("device", ("cpu", "cuda"))
+def test_the_unread_fields_are_the_ones_no_getter_reads_back(config, read, device):
+    # The tables above are what each device's algorithm was checked to read, so a
+    # field outside them is one it takes no setting for, and nothing else is.
+    every = {field.name for field in dataclasses.fields(config)}
+
+    assert set(config().unread_fields(device)) == every - read[device].keys()

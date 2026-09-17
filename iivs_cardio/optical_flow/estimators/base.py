@@ -106,6 +106,21 @@ class EstimatorConfig(ABC):
     SUPPORTED_DEVICES: ClassVar[frozenset[DeviceKind]] = DEVICE_KINDS
     FRAME_DTYPE: ClassVar[torch.dtype]
 
+    def unread_fields(self, device: DeviceKind) -> tuple[str, ...]:  # noqa: ARG002
+        """Return the fields the algorithm built for `device` does not read.
+
+        A fact about the algorithm, like `SUPPORTED_DEVICES`: an implementation for one
+        device may take settings the other has no place for. What a run does about a
+        field set to no effect is the run's to decide.
+
+        Args:
+            device: The kind of device the algorithm would be built for.
+
+        Returns:
+            The names of those fields, empty where every field is read on `device`.
+        """
+        return ()
+
     @abstractmethod
     def build(self, device: DeviceLike = "cpu") -> OpticalFlowEstimator:
         """Construct the estimator these describe, on `device`.

@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 
     from omegaconf import DictConfig
 
+    from iivs_cardio.common.device import DeviceKind
+
 _WHITELIST: Final = ("iivs_cardio.optical_flow.estimators.*",)
 
 # The config group `estimator` is filled from. Its name is the key it fills, so
@@ -58,24 +60,40 @@ def parse_estimator_config(node: DictConfig | None) -> EstimatorConfig:
     return config
 
 
-def describe_estimator_config(config: EstimatorConfig) -> dict[str, Any]:
-    """Return an estimator's settings as plain data, with which one it is.
+def describe_estimator_config(
+    config: EstimatorConfig, device: DeviceKind
+) -> dict[str, Any]:
+    """Return an estimator's settings on `device` as plain data, with which one it is.
 
     The kind is read off the class rather than declared on it, since nothing in the
     package branches on it: the name exists for a reader of the document and for a later
     run comparing what wrote one, and both of those already read the settings beside it.
 
+    Only the settings the algorithm for `device` reads are kept. One it does not read
+    shapes nothing, so two runs apart only there compute the same flows and are
+    recorded as the same.
+
     A fresh mapping each call, so a caller may change or drop keys without reaching the
     settings anyone else was given.
+
+    Args:
+        config: The estimator's settings.
+        device: The kind of device the run computes on.
     """
     kind = type(config).__name__.removesuffix("Config").lower()
+    settings = asdict(config)  # ty: ignore[invalid-argument-type]
 
-    return {"kind": kind, **asdict(config)}  # ty: ignore[invalid-argument-type]
+    for name in config.unread_fields(device):
+        del settings[name]
+
+    return {"kind": kind, **settings}
 
 
-def log_estimator_config(estimator_config: EstimatorConfig, logger: Logger) -> None:
-    """Log the estimator a run computes with, with the settings that shape it."""
-    described = describe_estimator_config(estimator_config)
+def log_estimator_config(
+    estimator_config: EstimatorConfig, device: DeviceKind, logger: Logger
+) -> None:
+    """Log the estimator a run computes with, with the settings that shape it on `device`."""
+    described = describe_estimator_config(estimator_config, device)
     kind = described.pop("kind")
     settings = ", ".join(f"{key}={value}" for key, value in described.items())
     settings = f" ({settings})" if settings else ""

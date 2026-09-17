@@ -1501,10 +1501,14 @@ float 3채널이다. 그러면 평가의 `data_range`가 dtype에서 안 나오�
   닫히면 float `FRAME_DTYPE`을 든 추정기도 붙는다. 지금 붙이면 `_resolve_data_range`가
   예외를 던진다.
 
-- **`DualTVL1Config`가 장치에 따라 조용히 무시되는 필드를 넷 든다.**
+- ~~**`DualTVL1Config`가 장치에 따라 조용히 무시되는 필드를 넷 든다.**~~
   `inner_iterations`·`outer_iterations`·`median_filtering`은 CUDA에서, `iterations`는 CPU에서
-  읽히지 않는다. `iterations=1000`으로 스윕을 돌렸는데 CPU였다면 아무 일도 일어나지 않고
-  로그도 말하지 않는다.
+  읽히지 않는다. **닫았다**: 설정이 `EstimatorConfig.unread_fields(device)`로 그 장치에서 읽히지
+  않는 필드를 사실로 선언하고(`SUPPORTED_DEVICES`와 같은 자리, 로그는 남기지 않음), 드라이버가
+  `_validate_estimator`에서 **기본값에서 바꾼** 읽히지 않는 필드를 브랜치가 열리기 전에 거절한다
+  (「어긋난 키는 무시하지 않고 거절한다」). 로그와 기록되는 `settings`에서도 그 장치가 읽지 않는
+  필드는 뺀다 — 결과가 같은 두 실행이 같은 설정으로 기록되어 재사용이 막히지 않도록. 이전에 쓴 평가
+  문서·flow 기록과는 `settings`가 달라지지만, 실제 데이터로 쓴 것이 아직 없다.
 
   **말하는 것은 config가 아니라 드라이버다.** 한 번 config가 직접 `logging.getLogger(__name__)`로
   경고하도록 짰다가 물렸다 — §관측이 정한 것은 로거 이름이 **스테이지**이고 그 이름을 잡이

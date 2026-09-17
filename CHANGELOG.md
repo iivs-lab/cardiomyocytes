@@ -193,6 +193,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   standing.
 ### Changed
 
+- A setting an estimator does not read on the run's device is refused rather
+  than ignored, when it was moved from its default: `DualTVL1Config` takes loop
+  settings only one of cv2's two implementations reads, and a sweep over one on
+  the other device ran to the end reporting no difference.
+  `EstimatorConfig.unread_fields(device)` declares them, and the flow run's log
+  and recorded settings leave them out, so two runs apart only there are
+  recorded as one.
 - An item whose stage has no index to compute is skipped rather than refusing
   the run. `FlowStageRun` refused every dataset holding one sequence of fewer
   than two frames; now `StageRun.run_stage` builds the stage and skips an item

@@ -11,7 +11,11 @@ from iivs.dhm.data.phase import PhaseBinFolder
 
 from iivs_cardio.common.device import Device
 from iivs_cardio.optical_flow.data import FLOW_FLOAT_NPY, OpticalFlowFolder
-from iivs_cardio.optical_flow.estimators import DeepFlowConfig, FarnebackConfig
+from iivs_cardio.optical_flow.estimators import (
+    DeepFlowConfig,
+    DualTVL1Config,
+    FarnebackConfig,
+)
 from scripts._common.compute import ComputeConfig, run_all
 from scripts._common.dataset import FrameSelectConfig, SequenceSelectConfig
 from scripts._common.phase import LAST_SEARCH
@@ -415,3 +419,63 @@ def test_an_estimator_that_cannot_run_on_the_device_is_refused(tree, tmp_path):
         )
 
     assert list(output.iterdir()) == []
+
+
+def _build(tree, tmp_path, estimator, device="cpu", target=None):
+    source, select, normalize = _configs(tree, tmp_path)
+    output = tmp_path / "out"
+    output.mkdir(exist_ok=True)
+
+    return build_flow_stages(
+        source,
+        select,
+        estimator,
+        normalize,
+        None,
+        target,
+        device=device,
+        output_root=output,
+        name="optical_flow",
+    )
+
+
+@pytest.mark.parametrize(
+    ("device", "settings", "said"),
+    (
+        ("cpu", {"iterations": 1000}, "iterations"),
+        (
+            "cuda",
+            {"outer_iterations": 9, "median_filtering": 3},
+            "outer_iterations, median_filtering",
+        ),
+    ),
+)
+def test_a_setting_the_device_does_not_read_is_refused(
+    tree, tmp_path, device, settings, said
+):
+    # A sweep over it would run to the end and report no difference, and the log
+    # would never say why. Refused before a branch opens, as a device the
+    # estimator does not run on is.
+    with pytest.raises(
+        ValueError, match=rf"dualtvl1 on {device} does not read {said}$"
+    ):
+        _build(tree, tmp_path, DualTVL1Config(**settings), device, _target())
+
+    assert list((tmp_path / "out").iterdir()) == []
+
+
+def test_settings_left_at_their_defaults_or_read_by_the_device_are_let_through(
+    tree, tmp_path
+):
+    _build(tree, tmp_path, DualTVL1Config(inner_iterations=7), "cpu", _target())
+    _build(tree, tmp_path, DualTVL1Config(iterations=50), "cuda", _target())
+    _build(tree, tmp_path, FarnebackConfig(num_levels=2), "cpu", _target())
+
+
+def test_what_a_run_records_of_its_estimator_is_what_its_device_reads(tree, tmp_path):
+    stages = _build(tree, tmp_path, DualTVL1Config(), "cpu", _target(save=True))
+
+    for branch in stages._branches:  # noqa: SLF001
+        recorded = branch.settings["estimator"]
+        assert "iterations" not in recorded
+        assert recorded["inner_iterations"] == 20

@@ -13,7 +13,7 @@ __all__ = (
 )
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path, PurePath
 from typing import TYPE_CHECKING, ClassVar, Self
 
@@ -211,23 +211,40 @@ def _evaluation_file(target_config: FlowTargetConfig) -> str:
 
 
 def _validate_estimator(estimator_config: EstimatorConfig, device: DeviceKind) -> None:
-    """Raise unless the estimator has an implementation for the device asked for.
+    """Raise unless the estimator runs on the device asked for, as it was configured.
 
     Refused where both settings are in view, which is before a branch opens. The
     estimator is built per item and per device, so left to that the refusal arrives once
     per sequence, with the outputs already open: the run then writes a document covering
     nothing, and that document refuses the corrected run the name it would write under.
 
-    Raises:
-        ValueError: If `device` is not one the estimator runs on.
-    """
-    if device in estimator_config.SUPPORTED_DEVICES:
-        return
+    A setting moved from its default that the algorithm for `device` does not read is
+    refused too. It would change nothing, and a sweep over it would run to the end
+    reporting no difference.
 
-    kind = describe_estimator_config(estimator_config)["kind"]
-    runs = ", ".join(sorted(estimator_config.SUPPORTED_DEVICES))
-    msg = f"{kind} runs on {runs}, not on {device}"
-    raise ValueError(msg)
+    Raises:
+        ValueError: If `device` is not one the estimator runs on, or if a setting it does
+            not read there was set.
+    """
+    kind = type(estimator_config).__name__.removesuffix("Config").lower()
+
+    if device not in estimator_config.SUPPORTED_DEVICES:
+        runs = ", ".join(sorted(estimator_config.SUPPORTED_DEVICES))
+        msg = f"{kind} runs on {runs}, not on {device}"
+        raise ValueError(msg)
+
+    unread = set(estimator_config.unread_fields(device))
+    moved = [
+        setting.name
+        for setting in fields(estimator_config)  # ty: ignore[invalid-argument-type]
+        if setting.name in unread
+        and setting.default is not MISSING
+        and getattr(estimator_config, setting.name) != setting.default
+    ]
+
+    if moved:
+        msg = f"{kind} on {device} does not read {', '.join(moved)}"
+        raise ValueError(msg)
 
 
 def _validate_output(
@@ -304,20 +321,22 @@ def log_configs(
     normalization: Normalization,
     target_config: FlowTargetConfig | None,
     *,
+    device: DeviceKind,
     output_root: StrPath,
     name: str,
 ) -> None:
     """Log the whole configuration of a run, as one block per part.
 
     A run that writes nothing has no target to describe, which is what an absent
-    `target_config` means.
+    `target_config` means. The estimator is logged with the settings the algorithm for
+    `device` reads.
     """
     logger = logging.getLogger(name)
 
     log_source_config(source_config, sequence_config, logger)
     log_filter_config(kernel_config, logger)
     log_normalize_config(normalization, logger)
-    log_estimator_config(estimator_config, logger)
+    log_estimator_config(estimator_config, device, logger)
 
     if target_config is not None:
         log_target_config(target_config, logger, output_root=output_root)
@@ -335,6 +354,7 @@ def build_branches(
     normalization: Normalization,
     target_config: FlowTargetConfig,
     *,
+    device: DeviceKind,
     output_root: StrPath,
     contents: Mapping[str, Sequence[str]],
     selected: Sequence[str] | None = None,
@@ -352,9 +372,11 @@ def build_branches(
     Args:
         source_config: The tree the run reads, recorded in what the branches write.
         kernel_config: The filter, recorded for a later run to compare against.
-        estimator_config: The estimator, recorded for the same reason.
+        estimator_config: The estimator, recorded for the same reason, with the
+            settings the algorithm for `device` reads.
         normalization: The scaling, whose account is recorded with the rest.
         target_config: The settings saying what the run writes.
+        device: The kind of device the run computes on.
         output_root: The folder the branches write under.
         contents: Every sequence the source holds, against the frames each would be read
             over.
@@ -386,7 +408,7 @@ def build_branches(
         },
         "filter": describe_filter_kernel(kernel_config),
         "normalize": dict(normalization.described),
-        "estimator": describe_estimator_config(estimator_config),
+        "estimator": describe_estimator_config(estimator_config, device),
     }
 
     if (branch := target_config.flows).save:
@@ -476,6 +498,7 @@ def build_flow_stages(
         estimator_config,
         normalization,
         target_config,
+        device=device,
         output_root=output_root,
         name=name,
     )
@@ -505,6 +528,7 @@ def build_flow_stages(
             estimator_config,
             normalization,
             target_config,
+            device=device,
             output_root=output_root,
             contents=contents,
             selected=selected,

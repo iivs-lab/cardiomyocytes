@@ -8,7 +8,11 @@ from hydra import compose, initialize_config_dir
 from hydra.errors import InstantiationException
 from omegaconf import OmegaConf
 
-from iivs_cardio.optical_flow.estimators import DeepFlowConfig, FarnebackConfig
+from iivs_cardio.optical_flow.estimators import (
+    DeepFlowConfig,
+    DualTVL1Config,
+    FarnebackConfig,
+)
 from scripts.optical_flow._estimating import (
     describe_estimator_config,
     log_estimator_config,
@@ -75,11 +79,13 @@ def test_every_option_of_the_group_composes_into_an_estimator_config(name):
 
     config = parse_estimator_config(composed.estimator)
 
-    assert describe_estimator_config(config)["kind"] == name
+    assert describe_estimator_config(config, "cpu")["kind"] == name
 
 
 def test_a_description_names_which_estimator_and_what_shapes_it():
-    described = describe_estimator_config(FarnebackConfig(num_levels=2, win_size=7))
+    described = describe_estimator_config(
+        FarnebackConfig(num_levels=2, win_size=7), "cpu"
+    )
 
     assert described["kind"] == "farneback"
     assert described["num_levels"] == 2
@@ -89,26 +95,58 @@ def test_a_description_names_which_estimator_and_what_shapes_it():
 def test_two_estimators_are_told_apart_by_what_is_recorded():
     # What a later run compares to decide whether a document still describes
     # it: two runs under different estimators must not read as one.
-    assert describe_estimator_config(FarnebackConfig()) != describe_estimator_config(
-        DeepFlowConfig()
-    )
+    assert describe_estimator_config(
+        FarnebackConfig(), "cpu"
+    ) != describe_estimator_config(DeepFlowConfig(), "cpu")
 
 
 def test_a_description_is_a_fresh_mapping_each_time():
     config = FarnebackConfig()
-    described = describe_estimator_config(config)
+    described = describe_estimator_config(config, "cpu")
     described["kind"] = "edited"
 
-    assert describe_estimator_config(config)["kind"] == "farneback"
+    assert describe_estimator_config(config, "cpu")["kind"] == "farneback"
 
 
 def test_the_log_line_names_the_estimator_and_its_settings(caplog):
     logger = logging.getLogger("test_estimating")
 
     with caplog.at_level(logging.INFO, logger="test_estimating"):
-        log_estimator_config(FarnebackConfig(num_levels=2), logger)
+        log_estimator_config(FarnebackConfig(num_levels=2), "cpu", logger)
 
     (line,) = caplog.messages
 
     assert "estimator: farneback" in line
     assert "num_levels=2" in line
+
+
+@pytest.mark.parametrize(
+    ("device", "absent"),
+    (
+        ("cpu", {"iterations"}),
+        ("cuda", {"inner_iterations", "outer_iterations", "median_filtering"}),
+    ),
+)
+def test_a_description_leaves_out_what_the_device_does_not_read(device, absent):
+    # Two runs apart only in a setting nothing reads compute the same flows, so
+    # they are recorded as the same and one may reuse what the other wrote.
+    described = describe_estimator_config(DualTVL1Config(), device)
+
+    assert absent.isdisjoint(described)
+    assert {"tau", "nscales", "warps"} <= described.keys()
+    assert describe_estimator_config(
+        DualTVL1Config(), device
+    ) == describe_estimator_config(DualTVL1Config(**dict.fromkeys(absent, 7)), device)
+
+
+def test_the_log_line_names_only_what_the_device_reads(caplog):
+    logger = logging.getLogger("test_estimating")
+
+    with caplog.at_level(logging.INFO, logger="test_estimating"):
+        log_estimator_config(DualTVL1Config(), "cpu", logger)
+
+    (line,) = caplog.messages
+    listed = dict(pair.split("=") for pair in line.split("(", 1)[1][:-1].split(", "))
+
+    assert listed["inner_iterations"] == "20"
+    assert "iterations" not in listed
