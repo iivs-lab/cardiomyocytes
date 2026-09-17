@@ -535,12 +535,12 @@ def test_a_subpath_that_reaches_outside_a_sequence_is_refused(config, subpath):
     # The destination check compares the two subpaths as they stand, so a `..`
     # walks straight past it and `Path(root, name, subpath)` lands wherever it
     # points: back inside the source, on a run the check just cleared. Refused
-    # where a subpath is read instead, which covers whichever end named it.
+    # as the field is read, which covers whichever end named it.
     # `is_absolute()` is not the test: `/elsewhere` is False on Windows, where
     # it still resets the path to the drive root, and the anchor is what says so
     # on both platforms.
     with pytest.raises(ValueError, match=r"invalid subpath"):
-        config(subpath=subpath).resolve_subpath()
+        config(subpath=subpath)
 
 
 @pytest.mark.parametrize("config", (PreprocessSourceConfig, FrameBranchConfig))

@@ -45,6 +45,21 @@ SHORT_SEQUENCE_POLICIES: Final[tuple[ShortSequencePolicy, ...]] = literal_values
 )
 
 
+def _ensure_relative(subpath: str) -> PurePath:
+    """Return `subpath` as a path a sequence's own folder holds, refusing any other.
+
+    Raises:
+        ValueError: If it is anchored, or steps outside with a `..`.
+    """
+    path = PurePath(subpath)
+
+    if path.anchor or ".." in path.parts:
+        msg = f"invalid subpath {subpath!r}: expected a relative path, no '..'"
+        raise ValueError(msg)
+
+    return path
+
+
 @dataclass
 class SequenceLayout:
     """Where one end of a stage keeps a sequence's frames, inside its own folder.
@@ -58,11 +73,19 @@ class SequenceLayout:
             names none and follows nothing.
         subpath: The layout that was asked for. Defaults to `None`, which takes
             whichever the class or the other end settles on.
+
+    Raises:
+        ValueError: If `subpath` reaches outside a sequence's own folder.
     """
 
     DEFAULT_SUBPATH: ClassVar[str]
 
     subpath: str | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse a layout no sequence could hold, where it is read rather than used."""
+        if self.subpath is not None:
+            _ensure_relative(self.subpath)
 
     def resolve_subpath(self, follow: str | None = None) -> str:
         """Return where the frames sit, settling an unset `subpath`.
@@ -87,12 +110,7 @@ class SequenceLayout:
         default = unwrap_or_default(follow, self.DEFAULT_SUBPATH)
         subpath = unwrap_or_default(self.subpath, default)
 
-        path = PurePath(subpath)
-        if path.anchor or ".." in path.parts:
-            msg = f"invalid subpath {subpath!r}: expected a relative path, no '..'"
-            raise ValueError(msg)
-
-        return "/".join(path.parts)
+        return "/".join(_ensure_relative(subpath).parts)
 
 
 @dataclass
@@ -113,12 +131,19 @@ class FrameSelectConfig:
         if_short: The policy for a sequence that cannot supply `count`, which says
             nothing when there is no count to fall short of. `"take"` takes what there
             is and names the sequence in the log. Defaults to `"take"`.
+
+    Raises:
+        ValueError: If `start` is negative, or `step` or `count` is below one.
     """
 
     start: int = 0
     step: int = 1
     count: int | None = None
     if_short: ShortSequencePolicy = "take"
+
+    def __post_init__(self) -> None:
+        """Refuse a selection no sequence could be read by, where it is read."""
+        self.indices(0)  # the three are checked before a total is read at all
 
     def indices(self, total: int) -> range:
         """Return which of `total` source frames this run takes, in order."""
