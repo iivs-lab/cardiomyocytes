@@ -222,20 +222,44 @@ def test_a_sequence_the_document_has_no_range_for_is_refused_by_name(tree, tmp_p
         )
 
 
-def test_a_sequence_too_short_to_make_a_pair_is_refused(tree, tmp_path):
-    source, select, normalize = _configs(tree, tmp_path, count=1)
+def _shorten(tree, name: str, keep: int) -> None:
+    """Leave `keep` frames in one sequence of the tree, as a cut acquisition would."""
+    for frame in sorted((tree / name / PHASE_FLOAT_BIN).iterdir())[keep:]:
+        frame.unlink()
 
-    with pytest.raises(ValueError, match="a flow needs two"):
-        build_flow_stages(
-            source,
-            select,
-            FarnebackConfig(),
-            normalize,
-            None,
-            _target(),
-            output_root=tmp_path / "out",
-            name="optical_flow",
-        )
+
+def test_a_sequence_too_short_to_make_a_pair_is_skipped_and_named(
+    tree, tmp_path, caplog
+):
+    # It answers no flow, so the run goes on without it rather than refusing the
+    # whole dataset over it. What it leaves is the document's own account: given
+    # to the run, with no result, which is what `skipped` counts.
+    _shorten(tree, NAMES[1], keep=1)
+
+    with caplog.at_level(logging.INFO):
+        output = _run(tree, tmp_path, _target(save=True))
+
+    written = json.loads((output / "flow_evaluation.json").read_text("utf-8"))
+
+    assert written["coverage"]["covered"] == SEQUENCES - 1
+    assert written["coverage"]["skipped"] == [NAMES[1]]
+    assert written["dataset"]["pairs"] == FRAMES - 1
+    assert not (output / NAMES[1]).exists()
+    assert "skipped: no index to compute" in caplog.text
+
+
+def test_skipping_a_short_sequence_leaves_the_others_as_they_would_be(tree, tmp_path):
+    whole = _run(tree, tmp_path / "whole", _target(save=True))
+    _shorten(tree, NAMES[1], keep=1)
+    LAST_SEARCH.clear()  # the tree changed under the search the first run kept
+    short = _run(tree, tmp_path / "short", _target(save=True))
+
+    kept = OpticalFlowFolder(whole / NAMES[0] / FLOW_FLOAT_NPY)
+    alongside = OpticalFlowFolder(short / NAMES[0] / FLOW_FLOAT_NPY)
+
+    assert len(alongside) == len(kept)
+    for index in range(len(kept)):
+        assert np.array_equal(alongside[index], kept[index])
 
 
 # ========================== #

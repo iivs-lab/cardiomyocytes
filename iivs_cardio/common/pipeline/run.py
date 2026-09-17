@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-__all__ = ("Releasable", "StageRun")
+__all__ = ("ItemVerdict", "Releasable", "StageRun")
 
 import logging
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, contextmanager
-from typing import TYPE_CHECKING, Any, Protocol, Self
+from typing import TYPE_CHECKING, Any, Literal, Protocol, Self
 
 from kaparoo.utils import quantify
 from kaparoo.utils.timer import Timer
@@ -23,6 +23,12 @@ if TYPE_CHECKING:
 
     from iivs_cardio.common.device import Device
     from iivs_cardio.common.pipeline.base import SideBranch, Stage
+
+
+# What carrying out one item came to, short of failing: read and computed, passed over
+# because every branch already holds it, or passed over because its stage answers for no
+# index at all.
+type ItemVerdict = Literal["computed", "unchanged", "skipped"]
 
 
 class Releasable(Named, Protocol):
@@ -167,12 +173,18 @@ class StageRun[S: Releasable](ABC):
 
         self._log("nothing to compute: every branch already holds this item")
 
-    def run_stage(self, index: int, device: Device) -> bool:
+    def run_stage(self, index: int, device: Device) -> ItemVerdict:
         """Carry out the item at `index` on `device`, and log what happened.
 
         The item's name heads a block and everything else hangs under it, so a reader
         skimming the left margin sees one entry per item. Every branch that has
         something to say says it after it committed.
+
+        An item whose stage answers for no index is skipped rather than walked. The
+        stage's length is the whole of that judgement, so it holds for whatever makes
+        the length zero: a sequence of one frame under a stage over pairs, or of two
+        under one built over those pairs. No hook is opened for it, so no branch writes
+        an empty output that would read as a finished one.
 
         The item lets go of what it held afterwards, whether it finished or gave up.
         Every item of the run is held for the whole of it, so a window kept past the
@@ -184,9 +196,10 @@ class StageRun[S: Releasable](ABC):
             device: The device to carry it out on.
 
         Returns:
-            Whether the item was computed. One that no branch wants a hook for is not
-            read at all, and the frames that would have cost are the whole point of
-            asking first.
+            `"computed"` for an item that was walked. `"unchanged"` for one no branch
+            wants a hook for, which is not read at all: the frames that would have cost
+            are the whole point of asking first. `"skipped"` for one whose stage answers
+            for no index, which is not read either.
         """
         item = self._items[index]
 
@@ -195,7 +208,11 @@ class StageRun[S: Releasable](ABC):
         stage = self.get_stage(index, device)
         if stage is None:
             self._log_unchanged()
-            return False
+            return "unchanged"
+
+        if not len(stage):
+            self._log("skipped: no index to compute")
+            return "skipped"
 
         self._log("%s on %s", self._work_label(index), device)
 
@@ -210,7 +227,7 @@ class StageRun[S: Releasable](ABC):
 
         self._log("done in %.1fs", timer.elapsed)
 
-        return True
+        return "computed"
 
     @contextmanager
     def running(self) -> Iterator[Self]:

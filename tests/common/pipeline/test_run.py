@@ -40,6 +40,21 @@ class _Doubled(Stage[int]):
         return self._source[index].require() * 2
 
 
+class _Pairs(Stage[int]):
+    """A stage answering once for each neighbouring pair of the one beneath."""
+
+    def __init__(self, source: Stage[int]) -> None:
+        super().__init__(source)
+        self._source = source
+
+    def __len__(self) -> int:
+        return max(len(self._source) - 1, 0)
+
+    @override
+    def _compute(self, index: int) -> int:
+        return self._source[index].require() + self._source[index + 1].require()
+
+
 class _Reporting:
     """A hook that has one line to say once its stage is done."""
 
@@ -124,7 +139,7 @@ def test_a_hook_on_a_stage_further_down_reports_too(caplog):
     stage = _Doubled(source).register_hooks(_Reporting("above"))
 
     with caplog.at_level(logging.INFO):
-        assert _Run(stage).run_stage(0, Device("cpu"))
+        assert _Run(stage).run_stage(0, Device("cpu")) == "computed"
 
     said = _said(caplog)
     assert "above" in said
@@ -199,3 +214,29 @@ def test_hooks_of_one_stage_report_in_the_order_they_were_registered(caplog):
 
     said = _said(caplog)
     assert said.index("first") < said.index("second")
+
+
+def test_an_item_its_stage_answers_nothing_for_is_skipped_unopened(caplog):
+    # Whether there is anything to compute is the stage's length to say, so a
+    # chain that shortens as it climbs is judged at the top: two numbers under a
+    # stage of pairs answer one, and one answers none. Nothing is opened, so no
+    # hook commits an output standing for work that was never done.
+    events: list[str] = []
+    source = _Numbers(1).register_hooks(_Traced("below", events))
+    stage = _Pairs(source).register_hooks(_Traced("above", events))
+
+    with caplog.at_level(logging.INFO):
+        verdict = _Run(stage).run_stage(0, Device("cpu"))
+
+    assert verdict == "skipped"
+    assert events == []
+    assert "skipped: no index to compute" in _said(caplog)
+    assert not any("doubling" in line for line in _said(caplog))
+
+
+def test_an_item_long_enough_for_its_stage_is_walked():
+    events: list[str] = []
+    stage = _Pairs(_Numbers(2)).register_hooks(_Traced("above", events))
+
+    assert _Run(stage).run_stage(0, Device("cpu")) == "computed"
+    assert events == ["open above", "call above 0", "close above", "report above"]

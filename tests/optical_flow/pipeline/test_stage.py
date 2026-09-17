@@ -309,7 +309,7 @@ def test_one_estimator_is_built_for_a_device_however_many_sequences_run():
     job = _job(*sequences, branches=(_Watching(),), config=config)
 
     for index in range(len(sequences)):
-        job.get_stage(index, Device("cpu"))
+        assert job.run_stage(index, Device("cpu")) == "computed"
 
     assert config.builds == 1
 
@@ -333,7 +333,7 @@ def test_a_sequence_every_branch_holds_makes_no_algorithm(algorithms_made):
     (sequence,) = _sequences(4)
     job = _job(sequence, branches=(_Watching(wanted=False),))
 
-    assert not job.run_stage(0, Device("cpu"))
+    assert job.run_stage(0, Device("cpu")) == "unchanged"
     assert algorithms_made == []
 
 
@@ -341,7 +341,7 @@ def test_the_sequence_lets_go_of_its_window_once_it_has_run():
     (sequence,) = _sequences(4)
     job = _job(sequence, branches=(_Watching(),))
 
-    assert job.run_stage(0, Device("cpu"))
+    assert job.run_stage(0, Device("cpu")) == "computed"
     assert sequence.released == 1
     assert sequence.device == Device("cpu")
 
@@ -350,7 +350,7 @@ def test_a_sequence_no_branch_wants_is_not_run():
     (sequence,) = _sequences(4)
     job = _job(sequence, branches=(_Watching(wanted=False),))
 
-    assert not job.run_stage(0, Device("cpu"))
+    assert job.run_stage(0, Device("cpu")) == "unchanged"
     assert sequence.released == 0
 
 
@@ -366,13 +366,23 @@ def test_a_sequence_with_no_normalizer_is_refused_by_name():
         )
 
 
-def test_a_sequence_too_short_to_make_a_pair_is_refused_before_the_run():
-    # It would answer no flow at all, and a document standing for it would
-    # count it as covered while saying nothing.
+def test_a_sequence_too_short_to_make_a_pair_is_skipped_unread(caplog, algorithms_made):
+    # It answers no flow at all. Walking it would open writers with nothing to
+    # write, which refuse on closing, and the setting that made it short would
+    # read as a flow that failed.
+    watching = _Watching()
     (sequence,) = _sequences(1)
+    job = _job(sequence, branches=(watching,))
 
-    with pytest.raises(ValueError, match="holds 1 frames: a flow needs two"):
-        _job(sequence)
+    with caplog.at_level("INFO"):
+        assert job.run_stage(0, Device("cpu")) == "skipped"
+
+    said = [record.getMessage().strip() for record in caplog.records]
+    assert "skipped: no index to compute" in said
+    assert not any("computing" in line for line in said)
+    assert watching.seen == []
+    assert sequence.released == 0
+    assert algorithms_made == []
 
 
 def test_the_job_says_what_it_is_about_to_do():

@@ -37,6 +37,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
     from pathlib import Path
 
+    from iivs_cardio.common.pipeline import ItemVerdict
+
 
 @dataclass(frozen=True, slots=True)
 class _Item:
@@ -58,12 +60,14 @@ class _Stages(StageRun[_Item]):
         dest: Path,
         explode_at: Iterable[int] = (),
         reuse_at: Iterable[int] = (),
+        short_at: Iterable[int] = (),
     ) -> None:
         super().__init__([_Item(f"item{i}") for i in range(count)], name="run")
 
         self._dest = dest
         self._explode_at = frozenset(explode_at)
         self._reuse_at = frozenset(reuse_at)
+        self._short_at = frozenset(short_at)
 
     @override
     def get_stage(self, index: int, device: Device) -> None:
@@ -74,17 +78,20 @@ class _Stages(StageRun[_Item]):
         raise NotImplementedError
 
     @override
-    def run_stage(self, index: int, device: Device) -> bool:
+    def run_stage(self, index: int, device: Device) -> ItemVerdict:
         if index in self._explode_at:
             msg = f"item {index} gave up"
             raise ValueError(msg)
 
         if index in self._reuse_at:
-            return False
+            return "unchanged"
+
+        if index in self._short_at:
+            return "skipped"
 
         (self._dest / f"{index:03d}.done").write_text("", encoding="utf-8")
 
-        return True
+        return "computed"
 
     @override
     @contextmanager
@@ -272,7 +279,7 @@ class _Talkative(_Stages):
     """A run whose items say something only a low level lets through."""
 
     @override
-    def run_stage(self, index: int, device: Device) -> bool:
+    def run_stage(self, index: int, device: Device) -> ItemVerdict:
         logging.getLogger(self.name).debug("item %d had something to say", index)
 
         return super().run_stage(index, device)
@@ -503,8 +510,8 @@ def test_a_failure_is_named_by_the_index_it_carries_not_by_when_it_returned(
     stages = _Stages(3, tmp_path)
     outcomes = [
         Outcome(2, "boom"),
-        Outcome(0, None, computed=True),
-        Outcome(1, None, computed=False),
+        Outcome(0, None, "computed"),
+        Outcome(1, None, "unchanged"),
     ]
     record = RunRecord()
 
@@ -522,13 +529,55 @@ def test_a_failure_is_named_by_the_index_it_carries_not_by_when_it_returned(
     ]
 
 
+@pytest.mark.parametrize("workers", (0, 2))
+def test_an_item_with_no_index_to_compute_is_neither_ready_nor_failed(
+    tmp_path, caplog, workers
+):
+    # A retry would find it exactly as short, so it is not a failure and raises
+    # nothing; it has no output either, so it is not counted ready. The verdict
+    # names it, which is where a reader of a finished run finds what was left out.
+    dest = tmp_path / "done"
+
+    with caplog.at_level(logging.INFO):
+        run_all(_Stages(4, dest, short_at=[1, 3]), _compute(workers))
+
+    assert _done(dest) == [0, 2]
+
+    level, line = _verdict(caplog)
+    assert level == logging.INFO
+    assert line.startswith("2 of 4 ready in ")
+
+    (warned,) = [r for r in caplog.records if "no index" in r.getMessage()]
+    assert warned.levelno == logging.WARNING
+    assert warned.getMessage() == "2 skipped with no index to compute: item1, item3"
+
+
+def test_a_skipped_item_is_recorded_apart_from_one_left_unchanged(tmp_path, caplog):
+    stages = _Stages(3, tmp_path)
+    outcomes = [
+        Outcome(0, None, "skipped"),
+        Outcome(1, None, "unchanged"),
+        Outcome(2, None, "computed"),
+    ]
+    record = RunRecord()
+
+    with caplog.at_level(logging.INFO):
+        _collect_outcomes(iter(outcomes), stages, logging.getLogger("run"), record)
+
+    assert record.skipped == {"item0"}
+    assert record.unchanged == {"item1"}
+    assert record.failed == {}
+    assert record.ready == 2
+    assert caplog.messages[0] == "item0 skipped (1/3)"
+
+
 def test_what_came_back_before_the_pool_died_is_kept(tmp_path, caplog):
     # The collections belong to the caller, so a pool that dies part way leaves
     # what it already said behind. Owning them here lost the grounds for a
     # retry exactly when a run most needs them.
     def outcomes():
         yield Outcome(0, "boom")
-        yield Outcome(1, None, computed=False)
+        yield Outcome(1, None, "unchanged")
         msg = "Worker-1 died unexpectedly"
         raise RuntimeError(msg)
 
@@ -555,7 +604,7 @@ def test_items_the_pool_took_down_with_it_are_not_counted_ready(
     # What rises is the pool going down, not the one item that failed before it:
     # the run stopped with two items unseen, and a verdict naming only the
     # failure would read as a run that finished.
-    outcomes = iter([Outcome(0, "boom"), Outcome(1, None, computed=True)])
+    outcomes = iter([Outcome(0, "boom"), Outcome(1, None, "computed")])
 
     def vanish(worker_id, context, index):
         try:
@@ -582,7 +631,7 @@ class _Interrupted(_Stages):
     """A run that is asked to stop part way, as a `Ctrl-C` asks."""
 
     @override
-    def run_stage(self, index: int, device: Device) -> bool:
+    def run_stage(self, index: int, device: Device) -> ItemVerdict:
         if index == 1:
             raise KeyboardInterrupt
 

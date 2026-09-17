@@ -41,6 +41,8 @@ if TYPE_CHECKING:
 
     from kaparoo.filesystem.types import StrPath
 
+    from iivs_cardio.common.pipeline import ItemVerdict
+
 
 # ========================== #
 #          Settings          #
@@ -130,13 +132,14 @@ class Outcome(NamedTuple):
         index: The item this outcome belongs to. Carried back so a result can be
             recognised whatever order it arrives in.
         reason: The reason the item failed, or `None` if it did not.
-        computed: Whether anything was read and computed for it. Defaults to False,
-            which is also what an item that failed comes back with.
+        verdict: What carrying it out came to, short of failing. Defaults to
+            `"unchanged"`, which is also what an item that failed comes back with and is
+            read past, `reason` being what says it failed.
     """
 
     index: int
     reason: str | None
-    computed: bool = False
+    verdict: ItemVerdict = "unchanged"
 
 
 @dataclass(slots=True)
@@ -149,18 +152,22 @@ class RunRecord:
     Attributes:
         returned: The items that came back at all, which separates one nobody ran from
             one that ran and failed.
-        unchanged: The items this run did not compute.
+        unchanged: The items this run did not compute, every branch already holding
+            them.
+        skipped: The items whose stage had no index to compute. Neither failed nor
+            ready: a retry would find them as they were.
         failed: The reason each failed item failed, keyed by its name.
     """
 
     returned: set[str] = field(default_factory=set)
     unchanged: set[str] = field(default_factory=set)
+    skipped: set[str] = field(default_factory=set)
     failed: dict[str, str] = field(default_factory=dict)
 
     @property
     def ready(self) -> int:
         """How many items have an output to show for them."""
-        return len(self.returned) - len(self.failed)
+        return len(self.returned) - len(self.failed) - len(self.skipped)
 
     def add(self, name: str, outcome: Outcome) -> None:
         """Take in what one item came back with."""
@@ -168,8 +175,10 @@ class RunRecord:
 
         if outcome.reason is not None:
             self.failed[name] = outcome.reason
-        elif not outcome.computed:
+        elif outcome.verdict == "unchanged":
             self.unchanged.add(name)
+        elif outcome.verdict == "skipped":
+            self.skipped.add(name)
 
 
 # ========================== #
@@ -362,12 +371,12 @@ def _run_on_worker(worker_id: int, context: SharedContext, index: int) -> Outcom
     try:
         device.activate()
         pin_threads(len(devices))
-        computed = stages.run_stage(index, device)
+        verdict = stages.run_stage(index, device)
     except Exception as error:
         logging.getLogger(context.name).exception("%s failed", stages.get_name(index))
         return Outcome(index, describe_failure(error))
 
-    return Outcome(index, None, computed=computed)
+    return Outcome(index, None, verdict)
 
 
 # ========================== #
@@ -445,12 +454,7 @@ def _collect_outcomes(
         name = stages.get_name(outcome.index)
         record.add(name, outcome)
 
-        verdict = "unchanged"
-        if outcome.reason is not None:
-            verdict = "failed"
-        elif outcome.computed:
-            verdict = "computed"
-
+        verdict = "failed" if outcome.reason is not None else outcome.verdict
         logger.info("%s %s (%d/%d)", name, verdict, count, total)
 
 
@@ -598,6 +602,12 @@ def _log_verdict(
     else:
         how = _describe_stop(stopped)
         logger.error("%s: %d of %d ready in %.1fs%s", how, ready, total, elapsed, split)
+
+    if record.skipped:
+        short = ", ".join(sorted(record.skipped))
+        logger.warning(
+            "%d skipped with no index to compute: %s", len(record.skipped), short
+        )
 
     if (missing := total - len(record.returned)) > 0:
         logger.error("%d never came back: the run stopped before they did", missing)

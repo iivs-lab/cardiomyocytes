@@ -170,8 +170,7 @@ class FlowStageRun(StageRun["PhaseFilteredSequence"]):
         name: The run's name.
 
     Raises:
-        ValueError: If a sequence has no normalizer, or holds too few frames to make a
-            pair.
+        ValueError: If a sequence has no normalizer.
     """
 
     def __init__(
@@ -187,11 +186,6 @@ class FlowStageRun(StageRun["PhaseFilteredSequence"]):
         for sequence in sequences:
             if sequence.name not in normalizers:
                 msg = f"no normalizer for {sequence.name!r}: give one per sequence"
-                raise ValueError(msg)
-
-            if len(sequence) < 2:
-                held = len(sequence)
-                msg = f"{sequence.name!r} holds {held} frames: a flow needs two"
                 raise ValueError(msg)
 
         self._normalizers = normalizers

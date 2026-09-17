@@ -1131,7 +1131,7 @@ def test_a_hook_that_is_empty_is_still_a_hook(phase_tree):
     branch = _Counting()
     stages = _factory(phase_tree, branch)
 
-    assert stages.run_stage(0, Device("cpu"))
+    assert stages.run_stage(0, Device("cpu")) == "computed"
     assert branch.hook.seen == list(range(FRAMES))
 
 
@@ -1779,7 +1779,7 @@ def test_a_run_with_no_target_does_not_blame_a_branch_for_holding_anything(
     )
 
     with caplog.at_level(logging.INFO):
-        assert not stages.run_stage(0, Device("cpu"))
+        assert stages.run_stage(0, Device("cpu")) == "unchanged"
 
     said = " ".join(record.getMessage() for record in caplog.records)
     assert "nothing to do: this run writes nothing" in said
