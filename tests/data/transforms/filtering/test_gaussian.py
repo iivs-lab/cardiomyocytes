@@ -197,11 +197,22 @@ def test_a_spike_is_spread_over_its_neighbourhood_not_deleted():
     assert blurred[2, 1].item() > 0.0  # the spike bled into a neighbour
 
 
-def test_gaussian_matches_a_brute_force_weighted_mean():
+@pytest.mark.parametrize(
+    "sigma",
+    (
+        pytest.param((1.0, 1.0, 1.0), id="equal-axes"),
+        pytest.param((0.7, 1.6, 1.0), id="unequal-every-way"),
+        pytest.param((2.0, 0.5, 0.0), id="a-disabled-temporal-axis"),
+        pytest.param((0.0, 1.2, 0.8), id="a-disabled-spatial-axis"),
+    ),
+)
+def test_gaussian_matches_a_brute_force_weighted_mean(sigma):
     # The separable pass, with time collapsed first and one final division, must
-    # equal the full 3D normalized weighting, not a per-axis approximation.
-    frames = _frames(5)
-    kernel = GaussianKernel((1.0, 1.0, 1.0), truncate=1.5)
+    # equal the full 3D normalized weighting, not a per-axis approximation. The
+    # sigmas differ per axis: an equal one on every axis weighs x and y alike,
+    # so a pass that swapped their weights would still agree.
+    frames = _frames(5, height=7, width=9)
+    kernel = GaussianKernel(sigma, truncate=1.5)
     window = torch.from_numpy(frames)
 
     for index in range(len(frames)):
