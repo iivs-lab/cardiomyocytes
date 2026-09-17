@@ -70,7 +70,9 @@ class FrameEvaluation(StepResult):
             measured. Every metric of `METRICS` is a key, and nothing else is.
 
     Metrics:
-        ssim: Structural similarity of the reconstruction against the second frame.
+        ssim: Structural similarity of the reconstruction against the first frame. A
+            forward flow is defined on that frame's grid, so sampling the second one
+            along it reconstructs the first.
         ssim_floor: What a zero flow would have scored, which `ssim` is read above
             rather than on its own.
         psnr: Peak signal-to-noise ratio of the same reconstruction, in dB, which an
