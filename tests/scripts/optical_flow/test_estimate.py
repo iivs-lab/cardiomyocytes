@@ -16,7 +16,7 @@ from scripts._common.dataset import SequenceSelectConfig
 from scripts._common.phase import LAST_SEARCH
 from scripts.optical_flow._normalizing import NormalizeConfig
 from scripts.optical_flow._process import (
-    FlowInputs,
+    FlowConfig,
     FlowSourceConfig,
     FlowTargetConfig,
 )
@@ -157,25 +157,25 @@ def test_a_composed_job_is_read_into_one_value():
         "select.exclude=[TL_00,TL_01]",
     )
 
-    inputs = FlowInputs.read(composed)
+    config = FlowConfig.read(composed)
 
-    assert inputs.source.root == "/data"
-    assert isinstance(inputs.estimator, DeepFlowConfig)
-    assert isinstance(inputs.kernel, IdentityConfig)
-    assert inputs.normalize.level == "given"
-    assert inputs.normalize.source == [0.0, 1.0]
-    assert inputs.target.evaluations.save
+    assert config.source.root == "/data"
+    assert isinstance(config.estimator, DeepFlowConfig)
+    assert isinstance(config.kernel, IdentityConfig)
+    assert config.normalize.level == "given"
+    assert config.normalize.source == [0.0, 1.0]
+    assert config.target.evaluations.save
 
 
 def test_what_was_read_holds_plain_python_rather_than_configuration():
     # Nothing past `main` should have to know where its settings came from, so
     # a container reaching the run would carry hydra's own rules into it.
-    inputs = FlowInputs.read(_composed("source.root=/data", "select.exclude=[TL_00]"))
+    config = FlowConfig.read(_composed("source.root=/data", "select.exclude=[TL_00]"))
 
-    assert type(inputs.select.exclude) is list
-    assert type(inputs.source.frames.start) is int
+    assert type(config.select.exclude) is list
+    assert type(config.source.frames.start) is int
 
 
 def test_a_job_with_no_estimator_is_refused_where_it_is_read():
     with pytest.raises(TypeError, match="`estimator` is not set"):
-        FlowInputs.read(_composed("source.root=/data", "~estimator"))
+        FlowConfig.read(_composed("source.root=/data", "~estimator"))

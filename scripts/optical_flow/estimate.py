@@ -9,7 +9,7 @@ from kaparoo.filesystem import ensure_dir_exists
 
 from scripts._common.compute import WorkerLogFolder, run_all
 from scripts._common.hydra import ensure_sweep_runs, is_multirun, output_directory
-from scripts.optical_flow._process import FlowInputs, build_flow_stages
+from scripts.optical_flow._process import FlowConfig, build_flow_stages
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
@@ -27,22 +27,22 @@ STAGE: Final = "optical_flow"
 def main(config: DictConfig) -> None:
     ensure_sweep_runs()
 
-    inputs = FlowInputs.read(config)
+    config: FlowConfig = FlowConfig.read(config)
 
-    if inputs.target.flows.save and is_multirun():
+    if config.target.flows.save and is_multirun():
         msg = "cannot write flows in a sweep: run the winning config alone instead"
         raise ValueError(msg)
 
     output_root = ensure_dir_exists(output_directory())
 
     stages = build_flow_stages(
-        inputs.source,
-        inputs.select,
-        inputs.estimator,
-        inputs.normalize,
-        inputs.kernel,
-        inputs.target,
-        device=inputs.compute.device,
+        config.source,
+        config.select,
+        config.estimator,
+        config.normalize,
+        config.kernel,
+        config.target,
+        device=config.compute.device,
         output_root=output_root,
         name=STAGE,
     )
@@ -50,7 +50,7 @@ def main(config: DictConfig) -> None:
     log_folder = WorkerLogFolder(output_root, stages.name)
     log_folder.clear()
 
-    run_all(stages, inputs.compute, unit="seq", log_folder=log_folder)
+    run_all(stages, config.compute, unit="seq", log_folder=log_folder)
 
 
 if __name__ == "__main__":

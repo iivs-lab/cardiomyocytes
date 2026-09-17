@@ -14,7 +14,7 @@ from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig
 from scripts._common.compute import ComputeConfig
 from scripts._common.dataset import SequenceSelectConfig
 from scripts.data._process import (
-    PreprocessInputs,
+    PreprocessConfig,
     PreprocessSourceConfig,
     PreprocessTargetConfig,
 )
@@ -141,17 +141,17 @@ def test_a_composed_job_is_read_into_one_value():
         "source.root=/data", "filter=identity", "target.frames.save=true"
     )
 
-    inputs = PreprocessInputs.read(composed)
+    config = PreprocessConfig.read(composed)
 
-    assert inputs.source.root == "/data"
-    assert isinstance(inputs.kernel, IdentityConfig)
-    assert inputs.target.frames.save
-    assert inputs.compute.workers == 0
+    assert config.source.root == "/data"
+    assert isinstance(config.kernel, IdentityConfig)
+    assert config.target.frames.save
+    assert config.compute.workers == 0
 
 
 def test_a_job_with_no_filter_still_names_a_kernel():
     # Unlike the estimator there is a kernel that does nothing, so dropping the
     # group is a run that filters nothing rather than one that cannot run.
-    inputs = PreprocessInputs.read(_composed("source.root=/data", "~filter"))
+    config = PreprocessConfig.read(_composed("source.root=/data", "~filter"))
 
-    assert isinstance(inputs.kernel, IdentityConfig)
+    assert isinstance(config.kernel, IdentityConfig)

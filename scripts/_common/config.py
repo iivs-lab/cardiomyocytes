@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-__all__ = ("StageInputs",)
+__all__ = ("StageConfig",)
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -16,13 +16,17 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class StageInputs[S: SourceConfig]:
+class StageConfig[S: SourceConfig]:
     """What every stage reads out of the configuration it was composed from.
 
     One value rather than four locals, so a stage's `main` says which settings it took
     and nothing about how each of them is read. Every stage reads the same four: what to
     read, which of it to take, how to filter it, and what to run it on. A stage with
     more of its own subclasses this and adds them.
+
+    What the job was composed from and what a stage reads are not the same: `run_root`
+    and the `hydra` block belong to hydra, which places the job's directory by them, and
+    the folder a run writes under is the one it made rather than a setting read here.
 
     The configuration itself stays a `DictConfig` in `main`, since that is what
     `hydra.main` hands a job. What is settled here is that nothing past it has to know:

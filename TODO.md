@@ -1418,8 +1418,8 @@ B가 기본값인 것이 그대로 남는다. 파라미터 탐색이 쓰는 모�
 `normalize`와 `estimator`를 위해 바뀌는 것은 **둘의 기본값이 `null`이 되고, 모드가 그것을
 요구하거나 금한다**는 점뿐이다. 지금은 둘 다 사실상 필수다.
 
-**`StageInputs`는 그대로 넷이다.** 한때 「C에서는 `filter`가 무의미하니 `kernel`을
-`StageInputs`에서 각 스테이지로 내려야 한다」고 보았으나 틀렸다. C도 프레임을 실제로 만들어야
+**`StageConfig`는 그대로 넷이다.** 한때 「C에서는 `filter`가 무의미하니 `kernel`을
+`StageConfig`에서 각 스테이지로 내려야 한다」고 보았으나 틀렸다. C도 프레임을 실제로 만들어야
 한다 — 평가가 `frame1`·`frame2`를 워프하므로 **흐름이 계산될 때와 같은 프레임**을 재현해야
 하고, `describe_filter_kernel`의 역방향이 없어 필터는 복원이 아니라 config로 다시 대는 수밖에
 없다. `kernel`은 C에서도 진짜 입력이고, 동시에 record와 대조할 값이다.
@@ -1435,7 +1435,7 @@ B가 기본값인 것이 그대로 남는다. 파라미터 탐색이 쓰는 모�
   그것을 돌려줘야 하며, 이것이 사이드카를 실제로 쓰는 자리다.
 - **`flow` config 블록.** `FlowCacheConfig(SourceConfig)`, `DEFAULT_SUBPATH =
   FLOW_FLOAT_NPY`. `flow.root`가 null이면 A·B, 아니면 C.
-- **`FlowInputs`에 `flow` 필드 하나.** `normalize`와 `estimator`의 기본값이 `null`이 되고,
+- **`FlowConfig`에 `flow` 필드 하나.** `normalize`와 `estimator`의 기본값이 `null`이 되고,
   어느 쪽이 필수인지는 모드가 정한다.
 - **모드 검사**, 스테이지를 세우기 전에 한 번: §「스크립트는 하나다」의 표대로
   `normalize`·`estimator`·`target.flows.save`를 요구하거나 거절한다. `_validate_output`

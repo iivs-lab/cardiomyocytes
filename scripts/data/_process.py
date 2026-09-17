@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 __all__ = (
-    "PreprocessInputs",
+    "PreprocessConfig",
     "PreprocessSourceConfig",
     "PreprocessTargetConfig",
     "build_branches",
@@ -21,6 +21,7 @@ from iivs_cardio.common.logging import log_indented
 from iivs_cardio.common.pipeline.branch import ensure_json_name
 from iivs_cardio.data.pipeline import FrameTree, RangeDocument, SequenceStageRun
 from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig
+from scripts._common.config import StageConfig
 from scripts._common.dataset import (
     BranchConfig,
     TreeBranchConfig,
@@ -35,7 +36,6 @@ from scripts._common.phase import (
     build_sequences,
     log_short_sequences,
 )
-from scripts._common.settings import StageInputs
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -134,8 +134,11 @@ class PreprocessTargetConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class PreprocessInputs(StageInputs["PreprocessSourceConfig"]):
+class PreprocessConfig(StageConfig["PreprocessSourceConfig"]):
     """The whole of what this stage's `main` reads out of its configuration.
+
+    `run_root` and the `hydra` block are not among it: they place the job's directory,
+    and the folder the branches write under is the one hydra made for the job.
 
     Attributes:
         source: The tree the sequences are read from, which for this stage is phase as

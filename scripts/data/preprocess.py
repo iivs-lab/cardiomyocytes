@@ -9,7 +9,7 @@ from kaparoo.filesystem import ensure_dir_exists
 
 from scripts._common.compute import WorkerLogFolder, run_all
 from scripts._common.hydra import ensure_sweep_runs, is_multirun, output_directory
-from scripts.data._process import PreprocessInputs, build_preprocess_stages
+from scripts.data._process import PreprocessConfig, build_preprocess_stages
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
@@ -27,19 +27,19 @@ STAGE: Final = "preprocess"
 def main(config: DictConfig) -> None:
     ensure_sweep_runs()
 
-    inputs = PreprocessInputs.read(config)
+    config: PreprocessConfig = PreprocessConfig.read(config)
 
-    if inputs.target.frames.save and is_multirun():
+    if config.target.frames.save and is_multirun():
         msg = "cannot write frames in a sweep: run the winning config alone instead"
         raise ValueError(msg)
 
     output_root = ensure_dir_exists(output_directory())
 
     stages = build_preprocess_stages(
-        inputs.source,
-        inputs.select,
-        inputs.kernel,
-        inputs.target,
+        config.source,
+        config.select,
+        config.kernel,
+        config.target,
         output_root=output_root,
         name=STAGE,
     )
@@ -47,7 +47,7 @@ def main(config: DictConfig) -> None:
     log_folder = WorkerLogFolder(output_root, stages.name)
     log_folder.clear()
 
-    run_all(stages, inputs.compute, unit="seq", log_folder=log_folder)
+    run_all(stages, config.compute, unit="seq", log_folder=log_folder)
 
 
 if __name__ == "__main__":

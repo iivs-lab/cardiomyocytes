@@ -3,7 +3,7 @@ from __future__ import annotations
 __all__ = (
     "EvaluationBranchConfig",
     "FlowBranchConfig",
-    "FlowInputs",
+    "FlowConfig",
     "FlowSourceConfig",
     "FlowTargetConfig",
     "build_branches",
@@ -25,6 +25,7 @@ from iivs_cardio.data.transforms.filtering.kernel import IdentityConfig
 from iivs_cardio.optical_flow.data import FLOW_FLOAT_NPY
 from iivs_cardio.optical_flow.estimators import EstimatorConfig
 from iivs_cardio.optical_flow.pipeline import EvaluationDocument, FlowStageRun, FlowTree
+from scripts._common.config import StageConfig
 from scripts._common.dataset import (
     BranchConfig,
     TreeBranchConfig,
@@ -39,7 +40,6 @@ from scripts._common.phase import (
     build_sequences,
     log_short_sequences,
 )
-from scripts._common.settings import StageInputs
 from scripts.optical_flow._estimating import (
     describe_estimator_config,
     log_estimator_config,
@@ -155,12 +155,15 @@ class FlowTargetConfig:
 
 
 @dataclass(frozen=True, slots=True)
-class FlowInputs(StageInputs["FlowSourceConfig"]):
+class FlowConfig(StageConfig["FlowSourceConfig"]):
     """The whole of what this stage's `main` reads out of its configuration.
 
     Two more than preprocessing takes, and they are the two halves of what a frame has
     to become before an estimator will read it: the range it is scaled from, and the
     estimator whose dtype it is scaled onto.
+
+    `run_root` and the `hydra` block are not among it: they place the job's directory,
+    and the folder the branches write under is the one hydra made for the job.
 
     Attributes:
         source: The tree the sequences are read from, which here is phase however it was
