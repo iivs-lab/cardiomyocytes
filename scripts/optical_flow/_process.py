@@ -226,8 +226,7 @@ def _validate_estimator(estimator_config: EstimatorConfig, device: DeviceKind) -
 
     kind = describe_estimator_config(estimator_config)["kind"]
     runs = ", ".join(sorted(estimator_config.SUPPORTED_DEVICES))
-    fix = "set `compute` to one of those, or select another `estimator`"
-    msg = f"{kind} runs on {runs}, not on {device}: {fix}"
+    msg = f"{kind} runs on {runs}, not on {device}"
     raise ValueError(msg)
 
 
