@@ -49,10 +49,13 @@ def test_a_tree_is_opened_once(tmp_path):
     # so a second opening put the counts of two runs in one line.
     tree = _tree(tmp_path, "TL_00")
 
-    with tree, pytest.raises(RuntimeError, match=r"opened already: one branch per run"):
+    with (
+        tree,
+        pytest.raises(RuntimeError, match=r"has been opened: build a new FrameTree"),
+    ):
         tree.__enter__()
 
-    with pytest.raises(RuntimeError, match=r"opened already"), tree:
+    with pytest.raises(RuntimeError, match=r"has been opened"), tree:
         pass
 
 

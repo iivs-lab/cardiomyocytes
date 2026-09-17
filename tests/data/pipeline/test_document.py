@@ -444,7 +444,9 @@ def test_a_document_is_opened_once(tmp_path):
     with document:
         _scan(_meter(tmp_path, "a"), (0.0, 1.0))
 
-        with pytest.raises(RuntimeError, match=r"opened already"):
+        with pytest.raises(
+            RuntimeError, match=r"has been opened: build a new RangeDocument"
+        ):
             document.__enter__()
 
     assert (tmp_path / "range.results" / "a.json").exists()
@@ -456,7 +458,7 @@ def test_a_result_writer_is_opened_once(tmp_path):
     writer = _meter(tmp_path, "a")
     _scan(writer, (0.0, 1.0))
 
-    with pytest.raises(RuntimeError, match=r"opened already: one writer per walk"):
+    with pytest.raises(RuntimeError, match=r"has been opened: build a new RangeWriter"):
         writer.__enter__()
 
 

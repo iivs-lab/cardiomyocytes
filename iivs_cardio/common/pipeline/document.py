@@ -16,7 +16,7 @@ import json
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass
 from math import isfinite
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from kaparoo.filesystem import (
     STAGING,
@@ -409,8 +409,6 @@ class ResultWriter[S: SequenceResult](SingleUse, ABC):
             which is a mistake rather than a second attempt. Defaults to `False`.
     """
 
-    _USE: ClassVar[str] = "one writer per walk"
-
     def __init__(
         self,
         root: StrPath,
@@ -452,7 +450,7 @@ class ResultWriter[S: SequenceResult](SingleUse, ABC):
             RuntimeError: If it has been opened before. What it measured stays in it,
                 so a second walk would write a result standing for both.
         """
-        self._begin_use(self._path)
+        self._mark_entered(self._path)
 
         return self
 
@@ -558,8 +556,6 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult](
     """
 
     RESULTS_SUFFIX = ".results"
-
-    _USE: ClassVar[str] = "one document per run"
 
     def __init__(
         self,
@@ -933,7 +929,7 @@ class DocumentBranch[N: Named, S: SequenceResult, D: DatasetResult](
                 a result here, and this one was not told it may replace them.
             RuntimeError: If this document has been opened before.
         """
-        self._begin_use(self.path.name)
+        self._mark_entered(self.path.name)
 
         reserve_path(self.path, exist_ok=self._replacing, make_parents=True)
 

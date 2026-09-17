@@ -243,8 +243,8 @@ force          4     3, 4, 5 → acceleration 4
 - **컨텍스트 매니저인 훅·곁가지는 한 번만 열린다(AGENTS.md).** 여는 쪽이 같은 객체를 한 번으로
   줄이고(`Stage.all_hooks`, `StageRun.__init__`), 객체는 두 번째 `__enter__`를 거부한다.
   거부하는 자리는 `SingleUse` 하나이고 `FrameWriter`·`FrameBranch`·`ResultWriter`·
-  `DocumentBranch` 넷이 그것을 든다. 각자 말하는 것은 「한 번」이 무엇인가(`_USE`)뿐이다 —
-  walk 하나이거나 실행 하나다. `Stage`의 `_walked`는 그대로 두었다: 그쪽은 여는 것이 아니라
+  `DocumentBranch` 넷이 그것을 든다. 각자 `__enter__` 첫 줄에서 `_mark_entered`를 부르고,
+  거절 메시지는 새로 만들 클래스의 이름을 댄다. `Stage`의 `_walked`는 그대로 두었다: 그쪽은 여는 것이 아니라
   도는 것이라, 한 문장으로 맞추면 메시지가 추상화되면서 구체성을 잃는다.
 
 ## 열린 것 — `scripts/_common/compute.py`

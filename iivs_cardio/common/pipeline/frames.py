@@ -6,7 +6,7 @@ import json
 import shutil
 from abc import abstractmethod
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar, Final, Self
+from typing import TYPE_CHECKING, Final, Self
 
 from kaparoo.filesystem import (
     STAGING,
@@ -69,8 +69,6 @@ class FrameWriter[T, E = Path](SingleUse):
     Raises:
         ValueError: If `record_file` carries a directory part.
     """
-
-    _USE: ClassVar[str] = "one writer per walk"
 
     def __init__(
         self,
@@ -196,7 +194,7 @@ class FrameWriter[T, E = Path](SingleUse):
             RuntimeError: If it has been opened before. Closing takes the staged folder
                 away, so a second walk writes where nothing is.
         """
-        self._begin_use(self._dest)
+        self._mark_entered(self._dest)
 
         self._staged = StagedDirectory(
             self._dest, overwrite=self._overwrite, make_parents=True
@@ -281,8 +279,6 @@ class FrameBranch[N: Named, T](SingleUse, DatasetBranch):
             `record_file` carries a directory part, or if `selected` names something the
             contents does not hold.
     """
-
-    _USE: ClassVar[str] = "one branch per run"
 
     def __init__(
         self,
@@ -521,7 +517,7 @@ class FrameBranch[N: Named, T](SingleUse, DatasetBranch):
             RuntimeError: If it has been opened before. What it settled is what
                 `report` counts, so a second opening would count two runs as one.
         """
-        self._begin_use(self.root)
+        self._mark_entered(self.root)
 
         ensure_dir_exists(self.root, make=True)
 

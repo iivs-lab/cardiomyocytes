@@ -21,7 +21,6 @@ from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     Any,
-    ClassVar,
     Protocol,
     Self,
     override,
@@ -186,41 +185,32 @@ class SupportsRevert(Protocol):
 
 
 class SingleUse:
-    """Something used for one walk or one run, which refuses a second.
+    """Something that can be opened once, and refuses to be opened again.
 
-    A hook is opened around the walk that fires it and a branch around the run that
-    hands out its hooks, and either keeps what it did there: a staged folder that
-    closing moved away, a judgement of the outputs already on disk, the measurements
-    taken so far. Opening one again would work from that rather than from nothing, so it
-    is refused where the state is, which is the only place that knows.
-
-    Whoever opens several of them opens each object once however often it was given, so
-    the refusal answers reuse rather than a duplicate in one list.
-
-    Attributes:
-        _USE: What one use of this is, named as the refusal should say it.
+    What one opening did, such as a staged folder or the measurements taken, stays in
+    it, so a second opening would start from that rather than from nothing. Giving one
+    object twice in a list is not a second opening: whoever opens the list opens each
+    object once.
     """
 
-    _USE: ClassVar[str]
-
     # A class default, so a subclass adds nothing to its `__init__` to take this.
-    _used: bool = False
+    _entered: bool = False
 
-    def _begin_use(self, what: object) -> None:
-        """Take this up for its one use, refusing one that is spent.
+    def _mark_entered(self, name: object) -> None:
+        """Record that this has been opened, refusing one opened before.
 
         Args:
-            what: The output or destination this stands for, which the refusal names
-                before it says what one use is.
+            name: What this is opened for, such as the output it writes, which the
+                refusal names.
 
         Raises:
-            RuntimeError: If it has been opened before.
+            RuntimeError: If this has been opened before.
         """
-        if self._used:
-            msg = f"{what} was opened already: {self._USE}"
+        if self._entered:
+            msg = f"{name} has been opened: build a new {type(self).__name__}"
             raise RuntimeError(msg)
 
-        self._used = True
+        self._entered = True
 
 
 # ========================== #

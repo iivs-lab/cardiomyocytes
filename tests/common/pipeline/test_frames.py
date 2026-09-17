@@ -42,7 +42,7 @@ def test_a_writer_is_opened_once(tmp_path: Path) -> None:
     _drive(writer, [Step(0, "a")])
 
     with (
-        pytest.raises(RuntimeError, match=r"opened already: one writer per walk"),
+        pytest.raises(RuntimeError, match=r"has been opened: build a new FrameWriter"),
         writer,
     ):
         pass
